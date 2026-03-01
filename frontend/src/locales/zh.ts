@@ -36,7 +36,7 @@ export default {
     noContainer: '无容器',
   },
   chat: {
-    title: 'Eino 编程助手',
+    title: 'Starxo',
     emptyConnected: '已连接，准备就绪。描述一个任务开始吧。',
     emptyDisconnected: '连接到沙盒以开始编程。',
     hint1: '"编写一个 Python 爬虫"',

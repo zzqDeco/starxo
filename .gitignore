@@ -2,6 +2,7 @@ build/bin
 node_modules
 frontend/dist
 .omc/
+.claude/
 frontend/.omc/
 logs/
 *.log
