@@ -1,0 +1,8 @@
+build/bin
+node_modules
+frontend/dist
+.omc/
+frontend/.omc/
+logs/
+*.log
+frontend/package.json.md5
