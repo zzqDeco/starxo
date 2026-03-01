@@ -1,6 +1,6 @@
 # 覆盖统计
 
-> 所属项目: Eino Coding Agent (starxo) | 文档类型: 覆盖统计
+> 所属项目: Starxo | 文档类型: 覆盖统计
 
 ---
 

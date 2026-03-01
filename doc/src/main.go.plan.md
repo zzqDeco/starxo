@@ -36,7 +36,7 @@
   - `github.com/wailsapp/wails/v2/pkg/options/assetserver` (静态资源服务器配置)
 - 关键配置:
   - 窗口尺寸: 1400x900 (最小 1000x600)
-  - 应用标题: "Eino Coding Agent"
+  - 应用标题: "Starxo"
   - 背景色: RGBA(12, 14, 26, 1)
 
 ## 6. 变更影响面

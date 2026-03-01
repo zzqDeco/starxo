@@ -11,7 +11,7 @@ export default {
     add: '添加',
   },
   header: {
-    title: 'Eino Agent',
+    title: 'Starxo',
     hidePanel: '隐藏面板',
     showPanel: '显示面板',
     settings: '设置',

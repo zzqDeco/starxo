@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Starxo (product name: "Eino Coding Agent") is an AI coding agent desktop app built with **Wails v2** (Go backend + Vue 3 frontend). It connects to remote servers via SSH, manages Docker containers as sandboxed coding environments, and uses LLM-powered agents to write/execute/manage code inside those containers.
+Starxo is an AI coding agent desktop app built with **Wails v2** (Go backend + Vue 3 frontend). It connects to remote servers via SSH, manages Docker containers as sandboxed coding environments, and uses LLM-powered agents to write/execute/manage code inside those containers.
 
 ## Build & Development Commands
 
@@ -64,7 +64,7 @@ Tools like `ask_user` and `ask_choice` use `tool.StatefulInterrupt` to pause exe
 
 ### Data Storage
 
-All persistent data at `~/.eino-agent/`:
+All persistent data at `~/.starxo/`:
 - `config.json` — app settings (SSH, Docker, LLM, MCP configs)
 - `containers.json` — container registry
 - `sessions/{id}/` — session.json, messages.json, display.json

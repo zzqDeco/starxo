@@ -4,7 +4,7 @@
 
 ## About
 
-Starxo (product name: **Eino Coding Agent**) is an AI coding agent desktop application built on the [CloudWeGo Eino](https://github.com/cloudwego/eino) framework. It connects to remote servers via SSH, manages Docker containers as sandboxed coding environments, and uses LLM-powered agents to autonomously write, execute, and manage code.
+Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](https://github.com/cloudwego/eino) framework. It connects to remote servers via SSH, manages Docker containers as sandboxed coding environments, and uses LLM-powered agents to autonomously write, execute, and manage code.
 
 ## Features
 
@@ -164,7 +164,7 @@ npm run dev
 
 ## Configuration
 
-App configuration is stored at `~/.eino-agent/config.json`:
+App configuration is stored at `~/.starxo/config.json`:
 
 | Block | Description |
 |-------|-------------|
@@ -176,10 +176,10 @@ App configuration is stored at `~/.eino-agent/config.json`:
 
 ## Data Storage
 
-All persistent data is stored under `~/.eino-agent/`:
+All persistent data is stored under `~/.starxo/`:
 
 ```
-~/.eino-agent/
+~/.starxo/
 ├── config.json                # App configuration
 ├── containers.json            # Container registry
 └── sessions/

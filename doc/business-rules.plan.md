@@ -1,6 +1,6 @@
 # 业务规则目录
 
-> 所属项目: Eino Coding Agent (starxo) | 文档类型: 业务规则
+> 所属项目: Starxo | 文档类型: 业务规则
 
 ---
 
@@ -60,7 +60,7 @@
 ### BR-005: 会话持久化包含消息历史和时间线事件
 
 - **优先级**: P1
-- **描述**: 会话保存时 (`SessionService.SaveCurrentSession()`) 将 `ctxEngine` 中的消息历史和前端 `TimelineEvent` 列表序列化到 `~/.eino-agent/sessions/{id}/` 目录。会话切换时从该目录恢复状态。
+- **描述**: 会话保存时 (`SessionService.SaveCurrentSession()`) 将 `ctxEngine` 中的消息历史和前端 `TimelineEvent` 列表序列化到 `~/.starxo/sessions/{id}/` 目录。会话切换时从该目录恢复状态。
 - **原因**: 用户期望在会话切换后能恢复之前的对话上下文和可视化时间线。
 - **影响范围**: 会话保存/加载/切换
 - **实现位置**: `internal/service/session_svc.go`, `internal/storage/session_store.go`

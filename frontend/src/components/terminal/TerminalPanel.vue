@@ -62,7 +62,7 @@ async function initXterm() {
     fitAddon.fit()
     xtermLoaded = true
 
-    termInstance.writeln('\x1b[36m--- Eino Agent Terminal ---\x1b[0m')
+    termInstance.writeln('\x1b[36m--- Starxo Terminal ---\x1b[0m')
     termInstance.writeln('\x1b[90mWaiting for sandbox connection...\x1b[0m')
     termInstance.writeln('')
   } catch (e) {

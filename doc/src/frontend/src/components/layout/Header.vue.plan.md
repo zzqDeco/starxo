@@ -23,7 +23,7 @@
   - `toggle-right-panel` — 切换右侧面板
 - **语言切换**: `toggleLocale()` 在 en/zh 间切换，持久化到 localStorage('locale')
 - **模板结构**:
-  - header-left: 应用图标 + 标题 (Eino Agent)
+  - header-left: 应用图标 + 标题 (Starxo)
   - header-center: ConnectionStatus 组件
   - header-right: 右侧面板切换按钮 + 语言切换按钮 + 设置按钮
 - **Wails 拖拽**: header 元素带 `wails-drag` CSS 类，启用窗口拖拽

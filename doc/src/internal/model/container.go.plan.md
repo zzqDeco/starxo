@@ -43,7 +43,7 @@
 - 关键配置: 无
 
 ## 6. 变更影响面
-- 修改字段名或 JSON tag 会破坏已有容器注册数据（`~/.eino-agent/containers.json`）的反序列化兼容性
+- 修改字段名或 JSON tag 会破坏已有容器注册数据（`~/.starxo/containers.json`）的反序列化兼容性
 - `ContainerStatus` 枚举值变更会影响状态判断逻辑（如 `ContainerDestroyed` 在 `ContainerStore.RegisteredDockerIDs` 中用于过滤）
 - 该结构体被以下组件使用:
   - `storage.ContainerStore` — 容器注册表 CRUD 和持久化

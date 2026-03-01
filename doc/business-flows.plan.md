@@ -1,6 +1,6 @@
 # 业务流程
 
-> 所属项目: Eino Coding Agent (starxo) | 文档类型: 业务流程
+> 所属项目: Starxo | 文档类型: 业务流程
 
 ---
 
@@ -10,9 +10,9 @@
 
 ```
 main.go: NewApp()
-  ├── config.NewStore()           -- 加载/创建 ~/.eino-agent/config.json
-  ├── storage.NewSessionStore()   -- 加载/创建 ~/.eino-agent/sessions/
-  ├── storage.NewContainerStore() -- 加载/创建 ~/.eino-agent/containers.json
+  ├── config.NewStore()           -- 加载/创建 ~/.starxo/config.json
+  ├── storage.NewSessionStore()   -- 加载/创建 ~/.starxo/sessions/
+  ├── storage.NewContainerStore() -- 加载/创建 ~/.starxo/containers.json
   ├── 创建 6 个 Service 实例
   └── wails.Run()
         └── app.startup(ctx)

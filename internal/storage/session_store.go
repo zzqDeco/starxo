@@ -15,7 +15,7 @@ import (
 )
 
 // SessionStore manages session persistence on disk.
-// Sessions are stored as individual directories under ~/.eino-agent/sessions/{id}/
+// Sessions are stored as individual directories under ~/.starxo/sessions/{id}/
 type SessionStore struct {
 	baseDir string
 	mu      sync.RWMutex
@@ -27,7 +27,7 @@ func NewSessionStore() (*SessionStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(homeDir, ".eino-agent", "sessions")
+	dir := filepath.Join(homeDir, ".starxo", "sessions")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}

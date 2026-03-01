@@ -1,6 +1,6 @@
 # 实现映射
 
-> 所属项目: Eino Coding Agent (starxo) | 文档类型: 实现映射
+> 所属项目: Starxo | 文档类型: 实现映射
 
 ---
 
@@ -59,7 +59,7 @@
 | `tools` | `mcp.go` | MCP 服务器连接和工具加载 |
 | `tools` | `custom.go` | 自定义工具扩展点 |
 | `config` | `config.go` | 配置结构体定义 (AppConfig, SSHConfig, DockerConfig 等) |
-| `config` | `store.go` | 配置文件读写 (~/.eino-agent/config.json) |
+| `config` | `store.go` | 配置文件读写 (~/.starxo/config.json) |
 | `context` | `engine.go` | Engine，消息历史管理 (Add/Prepare/Clear) |
 | `context` | `windowing.go` | WindowMessages，上下文窗口化与截断策略 |
 | `context` | `history.go` | 消息历史持久化辅助 |

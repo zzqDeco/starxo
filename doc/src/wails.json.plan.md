@@ -24,9 +24,9 @@
 - **frontend:dev:watcher**: `npm run dev` — 开发模式前端热重载命令
 - **frontend:dev:serverUrl**: `auto` — 自动检测开发服务器 URL
 - **info**:
-  - productName: `Eino Coding Agent`
+  - productName: `Starxo`
   - productVersion: `0.1.0`
-  - comments: `Eino-based Coding Agent Desktop Application`
+  - comments: `Starxo Coding Agent Desktop Application`
 - **author**: zhaoziqian (zhaoziqian@corp.netease.com)
 
 ## 5. 依赖关系

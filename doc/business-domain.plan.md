@@ -1,12 +1,12 @@
 # 业务域定义
 
-> 所属项目: Eino Coding Agent (starxo) | 文档类型: 业务域
+> 所属项目: Starxo | 文档类型: 业务域
 
 ---
 
 ## 一、业务边界
 
-Eino Coding Agent 是一款 **AI 编程智能体桌面应用**，不是服务端应用或 SaaS 产品。
+Starxo 是一款 **AI 编程智能体桌面应用**，不是服务端应用或 SaaS 产品。
 
 ### 边界内 (In Scope)
 
@@ -34,7 +34,7 @@ Eino Coding Agent 是一款 **AI 编程智能体桌面应用**，不是服务端
 
 - 定义: 用户与 AI Agent 的一次完整对话上下文
 - 生命周期: 创建 -> 活跃 -> 切换/保存 -> 删除
-- 持久化: `~/.eino-agent/sessions/{id}/` 目录，包含消息历史和时间线事件
+- 持久化: `~/.starxo/sessions/{id}/` 目录，包含消息历史和时间线事件
 - 属性: ID (UUID), 名称, 创建时间, 更新时间, 消息列表, 时间线事件列表, 绑定容器 ID
 - 源文件: `internal/model/session.go`, `internal/storage/session_store.go`, `internal/service/session_svc.go`
 
@@ -91,7 +91,7 @@ Eino Coding Agent 是一款 **AI 编程智能体桌面应用**，不是服务端
 
 - 定义: 远程 Docker 容器的注册记录
 - 生命周期: 创建 -> 运行 -> 停止 -> 销毁 (独立于 SSH 连接)
-- 持久化: `~/.eino-agent/containers.json`
+- 持久化: `~/.starxo/containers.json`
 - 属性: 注册 ID, Docker ID, 名称, 镜像, SSH Host, 工作目录, 状态, 创建时间
 - 状态: running, stopped, unknown
 - 源文件: `internal/model/container.go`, `internal/storage/container_store.go`, `internal/service/container_svc.go`

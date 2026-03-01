@@ -18,7 +18,7 @@ func NewStore() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(homeDir, ".eino-agent")
+	dir := filepath.Join(homeDir, ".starxo")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}

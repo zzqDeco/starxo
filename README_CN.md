@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-Starxo（产品名：**Eino Coding Agent**）是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架的 AI 编程智能体桌面应用。通过 SSH 连接远程服务器，在 Docker 容器沙箱中自主编写、执行和管理代码，为开发者提供安全隔离的 AI 辅助编程环境。
+Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架的 AI 编程智能体桌面应用。通过 SSH 连接远程服务器，在 Docker 容器沙箱中自主编写、执行和管理代码，为开发者提供安全隔离的 AI 辅助编程环境。
 
 ## 核心特性
 
@@ -164,7 +164,7 @@ npm run dev
 
 ## 配置说明
 
-应用配置存储于 `~/.eino-agent/config.json`，包含以下配置块：
+应用配置存储于 `~/.starxo/config.json`，包含以下配置块：
 
 | 配置块 | 说明 |
 |--------|------|
@@ -176,10 +176,10 @@ npm run dev
 
 ## 数据存储
 
-所有持久化数据存储于 `~/.eino-agent/` 目录：
+所有持久化数据存储于 `~/.starxo/` 目录：
 
 ```
-~/.eino-agent/
+~/.starxo/
 ├── config.json                # 应用配置
 ├── containers.json            # 容器注册表
 └── sessions/

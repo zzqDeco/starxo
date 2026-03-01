@@ -11,7 +11,7 @@ export default {
     add: 'Add',
   },
   header: {
-    title: 'Eino Agent',
+    title: 'Starxo',
     hidePanel: 'Hide panel',
     showPanel: 'Show panel',
     settings: 'Settings',
@@ -36,7 +36,7 @@ export default {
     noContainer: 'No container',
   },
   chat: {
-    title: 'Eino Coding Agent',
+    title: 'Starxo',
     emptyConnected: 'Connected and ready. Describe a task to get started.',
     emptyDisconnected: 'Connect to your sandbox to start coding.',
     hint1: '"Write a Python web scraper"',

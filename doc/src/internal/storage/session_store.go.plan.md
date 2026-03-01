@@ -8,7 +8,7 @@
 - 所属模块: storage
 
 ## 2. 核心职责
-- 该文件实现了会话的磁盘持久化存储层 `SessionStore`，管理会话元数据和对话消息的读写。每个会话以独立目录存储在 `~/.eino-agent/sessions/{id}/` 下，包含 `session.json`（元数据）、`messages.json`（对话历史）和 `display.json`（前端展示数据）三个文件。提供会话的 CRUD 操作、消息的保存/加载以及前端展示数据的持久化，所有操作通过读写锁保证线程安全。
+- 该文件实现了会话的磁盘持久化存储层 `SessionStore`，管理会话元数据和对话消息的读写。每个会话以独立目录存储在 `~/.starxo/sessions/{id}/` 下，包含 `session.json`（元数据）、`messages.json`（对话历史）和 `display.json`（前端展示数据）三个文件。提供会话的 CRUD 操作、消息的保存/加载以及前端展示数据的持久化，所有操作通过读写锁保证线程安全。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -47,7 +47,7 @@
   - `time` (时间戳生成)
   - `github.com/google/uuid` (会话 ID 生成)
 - 关键配置:
-  - 存储目录: `~/.eino-agent/sessions/`
+  - 存储目录: `~/.starxo/sessions/`
 
 ## 6. 变更影响面
 - 修改存储路径或目录结构会影响已有用户的会话数据访问
@@ -61,4 +61,4 @@
 - 会话 ID 使用 UUID 前 8 位（`uuid.New().String()[:8]`），在会话数量极大时存在碰撞风险，可考虑使用完整 UUID。
 - `List` 方法对损坏的会话数据采用静默跳过策略 (`continue`)，可考虑添加日志记录。
 - `SaveDisplayData` 接收原始 JSON 字符串而非结构体，未做格式校验，依赖调用方确保数据合法性。
-- 存储目录名 `.eino-agent` 与 `config.Store` 共享，应保持一致。
+- 存储目录名 `.starxo` 与 `config.Store` 共享，应保持一致。

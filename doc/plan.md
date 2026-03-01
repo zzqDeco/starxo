@@ -1,6 +1,6 @@
 # Starxo 项目技术文档 — 主索引
 
-> 仓库: `starxo` | 产品名: **Eino Coding Agent** | 版本: 0.1.0
+> 仓库: `starxo` | 产品名: **Starxo** | 版本: 0.1.0
 > 生成时间: 2026-03-01 | 文档体系: aigw-core 模式
 
 ---
@@ -11,11 +11,11 @@
 |------|------|
 | 仓库路径 | `starxo` |
 | 项目类型 | 桌面应用 (Wails v2) |
-| 产品名 | Eino Coding Agent |
+| 产品名 | Starxo |
 | 代码文件数 | ~48 Go + ~35 Vue/TS/CSS = ~83 文件 |
 | 业务定位 | AI 编程智能体桌面应用，通过 SSH 连接远程服务器并在 Docker 容器中提供隔离的代码编写、执行和文件管理能力 |
 
-Eino Coding Agent 是一款基于 CloudWeGo Eino 框架构建的 AI 编程助手桌面应用。它采用 Deep Agent 模式，由一个主控智能体(coding_agent)编排三个专用子智能体(code_writer、code_executor、file_manager)，在远程 Docker 沙箱中完成代码编写、执行和文件操作。应用通过 Wails v2 将 Go 后端与 Vue 3 前端集成为原生桌面体验。
+Starxo 是一款基于 CloudWeGo Eino 框架构建的 AI 编程助手桌面应用。它采用 Deep Agent 模式，由一个主控智能体(coding_agent)编排三个专用子智能体(code_writer、code_executor、file_manager)，在远程 Docker 沙箱中完成代码编写、执行和文件操作。应用通过 Wails v2 将 Go 后端与 Vue 3 前端集成为原生桌面体验。
 
 ---
 
@@ -28,9 +28,9 @@ Eino Coding Agent 是一款基于 CloudWeGo Eino 框架构建的 AI 编程助手
 | 容器构建 | 无 (桌面应用，通过 `//go:embed all:frontend/dist` 嵌入前端资源) |
 | 测试覆盖 | 无 (当前无测试文件) |
 | 入口 | Go: `main.go` -> `app.go`; 前端: `frontend/src/main.ts` -> `App.vue` |
-| 配置 | `~/.eino-agent/config.json` (SSH/Docker/LLM/MCP/Agent) |
-| 会话存储 | `~/.eino-agent/sessions/{id}/` |
-| 容器注册表 | `~/.eino-agent/containers.json` |
+| 配置 | `~/.starxo/config.json` (SSH/Docker/LLM/MCP/Agent) |
+| 会话存储 | `~/.starxo/sessions/{id}/` |
+| 容器注册表 | `~/.starxo/containers.json` |
 
 ---
 
@@ -111,7 +111,7 @@ cd frontend && npm run build
 
 ### 配置文件
 
-- 路径: `~/.eino-agent/config.json`
+- 路径: `~/.starxo/config.json`
 - 加载: `internal/config/store.go` -> `config.NewStore()`
 - 默认值: `internal/config/config.go` -> `DefaultConfig()`
 

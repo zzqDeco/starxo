@@ -11,7 +11,7 @@ import (
 )
 
 // ContainerStore manages the container registry on disk.
-// All containers are stored in a single ~/.eino-agent/containers.json file.
+// All containers are stored in a single ~/.starxo/containers.json file.
 type ContainerStore struct {
 	path       string
 	containers []model.Container
@@ -24,7 +24,7 @@ func NewContainerStore() (*ContainerStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(homeDir, ".eino-agent")
+	dir := filepath.Join(homeDir, ".starxo")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
