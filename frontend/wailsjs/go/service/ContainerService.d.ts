@@ -4,6 +4,12 @@ import {model} from '../models';
 import {context} from '../models';
 import {service} from '../models';
 
+export function ActivateContainer(arg1:string):Promise<void>;
+
+export function CreateContainer():Promise<void>;
+
+export function DeactivateContainer():Promise<void>;
+
 export function DestroyContainer(arg1:string):Promise<void>;
 
 export function ListContainers():Promise<Array<model.Container>>;

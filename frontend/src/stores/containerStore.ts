@@ -2,17 +2,29 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ContainerInfo } from '@/types/session'
 import { useSessionStore } from './sessionStore'
+import { useConnectionStore } from './connectionStore'
 import {
   ListContainers,
   RefreshContainerStatus,
   StartContainer,
   StopContainer,
   DestroyContainer,
+  CreateContainer,
+  ActivateContainer,
+  DeactivateContainer,
 } from '../../wailsjs/go/service/ContainerService'
 
 export const useContainerStore = defineStore('container', () => {
   const containers = ref<ContainerInfo[]>([])
   const loading = ref(false)
+
+  // Active container tracking (driven by backend events)
+  const activeContainerID = ref('')
+
+  // Container creation progress
+  const creatingContainer = ref(false)
+  const containerProgress = ref(0)
+  const containerStep = ref('')
 
   const sessionStore = useSessionStore()
 
@@ -71,15 +83,73 @@ export const useContainerStore = defineStore('container', () => {
   async function destroyContainer(id: string) {
     try {
       await DestroyContainer(id)
+      if (activeContainerID.value === id) {
+        activeContainerID.value = ''
+      }
       await loadContainers()
     } catch (e) {
       console.error('Failed to destroy container:', e)
     }
   }
 
+  async function createContainer() {
+    const connectionStore = useConnectionStore()
+    if (!connectionStore.sshConnected) return
+
+    creatingContainer.value = true
+    containerProgress.value = 0
+    containerStep.value = ''
+    try {
+      await CreateContainer()
+      await loadContainers()
+    } catch (e) {
+      console.error('Failed to create container:', e)
+    } finally {
+      creatingContainer.value = false
+      containerStep.value = ''
+      containerProgress.value = 0
+    }
+  }
+
+  async function activateContainer(id: string) {
+    try {
+      await ActivateContainer(id)
+      await loadContainers()
+    } catch (e) {
+      console.error('Failed to activate container:', e)
+    }
+  }
+
+  async function deactivateContainer() {
+    try {
+      await DeactivateContainer()
+      activeContainerID.value = ''
+      await loadContainers()
+    } catch (e) {
+      console.error('Failed to deactivate container:', e)
+    }
+  }
+
+  function setActiveContainer(id: string) {
+    activeContainerID.value = id
+  }
+
+  function clearActiveContainer() {
+    activeContainerID.value = ''
+  }
+
+  function updateContainerProgress(step: string, percent: number) {
+    containerStep.value = step
+    containerProgress.value = percent
+  }
+
   return {
     containers,
     loading,
+    activeContainerID,
+    creatingContainer,
+    containerProgress,
+    containerStep,
     activeSessionContainers,
     otherContainers,
     loadContainers,
@@ -87,5 +157,11 @@ export const useContainerStore = defineStore('container', () => {
     startContainer,
     stopContainer,
     destroyContainer,
+    createContainer,
+    activateContainer,
+    deactivateContainer,
+    setActiveContainer,
+    clearActiveContainer,
+    updateContainerProgress,
   }
 })

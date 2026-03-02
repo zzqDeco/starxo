@@ -1,23 +1,20 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { Connect as SandboxConnect, Disconnect as SandboxDisconnect, GetStatus } from '../../wailsjs/go/service/SandboxService'
+import { ConnectSSH, DisconnectSSH, GetStatus } from '../../wailsjs/go/service/SandboxService'
 import { useSettingsStore } from './settingsStore'
 
 export const useConnectionStore = defineStore('connection', () => {
   const sshConnected = ref(false)
-  const dockerRunning = ref(false)
-  const containerID = ref('')
   const initProgress = ref(0)
   const initStep = ref('')
   const connecting = ref(false)
   const error = ref('')
 
-  const isReady = computed(() => sshConnected.value && dockerRunning.value)
+  const isReady = computed(() => sshConnected.value)
 
   const statusText = computed(() => {
     if (connecting.value) return initStep.value || 'Connecting...'
-    if (isReady.value) return 'Ready'
-    if (sshConnected.value && !dockerRunning.value) return 'SSH connected, Docker not running'
+    if (sshConnected.value) return 'SSH Connected'
     return 'Disconnected'
   })
 
@@ -39,10 +36,10 @@ export const useConnectionStore = defineStore('connection', () => {
 
     initStep.value = 'Initializing SSH connection...'
     try {
-      await SandboxConnect()
+      await ConnectSSH()
     } catch (e: any) {
       error.value = e?.message || String(e)
-      console.error('Connection failed:', e)
+      console.error('SSH connection failed:', e)
     } finally {
       connecting.value = false
       await refreshStatus()
@@ -51,10 +48,8 @@ export const useConnectionStore = defineStore('connection', () => {
 
   async function disconnect() {
     try {
-      await SandboxDisconnect()
+      await DisconnectSSH()
       sshConnected.value = false
-      dockerRunning.value = false
-      containerID.value = ''
       initProgress.value = 0
       initStep.value = ''
     } catch (e: any) {
@@ -68,8 +63,6 @@ export const useConnectionStore = defineStore('connection', () => {
       const status = await GetStatus()
       if (status) {
         sshConnected.value = status.sshConnected
-        dockerRunning.value = status.dockerRunning
-        containerID.value = status.containerID
       }
     } catch (e) {
       console.warn('Failed to get status:', e)
@@ -81,19 +74,19 @@ export const useConnectionStore = defineStore('connection', () => {
     initProgress.value = percent
   }
 
-  function setReady() {
+  function setSSHConnected() {
     sshConnected.value = true
-    dockerRunning.value = true
     connecting.value = false
     initStep.value = ''
     initProgress.value = 100
-    refreshStatus()
+  }
+
+  function setSSHDisconnected() {
+    sshConnected.value = false
   }
 
   return {
     sshConnected,
-    dockerRunning,
-    containerID,
     initProgress,
     initStep,
     connecting,
@@ -104,6 +97,7 @@ export const useConnectionStore = defineStore('connection', () => {
     disconnect,
     refreshStatus,
     updateProgress,
-    setReady,
+    setSSHConnected,
+    setSSHDisconnected,
   }
 })

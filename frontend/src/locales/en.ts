@@ -189,5 +189,11 @@ export default {
     stop: 'Stop',
     destroy: 'Destroy',
     destroyConfirm: 'Destroy this container? This cannot be undone.',
+    createContainer: 'New Container',
+    activate: 'Activate',
+    deactivate: 'Deactivate',
+    creating: 'Creating container...',
+    sshRequired: 'Connect SSH first',
+    sshReadyHint: 'SSH connected — click "New Container" to start',
   },
 }

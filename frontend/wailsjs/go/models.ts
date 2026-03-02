@@ -410,6 +410,9 @@ export namespace service {
 	    sshConnected: boolean;
 	    dockerRunning: boolean;
 	    containerID: string;
+	    activeContainerID: string;
+	    activeContainerName: string;
+	    dockerAvailable: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SandboxStatusDTO(source);
@@ -420,6 +423,9 @@ export namespace service {
 	        this.sshConnected = source["sshConnected"];
 	        this.dockerRunning = source["dockerRunning"];
 	        this.containerID = source["containerID"];
+	        this.activeContainerID = source["activeContainerID"];
+	        this.activeContainerName = source["activeContainerName"];
+	        this.dockerAvailable = source["dockerAvailable"];
 	    }
 	}
 	export class SessionService {

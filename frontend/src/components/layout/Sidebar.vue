@@ -175,10 +175,6 @@ function containerStatusDot(status?: string) {
           <span :class="['dot', connectionStore.sshConnected ? 'dot-green' : 'dot-red']"></span>
           <span class="conn-label">SSH</span>
         </div>
-        <div class="conn-item">
-          <span :class="['dot', connectionStore.dockerRunning ? 'dot-green' : 'dot-red']"></span>
-          <span class="conn-label">Docker</span>
-        </div>
       </div>
 
       <!-- Progress -->
@@ -194,7 +190,7 @@ function containerStatusDot(status?: string) {
 
       <!-- Connect / Disconnect -->
       <NButton
-        v-if="!connectionStore.isReady"
+        v-if="!connectionStore.sshConnected"
         type="primary"
         size="small"
         block

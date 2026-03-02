@@ -1,14 +1,16 @@
 <script lang="ts" setup>
 import { onMounted } from 'vue'
-import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NTag, NPopconfirm } from 'naive-ui'
-import { Refresh, Play, Stop, Trash, Server } from '@vicons/ionicons5'
+import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NTag, NPopconfirm, NProgress } from 'naive-ui'
+import { Refresh, Play, Stop, Trash, Server, Add, RadioButtonOn, RadioButtonOff } from '@vicons/ionicons5'
 import { useContainerStore } from '@/stores/containerStore'
+import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useI18n } from 'vue-i18n'
 import type { ContainerInfo } from '@/types/session'
 
 const { t } = useI18n()
 const containerStore = useContainerStore()
+const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
 
 onMounted(() => {
@@ -34,8 +36,7 @@ function statusLabel(status: string): string {
 }
 
 function isActive(container: ContainerInfo): boolean {
-  const session = sessionStore.activeSession
-  return session?.activeContainerID === container.id
+  return containerStore.activeContainerID === container.id
 }
 
 function formatTime(ts: number): string {
@@ -59,9 +60,27 @@ function sessionTitle(sessionID: string): string {
     <!-- Header -->
     <div class="panel-header">
       <span class="panel-title">{{ t('containers.title') }}</span>
-      <NButton quaternary circle size="tiny" @click="containerStore.loadContainers()" :loading="containerStore.loading">
-        <template #icon><NIcon size="14"><Refresh /></NIcon></template>
-      </NButton>
+      <div class="header-actions">
+        <NButton
+          size="tiny"
+          type="primary"
+          :disabled="!connectionStore.sshConnected || containerStore.creatingContainer"
+          :loading="containerStore.creatingContainer"
+          @click="containerStore.createContainer()"
+        >
+          <template #icon><NIcon size="14"><Add /></NIcon></template>
+          {{ t('containers.createContainer') }}
+        </NButton>
+        <NButton quaternary circle size="tiny" @click="containerStore.loadContainers()" :loading="containerStore.loading">
+          <template #icon><NIcon size="14"><Refresh /></NIcon></template>
+        </NButton>
+      </div>
+    </div>
+
+    <!-- Container creation progress -->
+    <div v-if="containerStore.creatingContainer" class="creation-progress">
+      <NProgress :percentage="containerStore.containerProgress" :show-indicator="false" type="line" status="info" />
+      <span class="progress-step">{{ containerStore.containerStep || t('containers.creating') }}</span>
     </div>
 
     <NSpin :show="containerStore.loading" class="panel-body">
@@ -70,7 +89,12 @@ function sessionTitle(sessionID: string): string {
         <div class="section-label">{{ t('containers.currentSession') }} ({{ containerStore.activeSessionContainers.length }})</div>
 
         <div v-if="containerStore.activeSessionContainers.length === 0" class="empty-hint">
-          {{ t('containers.noContainers') }}
+          <template v-if="connectionStore.sshConnected">
+            {{ t('containers.sshReadyHint') }}
+          </template>
+          <template v-else>
+            {{ t('containers.sshRequired') }}
+          </template>
         </div>
 
         <div
@@ -90,11 +114,28 @@ function sessionTitle(sessionID: string): string {
             <span class="detail-item detail-time">{{ formatTime(c.lastUsedAt) }}</span>
           </div>
           <div class="card-actions">
+            <!-- Activate / Deactivate -->
+            <NButton
+              v-if="!isActive(c) && c.status === 'running' && connectionStore.sshConnected"
+              quaternary size="tiny" type="info"
+              @click="containerStore.activateContainer(c.id)"
+            >
+              <template #icon><NIcon size="14"><RadioButtonOn /></NIcon></template>
+              {{ t('containers.activate') }}
+            </NButton>
+            <NButton
+              v-if="isActive(c)"
+              quaternary size="tiny"
+              @click="containerStore.deactivateContainer()"
+            >
+              <template #icon><NIcon size="14"><RadioButtonOff /></NIcon></template>
+              {{ t('containers.deactivate') }}
+            </NButton>
             <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="containerStore.startContainer(c.id)">
               <template #icon><NIcon size="14"><Play /></NIcon></template>
               {{ t('containers.start') }}
             </NButton>
-            <NButton v-if="c.status === 'running'" quaternary size="tiny" type="warning" @click="containerStore.stopContainer(c.id)">
+            <NButton v-if="c.status === 'running' && !isActive(c)" quaternary size="tiny" type="warning" @click="containerStore.stopContainer(c.id)">
               <template #icon><NIcon size="14"><Stop /></NIcon></template>
               {{ t('containers.stop') }}
             </NButton>
@@ -134,6 +175,14 @@ function sessionTitle(sessionID: string): string {
                 <span class="detail-item detail-time">{{ formatTime(c.lastUsedAt) }}</span>
               </div>
               <div class="card-actions">
+                <NButton
+                  v-if="c.status === 'running' && connectionStore.sshConnected"
+                  quaternary size="tiny" type="info"
+                  @click="containerStore.activateContainer(c.id)"
+                >
+                  <template #icon><NIcon size="14"><RadioButtonOn /></NIcon></template>
+                  {{ t('containers.activate') }}
+                </NButton>
                 <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="containerStore.startContainer(c.id)">
                   <template #icon><NIcon size="14"><Play /></NIcon></template>
                   {{ t('containers.start') }}
@@ -182,12 +231,32 @@ function sessionTitle(sessionID: string): string {
   flex-shrink: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .panel-title {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.creation-progress {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.progress-step {
+  display: block;
+  font-size: 11px;
+  color: var(--accent-amber);
+  font-style: italic;
+  margin-top: 4px;
 }
 
 .panel-body {

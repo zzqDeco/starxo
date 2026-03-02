@@ -189,5 +189,11 @@ export default {
     stop: '停止',
     destroy: '销毁',
     destroyConfirm: '确定销毁此容器？此操作不可撤销。',
+    createContainer: '新建容器',
+    activate: '激活',
+    deactivate: '取消激活',
+    creating: '正在创建容器...',
+    sshRequired: '请先连接 SSH',
+    sshReadyHint: 'SSH 已连接，点击"新建容器"开始',
   },
 }

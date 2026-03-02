@@ -113,39 +113,67 @@ onMounted(async () => {
   // Restore messages for the active session
   await restoreActiveMessages()
 
-  // Session switched event
+  // Session switched event — SSH stays connected, only container state changes
   EventsOn('session:switched', async (data: { session: Session; containerID?: string }) => {
     if (data?.session) {
       sessionStore.setActiveSession(data.session as Session)
       await restoreActiveMessages()
       sessionStore.loadSessions()
       containerStore.loadContainers()
-      // If no container bound, clear connection status (sandbox was disconnected server-side)
-      if (!data.containerID) {
-        connectionStore.sshConnected = false
-        connectionStore.dockerRunning = false
+      // Update active container (SSH remains connected)
+      if (data.containerID) {
+        containerStore.setActiveContainer(data.containerID)
+      } else {
+        containerStore.clearActiveContainer()
       }
     }
   })
 
-  // Sandbox progress events
-  EventsOn('sandbox:progress', (data: { step: string; percent: number }) => {
+  // SSH progress events
+  EventsOn('ssh:progress', (data: { step: string; percent: number }) => {
     if (data) {
       connectionStore.updateProgress(data.step, data.percent)
     }
   })
 
-  // Sandbox ready
-  EventsOn('sandbox:ready', () => {
-    connectionStore.setReady()
-    sessionStore.loadSessions()
-    containerStore.loadContainers()
+  // SSH connected
+  EventsOn('ssh:connected', () => {
+    connectionStore.setSSHConnected()
   })
 
-  // Sandbox disconnected (health check failure)
-  EventsOn('sandbox:disconnected', () => {
-    connectionStore.sshConnected = false
-    connectionStore.dockerRunning = false
+  // SSH disconnected (health check failure or manual disconnect)
+  EventsOn('ssh:disconnected', () => {
+    connectionStore.setSSHDisconnected()
+    containerStore.clearActiveContainer()
+  })
+
+  // Container creation/activation progress
+  EventsOn('container:progress', (data: { step: string; percent: number }) => {
+    if (data) {
+      containerStore.updateContainerProgress(data.step, data.percent)
+    }
+  })
+
+  // New container ready
+  EventsOn('container:ready', (data: { containerID: string }) => {
+    if (data?.containerID) {
+      containerStore.setActiveContainer(data.containerID)
+      containerStore.loadContainers()
+      sessionStore.loadSessions()
+    }
+  })
+
+  // Container activated (switched to existing container)
+  EventsOn('container:activated', (data: { containerID: string }) => {
+    if (data?.containerID) {
+      containerStore.setActiveContainer(data.containerID)
+      containerStore.loadContainers()
+    }
+  })
+
+  // Container deactivated
+  EventsOn('container:deactivated', () => {
+    containerStore.clearActiveContainer()
   })
 
   // Timeline events (unified event stream — the only message source)

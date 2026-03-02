@@ -4,15 +4,25 @@ import {service} from '../models';
 import {sandbox} from '../models';
 import {context} from '../models';
 
+export function ActivateContainer(arg1:string):Promise<void>;
+
 export function ActiveContainerRegID():Promise<string>;
 
 export function Connect():Promise<void>;
 
 export function ConnectExisting(arg1:string):Promise<void>;
 
+export function ConnectSSH():Promise<void>;
+
+export function CreateAndActivateContainer():Promise<void>;
+
+export function DeactivateContainer():Promise<void>;
+
 export function Disconnect():Promise<void>;
 
 export function DisconnectAndDestroy():Promise<void>;
+
+export function DisconnectSSH():Promise<void>;
 
 export function GetStatus():Promise<service.SandboxStatusDTO>;
 
@@ -23,6 +33,8 @@ export function SetContext(arg1:context.Context):Promise<void>;
 export function SetOnConnect(arg1:any):Promise<void>;
 
 export function SetOnContainerBound(arg1:any):Promise<void>;
+
+export function SetOnContainerDeactivated(arg1:any):Promise<void>;
 
 export function SetSessionService(arg1:service.SessionService):Promise<void>;
 

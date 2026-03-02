@@ -52,4 +52,7 @@ export interface SandboxStatus {
   sshConnected: boolean
   dockerRunning: boolean
   containerID: string
+  activeContainerID: string
+  activeContainerName: string
+  dockerAvailable: boolean
 }

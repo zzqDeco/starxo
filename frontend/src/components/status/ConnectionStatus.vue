@@ -21,21 +21,6 @@ const connectionStore = useConnectionStore()
       {{ connectionStore.sshConnected ? t('status.sshConnected') : t('status.sshDisconnected') }}
     </NTooltip>
 
-    <NTooltip trigger="hover" placement="bottom">
-      <template #trigger>
-        <div class="status-pill">
-          <span
-            :class="['dot', connectionStore.dockerRunning ? 'dot-green' : 'dot-red']"
-          ></span>
-          <span class="pill-label">Docker</span>
-        </div>
-      </template>
-      {{ connectionStore.dockerRunning ? t('status.dockerRunning') : t('status.dockerStopped') }}
-      <template v-if="connectionStore.containerID">
-        <br />{{ t('status.container') }}: {{ connectionStore.containerID.slice(0, 12) }}
-      </template>
-    </NTooltip>
-
     <span v-if="connectionStore.connecting" class="connecting-text">
       {{ connectionStore.initStep }}
     </span>
