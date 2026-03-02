@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { NIcon } from 'naive-ui'
 import { ArrowDown } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chatStore'
@@ -19,6 +19,8 @@ const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 
 const scrollContainer = ref<HTMLElement | null>(null)
+const bottomAreaRef = ref<HTMLElement | null>(null)
+const scrollBtnBottom = ref(80)
 const { isAutoScroll, isNearBottom, scrollToBottom, onScroll } = useAutoScroll(scrollContainer)
 
 const hasMessages = computed(() => chatStore.visibleMessages.length > 0)
@@ -96,6 +98,22 @@ function handleStop() {
   }
   chatStore.setGenerating(false)
 }
+
+// Track bottom area height for scroll button positioning
+let bottomObserver: ResizeObserver | null = null
+onMounted(() => {
+  if (bottomAreaRef.value) {
+    bottomObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        scrollBtnBottom.value = entry.contentRect.height + 12
+      }
+    })
+    bottomObserver.observe(bottomAreaRef.value)
+  }
+})
+onUnmounted(() => {
+  bottomObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -153,28 +171,32 @@ function handleStop() {
       <button
         v-if="showScrollBtn"
         :class="['scroll-to-bottom', { flash: hasNewMessages }]"
+        :style="{ bottom: scrollBtnBottom + 'px' }"
         @click="handleScrollToBottom"
       >
         <NIcon size="18"><ArrowDown /></NIcon>
       </button>
     </Transition>
 
-    <!-- Interrupt Dialog (overlays above input) -->
-    <InterruptDialog />
+    <!-- Bottom area wrapper for scroll button positioning -->
+    <div ref="bottomAreaRef" class="bottom-area">
+      <!-- Interrupt Dialog (overlays above input) -->
+      <InterruptDialog />
 
-    <!-- Persistent Todo Panel -->
-    <Transition name="todo-panel">
-      <div v-if="chatStore.latestTodos.length > 0" class="persistent-todo">
-        <TodoBoard :todos="chatStore.latestTodos" compact />
-      </div>
-    </Transition>
+      <!-- Persistent Todo Panel -->
+      <Transition name="todo-panel">
+        <div v-if="chatStore.latestTodos.length > 0" class="persistent-todo">
+          <TodoBoard :todos="chatStore.latestTodos" compact />
+        </div>
+      </Transition>
 
-    <!-- Input Area -->
-    <InputArea
-      :is-streaming="chatStore.isStreaming"
-      @send="handleSend"
-      @stop="handleStop"
-    />
+      <!-- Input Area -->
+      <InputArea
+        :is-streaming="chatStore.isStreaming"
+        @send="handleSend"
+        @stop="handleStop"
+      />
+    </div>
   </div>
 </template>
 
@@ -274,7 +296,6 @@ function handleStop() {
 /* Scroll to bottom button */
 .scroll-to-bottom {
   position: absolute;
-  bottom: 80px;
   right: 24px;
   width: 36px;
   height: 36px;
@@ -321,10 +342,18 @@ function handleStop() {
 /* Persistent todo panel */
 .persistent-todo {
   flex-shrink: 0;
+  max-height: 180px;
+  overflow-y: auto;
   padding: 0 24px 4px;
   max-width: 800px;
   margin: 0 auto;
   width: 100%;
+  transition: max-height 250ms ease-out;
+}
+
+/* Bottom area wrapper */
+.bottom-area {
+  flex-shrink: 0;
 }
 
 .todo-panel-enter-active,
