@@ -6,12 +6,13 @@ import Sidebar from './Sidebar.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import TerminalPanel from '@/components/terminal/TerminalPanel.vue'
 import FileExplorer from '@/components/files/FileExplorer.vue'
+import ContainerPanel from '@/components/containers/ContainerPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const showSettings = ref(false)
-const rightPanelTab = ref<'terminal' | 'files'>('terminal')
+const rightPanelTab = ref<'terminal' | 'files' | 'containers'>('terminal')
 const showRightPanel = ref(true)
 
 function toggleSettings() {
@@ -74,10 +75,17 @@ function toggleRightPanel() {
             >
               {{ t('layout.files') }}
             </button>
+            <button
+              :class="['tab-btn', { active: rightPanelTab === 'containers' }]"
+              @click="rightPanelTab = 'containers'"
+            >
+              {{ t('layout.containers') }}
+            </button>
           </div>
           <div class="right-panel-content">
             <TerminalPanel v-show="rightPanelTab === 'terminal'" />
             <FileExplorer v-show="rightPanelTab === 'files'" />
+            <ContainerPanel v-show="rightPanelTab === 'containers'" />
           </div>
         </NLayoutSider>
       </NLayout>

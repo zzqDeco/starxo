@@ -172,5 +172,22 @@ export default {
   layout: {
     terminal: '终端',
     files: '文件',
+    containers: '容器',
+  },
+  containers: {
+    title: '容器管理',
+    currentSession: '当前会话',
+    allContainers: '其他容器',
+    noContainers: '无容器 — 点击连接创建',
+    empty: '暂无已注册容器',
+    running: '运行中',
+    stopped: '已停止',
+    destroyed: '已销毁',
+    unknown: '未知',
+    active: '活跃',
+    start: '启动',
+    stop: '停止',
+    destroy: '销毁',
+    destroyConfirm: '确定销毁此容器？此操作不可撤销。',
   },
 }

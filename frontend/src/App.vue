@@ -6,6 +6,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useContainerStore } from '@/stores/containerStore'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
 import type { Message, TurnEvent, InterruptEvent, PlanEvent, ModeChangedEvent } from '@/types/message'
@@ -14,6 +15,7 @@ const settingsStore = useSettingsStore()
 const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
+const containerStore = useContainerStore()
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -117,6 +119,7 @@ onMounted(async () => {
       sessionStore.setActiveSession(data.session as Session)
       await restoreActiveMessages()
       sessionStore.loadSessions()
+      containerStore.loadContainers()
       // If no container bound, clear connection status (sandbox was disconnected server-side)
       if (!data.containerID) {
         connectionStore.sshConnected = false
@@ -135,7 +138,8 @@ onMounted(async () => {
   // Sandbox ready
   EventsOn('sandbox:ready', () => {
     connectionStore.setReady()
-    sessionStore.loadSessions() // Refresh sessions to update container status
+    sessionStore.loadSessions()
+    containerStore.loadContainers()
   })
 
   // Sandbox disconnected (health check failure)

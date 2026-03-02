@@ -172,5 +172,22 @@ export default {
   layout: {
     terminal: 'Terminal',
     files: 'Files',
+    containers: 'Containers',
+  },
+  containers: {
+    title: 'Containers',
+    currentSession: 'Current Session',
+    allContainers: 'Other Containers',
+    noContainers: 'No containers — click Connect to create one',
+    empty: 'No registered containers',
+    running: 'Running',
+    stopped: 'Stopped',
+    destroyed: 'Destroyed',
+    unknown: 'Unknown',
+    active: 'Active',
+    start: 'Start',
+    stop: 'Stop',
+    destroy: 'Destroy',
+    destroyConfirm: 'Destroy this container? This cannot be undone.',
   },
 }
