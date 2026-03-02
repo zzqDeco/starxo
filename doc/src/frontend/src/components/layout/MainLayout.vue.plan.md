@@ -8,7 +8,7 @@
 - 所属模块: frontend/src/components/layout (布局模块)
 
 ## 2. 核心职责
-- 应用主布局组件，定义三栏布局结构：左侧边栏 (Sidebar) + 中央内容 (Header + ChatPanel) + 右侧面板 (Terminal/Files)。
+- 应用主布局组件，定义三栏布局结构：左侧边栏 (Sidebar) + 中央内容 (Header + ChatPanel) + 右侧面板 (Terminal/Files/Containers)。
 - 管理右侧面板的显隐和 Tab 切换，以及设置面板模态的显隐。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
@@ -19,7 +19,7 @@
 ## 4. 关键实现细节
 - **内部状态**:
   - `showSettings: boolean` — 设置面板可见性
-  - `rightPanelTab: 'terminal' | 'files'` — 右侧面板当前 Tab
+  - `rightPanelTab: 'terminal' | 'files' | 'containers'` — 右侧面板当前 Tab
   - `showRightPanel: boolean` — 右侧面板可见性
 - **布局结构** (使用 Naive UI NLayout 组件):
   - `NLayout` (has-sider, position=absolute) — 最外层
@@ -29,12 +29,12 @@
       - `NLayout` (has-sider, content-area) — 内容区
         - `NLayoutContent` — 聊天内容，包含 ChatPanel
         - `NLayoutSider` (width=380, 条件渲染) — 右侧面板
-          - Tab 切换按钮 (Terminal / Files)
-          - `TerminalPanel` (v-show) / `FileExplorer` (v-show)
+          - Tab 切换按钮 (Terminal / Files / Containers)
+          - `TerminalPanel` (v-show) / `FileExplorer` (v-show) / `ContainerPanel` (v-show)
   - `SettingsPanel` (v-model:show) — 设置模态
 
 ## 5. 依赖关系
-- 内部依赖: `./Header.vue`、`./Sidebar.vue`、`@/components/chat/ChatPanel.vue`、`@/components/terminal/TerminalPanel.vue`、`@/components/files/FileExplorer.vue`、`@/components/settings/SettingsPanel.vue`
+- 内部依赖: `./Header.vue`、`./Sidebar.vue`、`@/components/chat/ChatPanel.vue`、`@/components/terminal/TerminalPanel.vue`、`@/components/files/FileExplorer.vue`、`@/components/containers/ContainerPanel.vue`、`@/components/settings/SettingsPanel.vue`
 - 外部依赖: `vue` (ref)、`naive-ui` (NLayout, NLayoutSider, NLayoutContent)、`vue-i18n` (useI18n)
 
 ## 6. 变更影响面

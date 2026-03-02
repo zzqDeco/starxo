@@ -14,17 +14,20 @@
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: Wails 事件（session:switched, sandbox:progress, sandbox:ready, sandbox:disconnected, agent:timeline, agent:done, agent:error, agent:interrupt, agent:plan, agent:mode_changed）、settingsStore/connectionStore/chatStore/sessionStore 状态
+- 输入来源: Wails 事件（session:switched, sandbox:progress, sandbox:ready, sandbox:disconnected, agent:timeline, agent:done, agent:error, agent:interrupt, agent:plan, agent:mode_changed）、settingsStore/connectionStore/chatStore/sessionStore/containerStore 状态
 - 输出结果: 渲染 NConfigProvider 包裹的 MainLayout 组件；将 Wails 事件数据分发到对应 Store
 
 ## 4. 关键实现细节
 - **主题配置**: `themeOverrides` 对象定义了完整的深色主题色板，包括 primaryColor (#22d3ee cyan)、bodyColor (#0c0e1a)、cardColor (#141726) 等，以及 Button/Input/Card/Modal/Tag/Dropdown/Collapse 组件级别的圆角覆盖
 - **消息恢复**: `restoreActiveMessages()` 函数实现两级回退策略：
-  1. 优先加载富显示数据（含时间线事件）`loadChatDisplay()`
-  2. 回退到基础持久化消息 `loadActiveMessages()`
+  1. 始终先调用 `chatStore.clearMessages()` 清空当前消息（防止切换到空会话时残留旧消息）
+  2. 优先加载富显示数据（含时间线事件）`loadChatDisplay()`
+  3. 回退到基础持久化消息 `loadActiveMessages()`
 - **Wails 事件监听**: 使用 `EventsOn` 注册 9 类事件处理器：
-  - `session:switched` → 切换活跃会话并恢复消息；无容器会话时清空 connectionStore 的 SSH/Docker 状态
-  - `sandbox:progress/ready/disconnected` → 更新 connectionStore 连接状态
+  - `session:switched` → 异步切换活跃会话并恢复消息；刷新 sessionStore 和 containerStore；无容器会话时清空 connectionStore 的 SSH/Docker 状态
+  - `sandbox:progress` → 更新 connectionStore 连接进度
+  - `sandbox:ready` → 标记连接就绪并刷新 sessionStore、containerStore
+  - `sandbox:disconnected` → 清空 SSH/Docker 连接状态
   - `agent:timeline` → 添加时间线事件到 chatStore
   - `agent:done` → 标记生成完成并持久化消息
   - `agent:error` → 显示错误消息
@@ -34,7 +37,7 @@
 - **Naive UI Provider 嵌套**: NConfigProvider > NMessageProvider > NDialogProvider > MainLayout
 
 ## 5. 依赖关系
-- 内部依赖: `@/components/layout/MainLayout.vue`、`@/stores/settingsStore`、`@/stores/connectionStore`、`@/stores/chatStore`、`@/stores/sessionStore`、`@/types/session`、`@/types/message`
+- 内部依赖: `@/components/layout/MainLayout.vue`、`@/stores/settingsStore`、`@/stores/connectionStore`、`@/stores/chatStore`、`@/stores/sessionStore`、`@/stores/containerStore`、`@/types/session`、`@/types/message`
 - 外部依赖: `naive-ui` (NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, GlobalThemeOverrides)、`vue` (onMounted)
 - Wails 绑定: `wailsjs/runtime/runtime` (EventsOn)
 

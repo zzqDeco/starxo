@@ -141,6 +141,7 @@
 | `frontend/src/stores/sessionStore.ts` | `doc/src/frontend/src/stores/sessionStore.plan.md` | TypeScript | stores |
 | `frontend/src/stores/connectionStore.ts` | `doc/src/frontend/src/stores/connectionStore.plan.md` | TypeScript | stores |
 | `frontend/src/stores/settingsStore.ts` | `doc/src/frontend/src/stores/settingsStore.plan.md` | TypeScript | stores |
+| `frontend/src/stores/containerStore.ts` | `doc/src/frontend/src/stores/containerStore.plan.md` | TypeScript | stores |
 
 ### frontend/src/types/ — 类型定义
 
@@ -186,6 +187,12 @@
 |--------|----------|----------|----------|
 | `frontend/src/components/files/FileExplorer.vue` | `doc/src/frontend/src/components/files/FileExplorer.plan.md` | Vue | files |
 | `frontend/src/components/files/FileTransfer.vue` | `doc/src/frontend/src/components/files/FileTransfer.plan.md` | Vue | files |
+
+### frontend/src/components/containers/ — 容器组件
+
+| 源文件 | 文档文件 | 文件类型 | 所属模块 |
+|--------|----------|----------|----------|
+| `frontend/src/components/containers/ContainerPanel.vue` | `doc/src/frontend/src/components/containers/ContainerPanel.plan.md` | Vue | containers |
 
 ### frontend/src/components/status/ — 状态组件
 
@@ -242,15 +249,16 @@
 | internal/store/ | 1 |
 | internal/logger/ | 2 |
 | 前端入口 | 3 |
-| frontend/src/stores/ | 4 |
+| frontend/src/stores/ | 5 |
 | frontend/src/types/ | 3 |
 | frontend/src/components/chat/ | 7 |
 | frontend/src/components/layout/ | 3 |
 | frontend/src/components/settings/ | 5 |
 | frontend/src/components/files/ | 2 |
+| frontend/src/components/containers/ | 1 |
 | frontend/src/components/status/ | 2 |
 | frontend/src/components/terminal/ | 1 |
 | frontend/src/composables/ | 2 |
 | frontend/src/locales/ | 3 |
 | 配置文件 | 3 |
-| **总计** | **85** |
+| **总计** | **88** |
