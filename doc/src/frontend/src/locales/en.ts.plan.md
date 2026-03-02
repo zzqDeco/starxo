@@ -31,7 +31,7 @@
   - `files` — 文件管理 (工作区、上传下载)
   - `terminal` — 终端 (输出标题)
   - `layout` — 布局 (Terminal/Files/Containers Tab 标签)
-  - `containers` — 容器管理 (标题、状态、操作按钮)
+  - `containers` — 容器管理 (标题、状态、操作按钮、**createContainer**、**activate**、**deactivate**、**creating**、**sshRequired**、**sshReadyHint**)
 
 ## 5. 依赖关系
 - 内部依赖: 被 `locales/index.ts` 导入

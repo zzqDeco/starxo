@@ -23,7 +23,7 @@
   - `MCPServerConfig` — MCP 服务器配置: name, transport (stdio/sse), command?, args?, url?, enabled
   - `AppSettings` — 顶层应用配置，聚合 ssh/docker/llm/mcp/agent 子配置
   - `FileInfo` — 文件信息: name, path, size, modified, preview, isOutput
-  - `SandboxStatus` — 沙盒状态: sshConnected, dockerRunning, containerID
+  - `SandboxStatus` — 沙盒状态: sshConnected, dockerRunning, containerID, **activeContainerID**, **activeContainerName**, **dockerAvailable**
 
 ## 5. 依赖关系
 - 内部依赖: 无

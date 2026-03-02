@@ -74,6 +74,7 @@
 - 消息处理变更影响会话历史的完整性
 - `processEvents` 将工具调用请求（assistant + ToolCalls）和工具执行结果（tool role）同步加入上下文历史，确保持久化后可完整恢复
 - `processEvents` 中 ToolCalls 事件处理后使用 `continue` 跳过后续的 `allContents` 累积，避免将工具调用内容重复添加为孤立的 assistant 消息（否则会导致 LLM API 报 "No tool output found" 错误）
+- `processEvents` 通过 `pendingToolCalls` map 跟踪已存入的 tool_call_id，在事件循环结束后为未收到结果的孤立 tool_call 注入合成错误响应（"Error: tool execution failed or was interrupted"），防止 LLM API 因缺失 tool result 返回 400 错误
 - Agent 执行过程中通过防抖机制（每 10 秒）中间保存会话，降低崩溃丢失风险
 - 流式输出逻辑影响前端实时内容显示
 - 是整个后端最核心的服务文件，变更需格外谨慎
