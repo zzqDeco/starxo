@@ -220,11 +220,58 @@ export namespace model {
 	        this.lastUsedAt = source["lastUsedAt"];
 	    }
 	}
+	export class PersistedToolCallFunction {
+	    name: string;
+	    arguments: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PersistedToolCallFunction(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.arguments = source["arguments"];
+	    }
+	}
+	export class PersistedToolCall {
+	    id: string;
+	    function: PersistedToolCallFunction;
+	
+	    static createFrom(source: any = {}) {
+	        return new PersistedToolCall(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.function = this.convertValues(source["function"], PersistedToolCallFunction);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PersistedMessage {
 	    role: string;
 	    content: string;
 	    name?: string;
 	    toolCallId?: string;
+	    toolCalls?: PersistedToolCall[];
 	
 	    static createFrom(source: any = {}) {
 	        return new PersistedMessage(source);
@@ -236,8 +283,29 @@ export namespace model {
 	        this.content = source["content"];
 	        this.name = source["name"];
 	        this.toolCallId = source["toolCallId"];
+	        this.toolCalls = this.convertValues(source["toolCalls"], PersistedToolCall);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
+	
+	
 	export class Session {
 	    id: string;
 	    title: string;

@@ -23,6 +23,7 @@
   - `(e *Engine) AddUserMessage(content string)` — 添加用户消息
   - `(e *Engine) AddAssistantMessage(content string)` — 添加助手消息
   - `(e *Engine) AddToolResult(toolCallID, content string)` — 添加工具结果消息
+  - `(e *Engine) AddMessage(msg *schema.Message)` — 添加完整消息（含 ToolCalls），用于持久化带工具调用的 assistant 消息
   - `(e *Engine) PrepareMessages() []*schema.Message` — 构建完整消息列表
   - `(e *Engine) FileContext() *FileContext` — 获取文件上下文管理器
   - `(e *Engine) History() *ConversationHistory` — 获取对话历史管理器
@@ -53,5 +54,5 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - Token 预算到消息数量的换算采用粗略估算（200 tokens/消息），后续可引入实际 tokenizer 提高精度。
-- `ExportMessages`/`ImportMessages` 当前不保存 `ToolCalls` 字段，若后续需要支持工具调用链的完整恢复，需扩展 `PersistedMessage` 结构体。
+- `ExportMessages`/`ImportMessages` 当前已支持 `ToolCalls` 字段的完整持久化和恢复，确保工具调用链在会话恢复时不丢失。
 - 系统提示词的读取使用了读锁，但 `systemPrompt` 在 `NewEngine` 后未提供修改方法，锁可简化。

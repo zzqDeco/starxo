@@ -17,11 +17,16 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
+  - `PersistedToolCall` — 工具调用请求的持久化结构体，包含以下字段:
+    - `ID` (string) — 工具调用唯一标识
+    - `Function` (PersistedToolCallFunction) — 包含 `Name` 和 `Arguments`
+  - `PersistedToolCallFunction` — 工具调用函数详情，包含 `Name` (函数名) 和 `Arguments` (JSON 参数)
   - `PersistedMessage` — 持久化消息结构体，包含以下字段:
     - `Role` (string) — 消息角色 (user/assistant/system/tool)
     - `Content` (string) — 消息内容
     - `Name` (string, omitempty) — 可选的发送者名称
     - `ToolCallID` (string, omitempty) — 可选的工具调用 ID（仅 tool 角色消息使用）
+    - `ToolCalls` ([]PersistedToolCall, omitempty) — 工具调用请求列表（仅 assistant 角色消息使用）
 - 导出函数/方法: 无
 - Wails 绑定方法: 无
 - 事件发射: 无
@@ -41,5 +46,6 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - 当前不包含 `ToolCalls` 字段（即 assistant 消息发起的工具调用列表），如需支持完整的工具调用链持久化需扩展此结构体。
+  → **已完成**: `ToolCalls []PersistedToolCall` 字段已添加，支持完整工具调用链持久化。向后兼容，旧数据无 `toolCalls` 字段时自动为 nil。
 - JSON tag 使用了驼峰命名 (`toolCallId`)，与前端 JavaScript 命名惯例一致，变更时需同步前端。
 - 字段变更应考虑向后兼容，建议新增字段使用 `omitempty` 标签。

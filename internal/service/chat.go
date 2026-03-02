@@ -241,6 +241,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 	var transferCount int
 	lastContentByAgent := make(map[string]string) // dedup
 
+	// Debounced intermediate save: persist at most once per 10 seconds during agent execution
+	var lastSaveTime time.Time
+	maybeSave := func() {
+		if time.Since(lastSaveTime) > 10*time.Second {
+			if s.sessionService != nil {
+				go func() { _ = s.sessionService.SaveCurrentSession() }()
+			}
+			lastSaveTime = time.Now()
+		}
+	}
+
 	for {
 		event, ok := events.Next()
 		if !ok {
@@ -332,6 +343,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 						Timestamp: time.Now().UnixMilli(),
 					})
 				}
+
+				// Store tool call message in context history for persistence
+				s.mu.Lock()
+				if s.ctxEngine != nil {
+					s.ctxEngine.AddMessage(&schema.Message{
+						Role:      schema.Assistant,
+						Content:   msg.Content,
+						ToolCalls: msg.ToolCalls,
+					})
+				}
+				s.mu.Unlock()
 			}
 
 			// Emit tool result events
@@ -349,6 +371,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 					ToolID:    msg.ToolCallID,
 					Timestamp: time.Now().UnixMilli(),
 				})
+
+				// Store tool result in context history for persistence
+				s.mu.Lock()
+				if s.ctxEngine != nil {
+					s.ctxEngine.AddToolResult(msg.ToolCallID, msg.Content)
+				}
+				s.mu.Unlock()
+
+				// Debounced intermediate save
+				maybeSave()
+
 				continue
 			}
 

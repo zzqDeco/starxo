@@ -126,6 +126,11 @@ func (e *Engine) SessionValues() map[string]any {
 	}
 }
 
+// AddMessage appends a complete message (including ToolCalls) to the conversation history.
+func (e *Engine) AddMessage(msg *schema.Message) {
+	e.history.Add(msg)
+}
+
 // ExportMessages converts the conversation history to a serializable format for persistence.
 func (e *Engine) ExportMessages() []model.PersistedMessage {
 	msgs := e.history.GetAll()
@@ -136,6 +141,15 @@ func (e *Engine) ExportMessages() []model.PersistedMessage {
 			Content:    msg.Content,
 			Name:       msg.Name,
 			ToolCallID: msg.ToolCallID,
+		}
+		for _, tc := range msg.ToolCalls {
+			pm.ToolCalls = append(pm.ToolCalls, model.PersistedToolCall{
+				ID: tc.ID,
+				Function: model.PersistedToolCallFunction{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			})
 		}
 		result = append(result, pm)
 	}
@@ -152,6 +166,15 @@ func (e *Engine) ImportMessages(messages []model.PersistedMessage) {
 			Content:    pm.Content,
 			Name:       pm.Name,
 			ToolCallID: pm.ToolCallID,
+		}
+		for _, ptc := range pm.ToolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, schema.ToolCall{
+				ID: ptc.ID,
+				Function: schema.FunctionCall{
+					Name:      ptc.Function.Name,
+					Arguments: ptc.Function.Arguments,
+				},
+			})
 		}
 		msgs = append(msgs, msg)
 	}
