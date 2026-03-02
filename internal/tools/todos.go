@@ -9,6 +9,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
+
+	"starxo/internal/logger"
 )
 
 // TodoItem represents a single task in the DAG.
@@ -62,6 +64,13 @@ func NewWriteTodosTool() tool.BaseTool {
 			copy(todoStore.todos, input.Todos)
 			todoStore.mu.Unlock()
 
+			// Diagnostic log: verify stored IDs
+			ids := make([]string, len(input.Todos))
+			for i, t := range input.Todos {
+				ids[i] = t.ID
+			}
+			logger.Info("[TODOS] Store updated", "count", len(input.Todos), "ids", strings.Join(ids, ","))
+
 			// Build summary
 			counts := map[string]int{}
 			for _, t := range input.Todos {
@@ -113,6 +122,13 @@ func NewUpdateTodoTool() tool.BaseTool {
 			todoStore.mu.Lock()
 			defer todoStore.mu.Unlock()
 
+			// Debug log: record store state at lookup time
+			storedIDs := make([]string, len(todoStore.todos))
+			for i, t := range todoStore.todos {
+				storedIDs[i] = t.ID
+			}
+			logger.Debug("[TODOS] update_todo lookup", "target", input.ID, "store_count", len(todoStore.todos), "stored_ids", strings.Join(storedIDs, ","))
+
 			found := false
 			for i := range todoStore.todos {
 				if todoStore.todos[i].ID == input.ID {
@@ -126,7 +142,7 @@ func NewUpdateTodoTool() tool.BaseTool {
 			}
 
 			if !found {
-				return "", fmt.Errorf("todo with ID %q not found", input.ID)
+				return fmt.Sprintf("Warning: todo with ID %q not found in current store (store has %d items). The todo list may need to be re-declared with write_todos.", input.ID, len(todoStore.todos)), nil
 			}
 
 			// Build summary

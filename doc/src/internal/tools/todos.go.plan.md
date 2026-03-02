@@ -13,7 +13,7 @@
 
 ## 3. 输入与输出
 - 输入来源: `WriteTodosInput`（包含 `Todos []TodoItem` 完整任务列表）、`UpdateTodoInput`（包含 `ID`、`Status`、可选 `Title`）、`context.Context`
-- 输出结果: 返回格式化的摘要字符串（含各状态计数）和完整 JSON 任务列表（以 `---` 分隔）；错误时返回 error（如未知依赖 ID、无效状态、未找到任务）
+- 输出结果: 返回格式化的摘要字符串（含各状态计数）和完整 JSON 任务列表（以 `---` 分隔）；错误时返回 error（如未知依赖 ID、无效状态）；`update_todo` ID 未找到时返回软提示（非 error），避免中断 Agent 管道
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
@@ -29,6 +29,7 @@
   - `NewUpdateTodoTool() tool.BaseTool` — 创建 `update_todo` 工具
     - 验证 ID 非空和状态值合法性
     - 按 ID 查找并更新状态，可选更新标题
+    - ID 未找到时返回 Warning 软提示（非 error），防止 NodeRunError 中断 Agent 管道
     - 返回更新后的状态计数摘要和完整 JSON
 - 全局状态:
   - `todoStore` — 包级 `var`，通过 `sync.Mutex` 保护的任务列表内存存储
@@ -36,7 +37,7 @@
 - 事件发射: 无（前端通过解析工具返回的 JSON 渲染 DAG）
 
 ## 5. 依赖关系
-- 内部依赖: 无
+- 内部依赖: `starxo/internal/logger` — 诊断日志（`write_todos` 存储确认、`update_todo` 查找调试）
 - 外部依赖:
   - `github.com/cloudwego/eino/components/tool` — `BaseTool` 接口
   - `github.com/cloudwego/eino/components/tool/utils` — `InferTool`
