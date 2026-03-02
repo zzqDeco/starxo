@@ -64,6 +64,18 @@
   /* Colored shadows */
   --shadow-cyan: 0 4px 16px rgba(34, 211, 238, 0.15);
   --shadow-glow: 0 0 20px rgba(34, 211, 238, 0.1);
+
+  /* Splitter */
+  --splitter-width: 4px;
+  --splitter-hover: var(--accent-cyan-dim);
+  --splitter-active: var(--accent-cyan);
+
+  /* z-index layers */
+  --z-base: 1;
+  --z-splitter: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-modal: 50;
 }
 
 html {
