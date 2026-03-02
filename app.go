@@ -86,6 +86,10 @@ func (a *App) startup(ctx context.Context) {
 	a.chatService.SetSessionService(a.sessionService)
 	a.fileService.SetSessionService(a.sessionService)
 
+	// Give sandbox service access to session service for container ownership
+	a.sandboxService.SetSessionService(a.sessionService)
+	a.containerService.SetSessionService(a.sessionService)
+
 	// When sandbox connects, update the chat service with the new manager
 	a.sandboxService.SetOnConnect(func(mgr *sandbox.SandboxManager) {
 		a.chatService.UpdateSandbox(mgr)
@@ -96,11 +100,19 @@ func (a *App) startup(ctx context.Context) {
 		a.sessionService.BindContainer(regID, wsPath)
 	})
 
-	// When the active session switches, auto-reconnect its container
+	// When the active session switches, auto-reconnect its container or disconnect
 	a.sessionService.SetOnSessionSwitch(func(containerRegID string) {
 		if containerRegID != "" {
 			go a.sandboxService.ConnectExisting(containerRegID)
+		} else {
+			// No container bound — disconnect current sandbox to avoid cross-session leakage
+			_ = a.sandboxService.Disconnect()
 		}
+	})
+
+	// When a session is deleted, cascade-destroy its containers on remote
+	a.sessionService.SetOnDestroyContainer(func(containerRegID string) error {
+		return a.containerService.DestroyContainer(containerRegID)
 	})
 
 	// When settings are saved, invalidate the runner so it rebuilds with new config

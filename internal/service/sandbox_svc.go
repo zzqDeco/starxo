@@ -20,6 +20,7 @@ type SandboxService struct {
 	manager          *sandbox.SandboxManager
 	store            *config.Store
 	containerStore   *storage.ContainerStore
+	sessionService   *SessionService
 	onConnect        func(mgr *sandbox.SandboxManager)
 	onContainerBound func(containerRegID, workspacePath string)
 	// activeContainerRegID tracks the registry ID of the currently connected container
@@ -32,6 +33,11 @@ func NewSandboxService(store *config.Store, containerStore *storage.ContainerSto
 		store:          store,
 		containerStore: containerStore,
 	}
+}
+
+// SetSessionService sets the session service dependency for container ownership.
+func (s *SandboxService) SetSessionService(ss *SessionService) {
+	s.sessionService = ss
 }
 
 // SetContext stores the Wails application context. Called from app.go startup.
@@ -86,6 +92,15 @@ func (s *SandboxService) Connect() error {
 	if docker != nil {
 		regID := uuid.New().String()[:8]
 		now := time.Now().UnixMilli()
+
+		// Determine owning session ID
+		sessionID := ""
+		if s.sessionService != nil {
+			if active := s.sessionService.GetActiveSession(); active != nil {
+				sessionID = active.ID
+			}
+		}
+
 		container := &model.Container{
 			ID:            regID,
 			DockerID:      docker.ContainerID(),
@@ -95,6 +110,7 @@ func (s *SandboxService) Connect() error {
 			SSHPort:       cfg.SSH.Port,
 			Status:        model.ContainerRunning,
 			SetupComplete: true,
+			SessionID:     sessionID,
 			CreatedAt:     now,
 			LastUsedAt:    now,
 		}

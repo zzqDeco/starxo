@@ -14,13 +14,14 @@ import (
 
 // SessionService manages chat sessions for the frontend.
 type SessionService struct {
-	ctx             context.Context
-	sessionStore    *storage.SessionStore
-	containerStore  *storage.ContainerStore
-	ctxEngine       *agentctx.Engine
-	activeSession   *model.Session
-	onSessionSwitch func(containerRegID string)
-	mu              sync.Mutex
+	ctx              context.Context
+	sessionStore     *storage.SessionStore
+	containerStore   *storage.ContainerStore
+	ctxEngine        *agentctx.Engine
+	activeSession    *model.Session
+	onSessionSwitch  func(containerRegID string)
+	onDestroyContainer func(containerRegID string) error
+	mu               sync.Mutex
 }
 
 // NewSessionService creates a new SessionService.
@@ -44,14 +45,22 @@ func (s *SessionService) SetCtxEngine(engine *agentctx.Engine) {
 }
 
 // SetOnSessionSwitch registers a callback fired when the active session changes.
-// The callback receives the target session's ContainerID (may be empty).
+// The callback receives the target session's ActiveContainerID (may be empty).
 func (s *SessionService) SetOnSessionSwitch(fn func(containerRegID string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onSessionSwitch = fn
 }
 
-// BindContainer associates the current session with a container registry ID and workspace path.
+// SetOnDestroyContainer registers a callback to destroy a container (stop+remove on remote).
+func (s *SessionService) SetOnDestroyContainer(fn func(containerRegID string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onDestroyContainer = fn
+}
+
+// BindContainer associates a container with the current session as its active container.
+// The container must not already be owned by another session.
 func (s *SessionService) BindContainer(containerRegID, workspacePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -60,19 +69,33 @@ func (s *SessionService) BindContainer(containerRegID, workspacePath string) {
 		return
 	}
 
-	s.activeSession.ContainerID = containerRegID
+	// Check ownership: reject if already bound to a different session
+	if s.containerStore != nil {
+		container, err := s.containerStore.Get(containerRegID)
+		if err == nil && container != nil && container.SessionID != "" && container.SessionID != s.activeSession.ID {
+			return // owned by another session, refuse to bind
+		}
+		// Set ownership on the container
+		if container != nil {
+			container.SessionID = s.activeSession.ID
+			_ = s.containerStore.Update(container)
+		}
+	}
+
+	s.activeSession.AddContainer(containerRegID)
+	s.activeSession.ActiveContainerID = containerRegID
 	s.activeSession.WorkspacePath = workspacePath
 	_ = s.sessionStore.Update(s.activeSession)
 }
 
-// GetBoundContainerID returns the container registry ID bound to the active session.
+// GetBoundContainerID returns the active container registry ID bound to the active session.
 func (s *SessionService) GetBoundContainerID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.activeSession == nil {
 		return ""
 	}
-	return s.activeSession.ContainerID
+	return s.activeSession.ActiveContainerID
 }
 
 // GetWorkspacePath returns the workspace path for the active session.
@@ -163,13 +186,13 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 	if s.ctx != nil {
 		wailsruntime.EventsEmit(s.ctx, "session:switched", SessionSwitchedEvent{
 			Session:     *sess,
-			ContainerID: sess.ContainerID,
+			ContainerID: sess.ActiveContainerID,
 		})
 	}
 
-	// Notify listeners (e.g. sandbox auto-reconnect)
+	// Notify listeners (e.g. sandbox auto-reconnect or disconnect)
 	if s.onSessionSwitch != nil {
-		containerID := sess.ContainerID
+		containerID := sess.ActiveContainerID
 		s.mu.Unlock()
 		s.onSessionSwitch(containerID)
 		s.mu.Lock() // Re-lock so deferred Unlock is balanced
@@ -179,13 +202,32 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 	return nil
 }
 
-// DeleteSession deletes a session. Cannot delete the active session.
+// DeleteSession deletes a session and cascade-destroys all its owned containers.
 func (s *SessionService) DeleteSession(sessionID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.activeSession != nil && s.activeSession.ID == sessionID {
+		s.mu.Unlock()
 		return fmt.Errorf("cannot delete the active session")
+	}
+
+	// Load session to get its container list
+	sess, err := s.sessionStore.Get(sessionID)
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to load session: %w", err)
+	}
+
+	destroyFn := s.onDestroyContainer
+	s.mu.Unlock()
+
+	// Cascade destroy all owned containers (best-effort)
+	for _, cid := range sess.Containers {
+		if destroyFn != nil {
+			_ = destroyFn(cid) // best-effort: remote may be unreachable
+		}
+		// Remove from registry regardless
+		_ = s.containerStore.Remove(cid)
 	}
 
 	return s.sessionStore.Delete(sessionID)
@@ -340,7 +382,7 @@ type EnrichedSession struct {
 	ContainerSSH    string `json:"containerSSH"`
 }
 
-// ListSessionsEnriched returns all sessions with their container info inlined.
+// ListSessionsEnriched returns all sessions with their active container info inlined.
 func (s *SessionService) ListSessionsEnriched() ([]EnrichedSession, error) {
 	sessions, err := s.sessionStore.List()
 	if err != nil {
@@ -350,8 +392,8 @@ func (s *SessionService) ListSessionsEnriched() ([]EnrichedSession, error) {
 	result := make([]EnrichedSession, 0, len(sessions))
 	for _, sess := range sessions {
 		es := EnrichedSession{Session: sess}
-		if sess.ContainerID != "" && s.containerStore != nil {
-			container, cerr := s.containerStore.Get(sess.ContainerID)
+		if sess.ActiveContainerID != "" && s.containerStore != nil {
+			container, cerr := s.containerStore.Get(sess.ActiveContainerID)
 			if cerr == nil && container != nil {
 				es.ContainerStatus = string(container.Status)
 				es.ContainerName = container.Name

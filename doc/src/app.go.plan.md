@@ -25,7 +25,10 @@
 - 关键回调连接:
   - `sandboxService.SetOnConnect` → 更新 chatService 的沙箱管理器
   - `sandboxService.SetOnContainerBound` → 绑定容器到当前会话
-  - `sessionService.SetOnSessionSwitch` → 自动重连容器
+  - `sandboxService.SetSessionService` → 容器注册时获取活跃会话 ID
+  - `sessionService.SetOnSessionSwitch` → 自动重连容器（空容器时调用 `Disconnect()`）
+  - `sessionService.SetOnDestroyContainer` → 级联删除时调用 `containerService.DestroyContainer`
+  - `containerService.SetSessionService` → 销毁容器时更新所属会话
   - `settingsService.SetOnSettingsSave` → 使 chatService runner 失效重建
   - `chatService.SetOnAgentDone` → 自动保存当前会话
 

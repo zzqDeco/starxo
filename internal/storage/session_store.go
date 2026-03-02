@@ -181,6 +181,8 @@ func (s *SessionStore) LoadDisplayData(sessionID string) (string, error) {
 }
 
 // loadSession reads a session.json from disk (caller must hold lock).
+// It handles migration from the old single-containerID format to the new
+// containers array format.
 func (s *SessionStore) loadSession(id string) (*model.Session, error) {
 	path := filepath.Join(s.baseDir, id, "session.json")
 	data, err := os.ReadFile(path)
@@ -191,6 +193,27 @@ func (s *SessionStore) loadSession(id string) (*model.Session, error) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, err
 	}
+
+	// Migrate old format: if raw JSON has "containerID" but session.Containers is empty,
+	// migrate the single value into the new array format.
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) == nil {
+		if oldID, ok := raw["containerID"]; ok {
+			var cid string
+			if json.Unmarshal(oldID, &cid) == nil && cid != "" && len(sess.Containers) == 0 {
+				sess.Containers = []string{cid}
+				sess.ActiveContainerID = cid
+				// Persist the migrated format
+				_ = s.saveSession(&sess)
+			}
+		}
+	}
+
+	// Ensure Containers is never nil for JSON serialization
+	if sess.Containers == nil {
+		sess.Containers = []string{}
+	}
+
 	return &sess, nil
 }
 

@@ -31,6 +31,7 @@
     - `SSHPort` (int) — SSH 端口
     - `Status` (ContainerStatus) — 当前状态
     - `SetupComplete` (bool) — 初始化是否完成
+    - `SessionID` (string) — 所属会话 ID（与 Session.Containers 构成双向引用）
     - `CreatedAt` (int64) — 创建时间戳
     - `LastUsedAt` (int64) — 最后使用时间戳
 - 导出函数/方法: 无
@@ -55,4 +56,5 @@
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - 新增容器状态值时需同步更新所有状态判断逻辑，特别是 `ContainerStore.RegisteredDockerIDs` 中的过滤条件。
 - `ID` 与 `DockerID` 的区分很重要：`ID` 是应用内部的注册标识，`DockerID` 是实际 Docker 容器的标识，两者不可混淆。
+- `SessionID` 记录容器归属的会话，与 `Session.Containers` 构成双向引用，确保父子关系一致性。容器创建时由 `SandboxService` 设置。
 - 时间戳字段使用 Unix 毫秒格式，与 `Session` 模型保持一致。

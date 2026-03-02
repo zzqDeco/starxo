@@ -26,6 +26,7 @@
   - `(s *ContainerStore) Update(container *model.Container) error` — 更新容器信息并持久化
   - `(s *ContainerStore) Remove(id string) error` — 从注册表中删除容器
   - `(s *ContainerStore) FindBySSH(host string, port int) []model.Container` — 按 SSH 地址查找容器
+  - `(s *ContainerStore) FindBySessionID(sessionID string) []model.Container` — 按所属会话 ID 查找容器
   - `(s *ContainerStore) RegisteredDockerIDs() []string` — 获取所有非销毁状态的 Docker ID
 - 未导出函数:
   - `(s *ContainerStore) load() error` — 从磁盘加载容器数据
@@ -48,6 +49,7 @@
 - 修改存储路径会影响已有用户的容器注册数据
 - `RegisteredDockerIDs` 的过滤逻辑变更会影响容器清理策略（`setup.go` 使用该方法避免清理已注册容器）
 - `FindBySSH` 被沙箱连接流程使用，用于检测是否存在可复用的容器
+- `FindBySessionID` 被级联删除流程使用，查找会话拥有的所有容器
 - 该存储层被 `service.ContainerService`、`service.SandboxService` 和 `service.SessionService` 使用
 - 内存中的容器列表与磁盘文件的一致性依赖于每次写操作后立即持久化
 

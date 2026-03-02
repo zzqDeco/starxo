@@ -30,7 +30,7 @@
   - `(s *SessionStore) SaveDisplayData(sessionID string, data string) error` — 保存前端展示数据
   - `(s *SessionStore) LoadDisplayData(sessionID string) (string, error)` — 加载前端展示数据
 - 未导出函数:
-  - `(s *SessionStore) loadSession(id string) (*model.Session, error)` — 从磁盘读取会话元数据
+  - `(s *SessionStore) loadSession(id string) (*model.Session, error)` — 从磁盘读取会话元数据，包含旧格式迁移逻辑（单 `containerID` → `containers` 数组）
   - `(s *SessionStore) saveSession(sess *model.Session) error` — 将会话元数据写入磁盘
 - Wails 绑定方法: 无（通过 SessionService 间接暴露）
 - 事件发射: 无
@@ -59,6 +59,7 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - 会话 ID 使用 UUID 前 8 位（`uuid.New().String()[:8]`），在会话数量极大时存在碰撞风险，可考虑使用完整 UUID。
+- `loadSession` 包含向后兼容迁移：检测旧格式的 `containerID` 字段，自动迁移到 `containers` 数组并持久化新格式。确保 `Containers` 字段不为 nil（空时初始化为空切片）。
 - `List` 方法对损坏的会话数据采用静默跳过策略 (`continue`)，可考虑添加日志记录。
 - `SaveDisplayData` 接收原始 JSON 字符串而非结构体，未做格式校验，依赖调用方确保数据合法性。
 - 存储目录名 `.starxo` 与 `config.Store` 共享，应保持一致。

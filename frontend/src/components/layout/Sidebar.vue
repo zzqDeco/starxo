@@ -140,9 +140,10 @@ function containerStatusDot(status?: string) {
               <span v-if="sess.updatedAt" class="session-time">· {{ formatTime(sess.updatedAt) }}</span>
             </span>
             <!-- Inline container status badge -->
-            <span v-if="sess.containerID" class="container-badge">
+            <span v-if="sess.activeContainerID" class="container-badge">
               <span :class="['dot', 'dot-mini', containerStatusDot(sess.containerStatus)]"></span>
-              <span class="container-badge-text">{{ sess.containerName || sess.containerID.substring(0, 8) }}</span>
+              <span class="container-badge-text">{{ sess.containerName || sess.activeContainerID.substring(0, 8) }}</span>
+              <span v-if="sess.containers && sess.containers.length > 1" class="container-count">+{{ sess.containers.length - 1 }}</span>
             </span>
             <span v-else class="no-container-hint">{{ t('sidebar.noContainer') }}</span>
           </template>
@@ -371,6 +372,12 @@ function containerStatusDot(status?: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.container-count {
+  font-size: 9px;
+  color: var(--accent-cyan);
+  font-weight: 600;
 }
 
 .no-container-hint {

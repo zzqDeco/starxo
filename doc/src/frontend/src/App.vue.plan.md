@@ -23,7 +23,7 @@
   1. 优先加载富显示数据（含时间线事件）`loadChatDisplay()`
   2. 回退到基础持久化消息 `loadActiveMessages()`
 - **Wails 事件监听**: 使用 `EventsOn` 注册 9 类事件处理器：
-  - `session:switched` → 切换活跃会话并恢复消息
+  - `session:switched` → 切换活跃会话并恢复消息；无容器会话时清空 connectionStore 的 SSH/Docker 状态
   - `sandbox:progress/ready/disconnected` → 更新 connectionStore 连接状态
   - `agent:timeline` → 添加时间线事件到 chatStore
   - `agent:done` → 标记生成完成并持久化消息

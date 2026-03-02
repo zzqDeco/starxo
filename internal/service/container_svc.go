@@ -13,6 +13,7 @@ type ContainerService struct {
 	ctx            context.Context
 	containerStore *storage.ContainerStore
 	sandboxService *SandboxService
+	sessionService *SessionService
 }
 
 // NewContainerService creates a new ContainerService.
@@ -21,6 +22,11 @@ func NewContainerService(containerStore *storage.ContainerStore, sandboxService 
 		containerStore: containerStore,
 		sandboxService: sandboxService,
 	}
+}
+
+// SetSessionService sets the session service dependency.
+func (s *ContainerService) SetSessionService(ss *SessionService) {
+	s.sessionService = ss
 }
 
 // SetContext stores the Wails application context.
@@ -98,13 +104,29 @@ func (s *ContainerService) StartContainer(containerRegID string) error {
 }
 
 // DestroyContainer stops, removes, and unregisters a container.
+// Also removes the container from its owning session's container list.
 func (s *ContainerService) DestroyContainer(containerRegID string) error {
+	// Look up the container to find its owning session
+	container, _ := s.containerStore.Get(containerRegID)
+
 	// If this is the active container, use full disconnect+destroy
 	if s.sandboxService.ActiveContainerRegID() == containerRegID {
-		return s.sandboxService.DisconnectAndDestroy()
+		if err := s.sandboxService.DisconnectAndDestroy(); err != nil {
+			return err
+		}
+	} else {
+		// Otherwise, just remove from registry
+		_ = s.containerStore.Remove(containerRegID)
 	}
 
-	// Otherwise, we need an SSH connection to the same host to remove it
-	// For now, just remove from registry
-	return s.containerStore.Remove(containerRegID)
+	// Update owning session's container list
+	if container != nil && container.SessionID != "" && s.sessionService != nil {
+		sess, err := s.sessionService.sessionStore.Get(container.SessionID)
+		if err == nil && sess != nil {
+			sess.RemoveContainer(containerRegID)
+			_ = s.sessionService.sessionStore.Update(sess)
+		}
+	}
+
+	return nil
 }

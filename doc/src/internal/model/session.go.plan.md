@@ -8,7 +8,7 @@
 - 所属模块: model
 
 ## 2. 核心职责
-- 该文件定义了会话的持久化数据模型 `Session`，代表一个用户与 AI Agent 的完整对话会话。每个会话包含唯一标识、标题、关联的容器 ID、工作区路径、创建/更新时间戳以及消息计数。该结构体是会话管理系统的核心数据类型，用于会话列表展示、会话切换和持久化存储。
+- 该文件定义了会话的持久化数据模型 `Session`，代表一个用户与 AI Agent 的完整对话会话。每个会话包含唯一标识、标题、多容器列表、活跃容器标识、工作区路径、创建/更新时间戳以及消息计数。会话与容器为严格父子关系（一对多），每个容器归属于创建它的会话。该结构体是会话管理系统的核心数据类型，用于会话列表展示、会话切换和持久化存储。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -20,12 +20,16 @@
   - `Session` — 会话结构体，包含以下字段:
     - `ID` (string) — 会话唯一标识 (UUID 前 8 位)
     - `Title` (string) — 会话标题
-    - `ContainerID` (string) — 关联的容器注册 ID
+    - `Containers` ([]string) — 所属容器注册 ID 列表（父子关系）
+    - `ActiveContainerID` (string, omitempty) — 当前活跃容器的注册 ID
     - `WorkspacePath` (string, omitempty) — 工作区路径
     - `CreatedAt` (int64) — 创建时间（Unix 毫秒时间戳）
     - `UpdatedAt` (int64) — 最后更新时间（Unix 毫秒时间戳）
     - `MessageCount` (int) — 消息数量
-- 导出函数/方法: 无
+- 导出函数/方法:
+  - `HasContainer(containerID string) bool` — 检查会话是否包含指定容器
+  - `AddContainer(containerID string)` — 将容器添加到列表（去重）
+  - `RemoveContainer(containerID string)` — 从列表移除容器，若移除的是活跃容器则清空 ActiveContainerID
 - Wails 绑定方法: 无
 - 事件发射: 无
 
@@ -45,5 +49,7 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - 时间戳使用 Unix 毫秒格式 (`UnixMilli`)，与前端 JavaScript 的 `Date.now()` 一致，变更格式需同步前端。
-- `ContainerID` 关联的是容器注册表 ID（非 Docker 容器 ID），命名可能引起混淆，注释中应明确说明。
+- `Containers` 列表记录的是容器注册表 ID（非 Docker 容器 ID），与 `container.go` 的 `ID` 字段对应。
+- `ActiveContainerID` 使用 `omitempty`，无活跃容器时省略。
 - `WorkspacePath` 使用了 `omitempty`，表示可选字段，适用于未绑定容器的会话。
+- `HasContainer`/`AddContainer`/`RemoveContainer` 方法操作 `Containers` 切片，`AddContainer` 内置去重，`RemoveContainer` 级联清空 `ActiveContainerID`。

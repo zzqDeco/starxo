@@ -22,15 +22,16 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
-  - `ContainerService`: 容器服务结构体，包含 Wails 上下文、ContainerStore、SandboxService 引用
+  - `ContainerService`: 容器服务结构体，包含 Wails 上下文、ContainerStore、SandboxService 引用、SessionService 引用
 - 导出函数/方法:
   - `NewContainerService(containerStore, sandboxService) *ContainerService`: 构造函数
   - `SetContext(ctx)`: 设置 Wails 上下文
+  - `SetSessionService(svc)`: 设置 SessionService 引用（销毁容器时更新所属会话）
   - `ListContainers() ([]model.Container, error)`: 列出所有已注册容器
   - `RefreshContainerStatus(containerRegID) (*model.Container, error)`: 刷新容器实际状态，通过 `docker.InspectContainer` 检查容器是否存在、是否运行
   - `StopContainer(containerRegID) error`: 停止容器，如果是活动容器则通过 SandboxManager 停止
   - `StartContainer(containerRegID) error`: 启动容器，委托给 `sandboxService.ConnectExisting` 进行重连
-  - `DestroyContainer(containerRegID) error`: 销毁容器，活动容器使用 `DisconnectAndDestroy`，非活动容器直接从注册表移除
+  - `DestroyContainer(containerRegID) error`: 销毁容器，活动容器使用 `DisconnectAndDestroy`，非活动容器直接从注册表移除。销毁后同步更新所属会话的 Containers 列表（通过 SessionService 调用 `RemoveContainer`）
 - Wails 绑定方法: `ListContainers`、`RefreshContainerStatus`、`StopContainer`、`StartContainer`、`DestroyContainer`
 - 事件发射: 无直接事件发射（通过 SandboxService 间接触发）
 
@@ -51,7 +52,7 @@
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- `DestroyContainer` 对非活动容器的处理不够完整（仅移除注册表记录），未来可考虑通过独立 SSH 连接执行 `docker rm` 命令。
+- `DestroyContainer` 销毁后自动更新所属会话的容器列表，保证父子关系一致性。非活动容器仅从注册表移除，未来可考虑通过独立 SSH 连接执行 `docker rm` 命令。
 - `RefreshContainerStatus` 依赖已有的 SandboxManager 连接，如果连接到不同的 SSH 主机则无法检查状态，标记为 Unknown。
 - `StopContainer` 对活动容器的停止操作需要已有的 SandboxManager，如果 manager 为 nil 则仅更新注册表状态。
 - 可考虑添加批量状态刷新功能以减少前端的 N 次 API 调用。

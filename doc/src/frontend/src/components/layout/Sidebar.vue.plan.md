@@ -26,7 +26,7 @@
   - 重命名: 内联 NInput 编辑，Enter/blur 确认，Escape 取消
   - 删除: 通过下拉菜单触发 deleteSession(id)
   - 下拉菜单: NDropdown 提供 rename/delete 选项
-- **会话项渲染**: 图标 + 标题 (NEllipsis) + 消息数和时间 + 容器状态徽标 (dot + name) + 操作菜单按钮 (hover 显示)
+- **会话项渲染**: 图标 + 标题 (NEllipsis) + 消息数和时间 + 容器状态徽标 (dot + name + 多容器计数 badge) + 操作菜单按钮 (hover 显示)。使用 `activeContainerID` 标识当前活跃容器，`containers.length > 1` 时显示额外容器计数
 - **底部连接区域**: SSH/Docker 状态点 + 连接进度 + 错误提示 + 连接/断开按钮
 - **辅助函数**:
   - `formatTime(ts)` — 今天显示时间，否则显示日期

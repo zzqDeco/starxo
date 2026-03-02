@@ -8,7 +8,7 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 该文件实现了 `SessionService`，负责管理聊天会话的完整生命周期。提供会话的创建、切换、删除、重命名、保存和加载功能。每个会话关联一个容器（通过 ContainerID 绑定）和工作区路径。会话切换时自动保存当前会话、加载目标会话的消息历史到上下文引擎、并通知沙箱服务进行容器重连。还提供增强版会话列表（包含容器状态信息）和前端显示数据的持久化。
+- 该文件实现了 `SessionService`，负责管理聊天会话的完整生命周期。提供会话的创建、切换、删除、重命名、保存和加载功能。每个会话拥有多个容器（通过 Containers 列表和 ActiveContainerID 管理），形成严格的父子关系。会话切换时自动保存当前会话、加载目标会话的消息历史到上下文引擎、并通知沙箱服务进行容器重连。删除会话时级联销毁所有子容器。还提供增强版会话列表（包含容器状态信息）和前端显示数据的持久化。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -22,20 +22,21 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
-  - `SessionService`: 会话服务结构体，包含 Wails 上下文、SessionStore、ContainerStore、上下文引擎、活动会话、会话切换回调、互斥锁
-  - `EnrichedSession`: 扩展会话类型，内嵌 `model.Session` 并添加 `ContainerStatus`、`ContainerName`、`ContainerSSH` 字段
+  - `SessionService`: 会话服务结构体，包含 Wails 上下文、SessionStore、ContainerStore、上下文引擎、活动会话、会话切换回调、容器销毁回调 (`onDestroyContainer`)、互斥锁
+  - `EnrichedSession`: 扩展会话类型，内嵌 `model.Session` 并添加 `ContainerStatus`、`ContainerName`、`ContainerSSH` 字段（基于 ActiveContainerID 查询）
 - 导出函数/方法:
   - `NewSessionService(sessionStore, containerStore) *SessionService`: 构造函数
   - `SetContext(ctx)`: 设置 Wails 上下文
   - `SetCtxEngine(engine)`: 设置上下文引擎
   - `SetOnSessionSwitch(fn)`: 注册会话切换回调
-  - `BindContainer(containerRegID, workspacePath)`: 将容器绑定到当前会话
+  - `SetOnDestroyContainer(fn)`: 注册容器销毁回调（级联删除时调用）
+  - `BindContainer(containerRegID, workspacePath)`: 将容器绑定到当前会话，校验容器未被其他会话绑定（唯一性），设置容器的 SessionID，追加到 Containers 列表并设为 ActiveContainerID
   - `GetBoundContainerID() string`: 获取当前会话绑定的容器 ID
   - `GetWorkspacePath() string`: 获取当前会话工作区路径，默认 "/workspace"
   - `ListSessions() ([]model.Session, error)`: 列出所有会话
   - `CreateSession(title) (*model.Session, error)`: 创建新会话，自动保存当前会话并清空历史
   - `SwitchSession(sessionID) error`: 切换会话，保存当前、加载目标、恢复消息、发射事件、通知回调
-  - `DeleteSession(sessionID) error`: 删除会话（不能删除活动会话）
+  - `DeleteSession(sessionID) error`: 删除会话并级联销毁所有子容器（通过 onDestroyContainer 回调执行远程停止+销毁+注册表移除）
   - `RenameSession(sessionID, title) error`: 重命名会话
   - `GetActiveSession() *model.Session`: 获取当前活动会话（返回副本）
   - `GetActiveSessionMessages() ([]model.PersistedMessage, error)`: 获取活动会话消息

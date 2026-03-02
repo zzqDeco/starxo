@@ -116,6 +116,11 @@ onMounted(async () => {
       sessionStore.setActiveSession(data.session as Session)
       restoreActiveMessages()
       sessionStore.loadSessions()
+      // If no container bound, clear connection status (sandbox was disconnected server-side)
+      if (!data.containerID) {
+        connectionStore.sshConnected = false
+        connectionStore.dockerRunning = false
+      }
     }
   })
 

@@ -12,7 +12,8 @@ func TestSessionZeroValue(t *testing.T) {
 	var s Session
 	assert.Empty(t, s.ID)
 	assert.Empty(t, s.Title)
-	assert.Empty(t, s.ContainerID)
+	assert.Empty(t, s.Containers)
+	assert.Empty(t, s.ActiveContainerID)
 	assert.Empty(t, s.WorkspacePath)
 	assert.Zero(t, s.CreatedAt)
 	assert.Zero(t, s.UpdatedAt)
@@ -21,13 +22,14 @@ func TestSessionZeroValue(t *testing.T) {
 
 func TestSessionJSONRoundTrip(t *testing.T) {
 	original := Session{
-		ID:            "sess-abc123",
-		Title:         "Test Session",
-		ContainerID:   "ctr-xyz",
-		WorkspacePath: "/home/user/project",
-		CreatedAt:     1700000000,
-		UpdatedAt:     1700003600,
-		MessageCount:  42,
+		ID:                "sess-abc123",
+		Title:             "Test Session",
+		Containers:        []string{"ctr-xyz", "ctr-abc"},
+		ActiveContainerID: "ctr-xyz",
+		WorkspacePath:     "/home/user/project",
+		CreatedAt:         1700000000,
+		UpdatedAt:         1700003600,
+		MessageCount:      42,
 	}
 
 	data, err := json.Marshal(original)

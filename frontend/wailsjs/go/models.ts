@@ -199,13 +199,14 @@ export namespace model {
 	    sshPort: number;
 	    status: string;
 	    setupComplete: boolean;
+	    sessionID: string;
 	    createdAt: number;
 	    lastUsedAt: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Container(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -216,6 +217,7 @@ export namespace model {
 	        this.sshPort = source["sshPort"];
 	        this.status = source["status"];
 	        this.setupComplete = source["setupComplete"];
+	        this.sessionID = source["sessionID"];
 	        this.createdAt = source["createdAt"];
 	        this.lastUsedAt = source["lastUsedAt"];
 	    }
@@ -309,21 +311,23 @@ export namespace model {
 	export class Session {
 	    id: string;
 	    title: string;
-	    containerID: string;
+	    containers: string[];
+	    activeContainerID: string;
 	    workspacePath?: string;
 	    createdAt: number;
 	    updatedAt: number;
 	    messageCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.title = source["title"];
-	        this.containerID = source["containerID"];
+	        this.containers = source["containers"] || [];
+	        this.activeContainerID = source["activeContainerID"] || '';
 	        this.workspacePath = source["workspacePath"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
@@ -355,7 +359,8 @@ export namespace service {
 	export class EnrichedSession {
 	    id: string;
 	    title: string;
-	    containerID: string;
+	    containers: string[];
+	    activeContainerID: string;
 	    workspacePath?: string;
 	    createdAt: number;
 	    updatedAt: number;
@@ -363,16 +368,17 @@ export namespace service {
 	    containerStatus: string;
 	    containerName: string;
 	    containerSSH: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EnrichedSession(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.title = source["title"];
-	        this.containerID = source["containerID"];
+	        this.containers = source["containers"] || [];
+	        this.activeContainerID = source["activeContainerID"] || '';
 	        this.workspacePath = source["workspacePath"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];

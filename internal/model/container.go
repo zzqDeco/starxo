@@ -20,6 +20,7 @@ type Container struct {
 	SSHPort       int             `json:"sshPort"`
 	Status        ContainerStatus `json:"status"`
 	SetupComplete bool            `json:"setupComplete"`
+	SessionID     string          `json:"sessionID"` // owning session ID
 	CreatedAt     int64           `json:"createdAt"`
 	LastUsedAt    int64           `json:"lastUsedAt"`
 }

@@ -17,8 +17,8 @@
 
 ## 4. 关键实现细节
 - **导出类型/接口**:
-  - `Session` — 会话信息: id, title, containerID, workspacePath?(可选), createdAt, updatedAt, messageCount。富化字段: containerStatus? (running/stopped/unknown/destroyed/''), containerName?, containerSSH?
-  - `ContainerInfo` — 容器详情: id, dockerID, name, image, sshHost, sshPort, status (running/stopped/unknown/destroyed), setupComplete, createdAt, lastUsedAt
+  - `Session` — 会话信息: id, title, containers (string[]), activeContainerID, workspacePath?(可选), createdAt, updatedAt, messageCount。富化字段: containerStatus? (running/stopped/unknown/destroyed/''), containerName?, containerSSH?
+  - `ContainerInfo` — 容器详情: id, dockerID, name, image, sshHost, sshPort, status (running/stopped/unknown/destroyed), setupComplete, sessionID, createdAt, lastUsedAt
 
 ## 5. 依赖关系
 - 内部依赖: 无

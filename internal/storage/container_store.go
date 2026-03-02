@@ -107,6 +107,19 @@ func (s *ContainerStore) FindBySSH(host string, port int) []model.Container {
 	return result
 }
 
+// FindBySessionID returns all containers owned by the given session.
+func (s *ContainerStore) FindBySessionID(sessionID string) []model.Container {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []model.Container
+	for _, c := range s.containers {
+		if c.SessionID == sessionID {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
 // RegisteredDockerIDs returns all Docker container IDs in the registry.
 // Used by setup.go to avoid cleaning up registered containers.
 func (s *ContainerStore) RegisteredDockerIDs() []string {

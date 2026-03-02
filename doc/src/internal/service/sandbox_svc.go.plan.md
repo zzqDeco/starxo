@@ -22,13 +22,14 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
-  - `SandboxService`: 沙箱服务结构体，包含 Wails 上下文、SandboxManager 实例、配置存储、容器存储、连接回调、容器绑定回调、当前活动容器注册 ID
+  - `SandboxService`: 沙箱服务结构体，包含 Wails 上下文、SandboxManager 实例、配置存储、容器存储、SessionService 引用、连接回调、容器绑定回调、当前活动容器注册 ID
 - 导出函数/方法:
   - `NewSandboxService(store, containerStore) *SandboxService`: 构造函数
   - `SetContext(ctx)`: 设置 Wails 上下文
   - `SetOnConnect(fn)`: 注册连接成功回调
   - `SetOnContainerBound(fn)`: 注册容器绑定回调
-  - `Connect() error`: 创建新容器并连接，注册到容器存储，生成 UUID 短 ID，排除已注册容器避免清理冲突
+  - `SetSessionService(svc)`: 设置 SessionService 引用（容器注册时获取活跃会话 ID）
+  - `Connect() error`: 创建新容器并连接，注册到容器存储（设置 SessionID 从活跃会话获取），生成 UUID 短 ID，排除已注册容器避免清理冲突
   - `ConnectExisting(containerRegID) error`: 重连已注册容器，覆盖 SSH 配置为容器存储的信息
   - `Disconnect() error`: 关闭 SSH 但保留容器
   - `DisconnectAndDestroy() error`: 停止并移除容器，从注册表中删除
