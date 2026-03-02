@@ -66,10 +66,12 @@ const themeOverrides: GlobalThemeOverrides = {
 
 /** Restore messages from persisted data into chatStore */
 async function restoreActiveMessages() {
+  // Always clear first — prevents stale messages when switching to empty sessions
+  chatStore.clearMessages()
+
   // Try rich display data first (includes timeline events)
   const display = await sessionStore.loadChatDisplay()
   if (display && display.length > 0) {
-    chatStore.clearMessages()
     for (const msg of display) {
       chatStore.addMessage({
         id: msg.id || crypto.randomUUID(),
@@ -86,7 +88,6 @@ async function restoreActiveMessages() {
   // Fallback to basic persisted messages (no timeline events)
   const persisted = await sessionStore.loadActiveMessages()
   if (persisted && persisted.length > 0) {
-    chatStore.clearMessages()
     for (const pm of persisted) {
       const msg: Message = {
         id: crypto.randomUUID(),
@@ -111,10 +112,10 @@ onMounted(async () => {
   await restoreActiveMessages()
 
   // Session switched event
-  EventsOn('session:switched', (data: { session: Session; containerID?: string }) => {
+  EventsOn('session:switched', async (data: { session: Session; containerID?: string }) => {
     if (data?.session) {
       sessionStore.setActiveSession(data.session as Session)
-      restoreActiveMessages()
+      await restoreActiveMessages()
       sessionStore.loadSessions()
       // If no container bound, clear connection status (sandbox was disconnected server-side)
       if (!data.containerID) {
