@@ -248,6 +248,15 @@ func (m *RemoteDockerManager) SetContainerID(id, name string) {
 	m.containerName = name
 }
 
+// ClearContainer clears the container ID and name without stopping the container.
+// Used when detaching from a container while keeping SSH alive.
+func (m *RemoteDockerManager) ClearContainer() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.containerID = ""
+	m.containerName = ""
+}
+
 // InspectContainer checks if a container exists and whether it is running.
 func (m *RemoteDockerManager) InspectContainer(ctx context.Context, dockerID string) (exists bool, running bool, err error) {
 	cmd := fmt.Sprintf("%s inspect --format '{{.State.Running}}' %s 2>/dev/null", m.dockerCmd(), dockerID)

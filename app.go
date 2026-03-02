@@ -100,13 +100,18 @@ func (a *App) startup(ctx context.Context) {
 		a.sessionService.BindContainer(regID, wsPath)
 	})
 
-	// When the active session switches, auto-reconnect its container or disconnect
+	// When a container is deactivated, clear chat service's sandbox reference
+	a.sandboxService.SetOnContainerDeactivated(func() {
+		a.chatService.UpdateSandbox(nil)
+	})
+
+	// When the active session switches, switch the active container (SSH stays connected)
 	a.sessionService.SetOnSessionSwitch(func(containerRegID string) {
 		if containerRegID != "" {
-			go a.sandboxService.ConnectExisting(containerRegID)
+			go a.sandboxService.ActivateContainer(containerRegID)
 		} else {
-			// No container bound — disconnect current sandbox to avoid cross-session leakage
-			_ = a.sandboxService.Disconnect()
+			// No container bound — deactivate current container (SSH stays connected)
+			_ = a.sandboxService.DeactivateContainer()
 		}
 	})
 

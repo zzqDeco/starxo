@@ -25,6 +25,66 @@ func NewEnvironmentSetup(ssh *SSHClient, docker *RemoteDockerManager, onProgress
 	}
 }
 
+// EnsureDockerAvailable ensures Docker is installed, the daemon is running,
+// and detects whether sudo is needed. This is called after SSH connects,
+// before any container operations.
+func (s *EnvironmentSetup) EnsureDockerAvailable(ctx context.Context) error {
+	s.onProgress("Checking Docker installation", 0)
+	if err := s.ensureDockerInstalled(ctx); err != nil {
+		return fmt.Errorf("docker installation check failed: %w", err)
+	}
+
+	s.onProgress("Starting Docker daemon", 50)
+	if err := s.ensureDockerRunning(ctx); err != nil {
+		return fmt.Errorf("failed to start Docker daemon: %w", err)
+	}
+
+	s.docker.DetectSudo(ctx)
+
+	s.onProgress("Docker ready", 100)
+	return nil
+}
+
+// SetupNewContainer performs container creation and setup:
+// 1. Clean up unregistered old containers
+// 2. Pull image if missing
+// 3. Create container
+// 4. Install Python packages
+// 5. Create workspace directory
+// 6. Health check
+func (s *EnvironmentSetup) SetupNewContainer(ctx context.Context, excludeDockerIDs []string) error {
+	s.onProgress("Cleaning up old containers", 0)
+	s.cleanupOldContainers(ctx, excludeDockerIDs)
+
+	s.onProgress("Pulling Docker image", 10)
+	if err := s.docker.EnsureImageExists(ctx); err != nil {
+		return fmt.Errorf("failed to ensure image exists: %w", err)
+	}
+
+	s.onProgress("Creating container", 30)
+	if err := s.docker.CreateContainer(ctx); err != nil {
+		return fmt.Errorf("failed to create container: %w", err)
+	}
+
+	s.onProgress("Installing Python packages", 50)
+	if err := s.installPythonPackages(ctx); err != nil {
+		return fmt.Errorf("failed to install Python packages: %w", err)
+	}
+
+	s.onProgress("Creating workspace directory", 80)
+	if err := s.createWorkspaceDir(ctx); err != nil {
+		return fmt.Errorf("failed to create workspace directory: %w", err)
+	}
+
+	s.onProgress("Running health check", 90)
+	if err := s.healthCheck(ctx); err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+
+	s.onProgress("Container ready", 100)
+	return nil
+}
+
 // InitializeFresh performs the full environment setup sequence for a new container:
 // 1. Check/install Docker
 // 2. Ensure Docker daemon is running
@@ -35,57 +95,19 @@ func NewEnvironmentSetup(ssh *SSHClient, docker *RemoteDockerManager, onProgress
 // 7. Create workspace directory
 // 8. Health check
 func (s *EnvironmentSetup) InitializeFresh(ctx context.Context, excludeDockerIDs []string) error {
-	// Step 1: Check Docker installed
-	s.onProgress("Checking Docker installation", 0)
-	if err := s.ensureDockerInstalled(ctx); err != nil {
-		return fmt.Errorf("docker installation check failed: %w", err)
+	if err := s.EnsureDockerAvailable(ctx); err != nil {
+		return err
 	}
 
-	// Step 2: Ensure Docker daemon is running
-	s.onProgress("Starting Docker daemon", 15)
-	if err := s.ensureDockerRunning(ctx); err != nil {
-		return fmt.Errorf("failed to start Docker daemon: %w", err)
+	// Remap progress for container setup phase (25% - 100%)
+	origProgress := s.onProgress
+	s.onProgress = func(step string, pct int) {
+		// Map 0-100 of container setup to 25-100 of overall
+		origProgress(step, 25+pct*75/100)
 	}
+	defer func() { s.onProgress = origProgress }()
 
-	// Detect whether docker commands need sudo
-	s.docker.DetectSudo(ctx)
-
-	// Step 2.5: Clean up old eino-sandbox containers (skip registered ones)
-	s.onProgress("Cleaning up old containers", 25)
-	s.cleanupOldContainers(ctx, excludeDockerIDs)
-
-	// Step 3: Pull image if missing
-	s.onProgress("Pulling Docker image", 30)
-	if err := s.docker.EnsureImageExists(ctx); err != nil {
-		return fmt.Errorf("failed to ensure image exists: %w", err)
-	}
-
-	// Step 4: Create container
-	s.onProgress("Creating container", 50)
-	if err := s.docker.CreateContainer(ctx); err != nil {
-		return fmt.Errorf("failed to create container: %w", err)
-	}
-
-	// Step 5: Install Python packages
-	s.onProgress("Installing Python packages", 65)
-	if err := s.installPythonPackages(ctx); err != nil {
-		return fmt.Errorf("failed to install Python packages: %w", err)
-	}
-
-	// Step 6: Create workspace directory
-	s.onProgress("Creating workspace directory", 85)
-	if err := s.createWorkspaceDir(ctx); err != nil {
-		return fmt.Errorf("failed to create workspace directory: %w", err)
-	}
-
-	// Step 7: Health check
-	s.onProgress("Running health check", 95)
-	if err := s.healthCheck(ctx); err != nil {
-		return fmt.Errorf("health check failed: %w", err)
-	}
-
-	s.onProgress("Environment ready", 100)
-	return nil
+	return s.SetupNewContainer(ctx, excludeDockerIDs)
 }
 
 // InitializeExisting reconnects to an existing container.

@@ -103,6 +103,21 @@ func (s *ContainerService) StartContainer(containerRegID string) error {
 	return s.sandboxService.ConnectExisting(containerRegID)
 }
 
+// CreateContainer creates a new container on the connected SSH host and activates it.
+func (s *ContainerService) CreateContainer() error {
+	return s.sandboxService.CreateAndActivateContainer()
+}
+
+// ActivateContainer switches the active container to a previously registered one.
+func (s *ContainerService) ActivateContainer(containerRegID string) error {
+	return s.sandboxService.ActivateContainer(containerRegID)
+}
+
+// DeactivateContainer detaches the active container without stopping it.
+func (s *ContainerService) DeactivateContainer() error {
+	return s.sandboxService.DeactivateContainer()
+}
+
 // DestroyContainer stops, removes, and unregisters a container.
 // Also removes the container from its owning session's container list.
 func (s *ContainerService) DestroyContainer(containerRegID string) error {

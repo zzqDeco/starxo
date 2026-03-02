@@ -56,9 +56,12 @@ type FileInfoDTO struct {
 
 // SandboxStatusDTO represents the current sandbox connection status.
 type SandboxStatusDTO struct {
-	SSHConnected  bool   `json:"sshConnected"`
-	DockerRunning bool   `json:"dockerRunning"`
-	ContainerID   string `json:"containerID"`
+	SSHConnected        bool   `json:"sshConnected"`
+	DockerRunning       bool   `json:"dockerRunning"`
+	ContainerID         string `json:"containerID"`
+	ActiveContainerID   string `json:"activeContainerID"`
+	ActiveContainerName string `json:"activeContainerName"`
+	DockerAvailable     bool   `json:"dockerAvailable"`
 }
 
 // SessionSwitchedEvent is emitted when the active session changes.
