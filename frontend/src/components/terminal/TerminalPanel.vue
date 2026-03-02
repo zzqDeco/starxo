@@ -1,19 +1,32 @@
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { TrashOutline } from '@vicons/ionicons5'
+import { TrashOutline, Cube } from '@vicons/ionicons5'
 import { useWailsEvent } from '@/composables/useWailsEvent'
+import { useConnectionStore } from '@/stores/connectionStore'
+import { useContainerStore } from '@/stores/containerStore'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+const connectionStore = useConnectionStore()
+const containerStore = useContainerStore()
 
 const terminalEl = ref<HTMLElement | null>(null)
 const lines = ref<Array<{ text: string; type: 'stdout' | 'stderr' | 'info' }>>([])
 const autoScroll = ref(true)
+const lineCount = ref(0)
 
 let termInstance: any = null
 let fitAddon: any = null
 let xtermLoaded = false
+
+const sshConnected = computed(() => connectionStore.sshConnected)
+const activeContainer = computed(() => containerStore.activeContainerID || '')
+
+function formatTime(): string {
+  const now = new Date()
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+}
 
 async function initXterm() {
   if (!terminalEl.value || xtermLoaded) return
@@ -62,9 +75,11 @@ async function initXterm() {
     fitAddon.fit()
     xtermLoaded = true
 
-    termInstance.writeln('\x1b[36m--- Starxo Terminal ---\x1b[0m')
-    termInstance.writeln('\x1b[90mWaiting for sandbox connection...\x1b[0m')
+    termInstance.writeln('\x1b[36m\x1b[1m  Starxo Terminal  \x1b[0m')
+    termInstance.writeln('\x1b[90m  AI Coding Agent v0.1.0\x1b[0m')
+    termInstance.writeln('\x1b[90m  Waiting for connection...\x1b[0m')
     termInstance.writeln('')
+    lineCount.value = 4
   } catch (e) {
     console.warn('xterm not available, falling back to simple terminal:', e)
     xtermLoaded = false
@@ -72,6 +87,7 @@ async function initXterm() {
 }
 
 function writeToTerminal(data: string, isError = false) {
+  lineCount.value++
   if (termInstance && xtermLoaded) {
     if (isError) {
       termInstance.writeln(`\x1b[31m${data}\x1b[0m`)
@@ -93,6 +109,7 @@ function writeToTerminal(data: string, isError = false) {
 }
 
 function clearTerminal() {
+  lineCount.value = 0
   if (termInstance && xtermLoaded) {
     termInstance.clear()
   } else {
@@ -108,16 +125,18 @@ useWailsEvent<{ stdout?: string; stderr?: string; exitCode?: number }>('terminal
   }
 })
 
-useWailsEvent('sandbox:ready', () => {
+useWailsEvent('container:ready', () => {
   if (termInstance && xtermLoaded) {
-    termInstance.writeln('\x1b[32m✓ Sandbox connected and ready.\x1b[0m')
+    termInstance.writeln(`\x1b[32m[${formatTime()}] Container connected and ready.\x1b[0m`)
     termInstance.writeln('')
+    lineCount.value += 2
   }
 })
 
-useWailsEvent<{ step: string; percent: number }>('sandbox:progress', (data) => {
+useWailsEvent<{ step: string; percent: number }>('container:progress', (data) => {
   if (termInstance && xtermLoaded) {
-    termInstance.writeln(`\x1b[36m[${data.percent}%] ${data.step}\x1b[0m`)
+    termInstance.writeln(`\x1b[36m[${formatTime()}] [${data.percent}%] ${data.step}\x1b[0m`)
+    lineCount.value++
   }
 })
 
@@ -180,6 +199,21 @@ onUnmounted(() => {
         </div>
       </template>
     </div>
+    <!-- Status Bar -->
+    <div class="terminal-status-bar">
+      <div class="status-left">
+        <span class="status-dot" :class="sshConnected ? 'connected' : 'disconnected'" />
+        <span class="status-label">{{ sshConnected ? 'SSH' : 'Disconnected' }}</span>
+        <template v-if="activeContainer">
+          <span class="status-sep">|</span>
+          <NIcon size="11"><Cube /></NIcon>
+          <span class="status-label">{{ activeContainer }}</span>
+        </template>
+      </div>
+      <div class="status-right">
+        <span class="line-count">{{ lineCount }} lines</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -237,6 +271,10 @@ onUnmounted(() => {
 
 .term-stderr {
   color: var(--accent-rose);
+  background: rgba(244, 63, 94, 0.06);
+  border-left: 2px solid var(--accent-rose);
+  padding-left: 8px;
+  margin-left: -8px;
 }
 
 .term-info {
@@ -247,5 +285,63 @@ onUnmounted(() => {
   color: var(--text-faint);
   font-style: italic;
   padding: 12px 4px;
+}
+
+/* Status Bar */
+.terminal-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.status-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.status-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.connected {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.status-dot.disconnected {
+  background: var(--text-faint);
+}
+
+.status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-sep {
+  color: var(--border-subtle);
+}
+
+.line-count {
+  color: var(--text-faint);
 }
 </style>
