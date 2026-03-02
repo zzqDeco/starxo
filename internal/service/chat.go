@@ -241,6 +241,9 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 	var transferCount int
 	lastContentByAgent := make(map[string]string) // dedup
 
+	// Track pending tool_call_ids to detect orphans (tool calls without results)
+	pendingToolCalls := make(map[string]bool)
+
 	// Debounced intermediate save: persist at most once per 10 seconds during agent execution
 	var lastSaveTime time.Time
 	maybeSave := func() {
@@ -354,6 +357,10 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 					})
 				}
 				s.mu.Unlock()
+				// Track pending tool call IDs
+				for _, tc := range msg.ToolCalls {
+					pendingToolCalls[tc.ID] = true
+				}
 				continue // Don't fall through to allContents — tool call content is already stored
 			}
 
@@ -379,6 +386,8 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 					s.ctxEngine.AddToolResult(msg.ToolCallID, msg.Content)
 				}
 				s.mu.Unlock()
+				// Mark this tool call as resolved
+				delete(pendingToolCalls, msg.ToolCallID)
 
 				// Debounced intermediate save
 				maybeSave()
@@ -414,6 +423,22 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 				}
 			}
 		}
+	}
+
+	// Fix orphaned tool calls: inject synthetic error responses for any tool_call_ids
+	// that were stored but never received a matching tool result. This prevents the
+	// OpenAI API from rejecting the next request with "tool_calls must be followed by
+	// tool messages responding to each tool_call_id".
+	if len(pendingToolCalls) > 0 {
+		s.mu.Lock()
+		if s.ctxEngine != nil {
+			for toolCallID := range pendingToolCalls {
+				logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
+					"tool_call_id", toolCallID)
+				s.ctxEngine.AddToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+			}
+		}
+		s.mu.Unlock()
 	}
 
 	return strings.Join(allContents, "\n\n"), transferCount, false
