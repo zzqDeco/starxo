@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { NButton, NInput, NCard } from 'naive-ui'
 import { useChatStore } from '@/stores/chatStore'
 import { ResumeWithAnswer, ResumeWithChoice, StopGeneration } from '../../../wailsjs/go/service/ChatService'
@@ -8,7 +8,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 const chatStore = useChatStore()
 
-const answerText = ref('')
+const answers = ref<string[]>([])
 const selectedIndex = ref(-1)
 const isSubmitting = ref(false)
 
@@ -16,14 +16,36 @@ const interrupt = computed(() => chatStore.pendingInterrupt)
 const isFollowUp = computed(() => interrupt.value?.type === 'followup')
 const isChoice = computed(() => interrupt.value?.type === 'choice')
 
+// Initialize per-question answer slots when interrupt changes
+watch(interrupt, (val) => {
+  if (val?.type === 'followup' && val.questions) {
+    answers.value = new Array(val.questions.length).fill('')
+  } else {
+    answers.value = []
+  }
+}, { immediate: true })
+
+const canSubmit = computed(() => answers.value.some(a => a.trim()))
+
 async function submitAnswer() {
-  if (!answerText.value.trim() || isSubmitting.value) return
+  if (!canSubmit.value || isSubmitting.value) return
   isSubmitting.value = true
   try {
+    const questions = interrupt.value!.questions!
+    let combined: string
+    if (questions.length === 1) {
+      // Single question: send answer directly
+      combined = answers.value[0].trim()
+    } else {
+      // Multiple questions: structured format
+      combined = questions
+        .map((q, i) => `${i + 1}. ${q}\nAnswer: ${answers.value[i]?.trim() || '(no answer)'}`)
+        .join('\n\n')
+    }
     chatStore.clearInterrupt()
     chatStore.setGenerating(true)
-    await ResumeWithAnswer(answerText.value.trim())
-    answerText.value = ''
+    await ResumeWithAnswer(combined)
+    answers.value = []
   } catch (e) {
     console.error('Failed to resume with answer:', e)
     chatStore.setGenerating(false)
@@ -83,19 +105,18 @@ function handleKeydown(e: KeyboardEvent) {
             class="question-item"
           >
             <span class="question-number">{{ i + 1 }}</span>
-            <span class="question-text">{{ q }}</span>
+            <div class="question-content">
+              <span class="question-text">{{ q }}</span>
+              <NInput
+                v-model:value="answers[i]"
+                type="textarea"
+                :placeholder="t('interrupt.answerPlaceholder')"
+                :autosize="{ minRows: 1, maxRows: 4 }"
+                :disabled="isSubmitting"
+                @keydown="handleKeydown"
+              />
+            </div>
           </div>
-        </div>
-
-        <div class="answer-area">
-          <NInput
-            v-model:value="answerText"
-            type="textarea"
-            :placeholder="t('interrupt.typeAnswer')"
-            :autosize="{ minRows: 2, maxRows: 6 }"
-            @keydown="handleKeydown"
-            :disabled="isSubmitting"
-          />
         </div>
 
         <div class="interrupt-actions">
@@ -111,7 +132,7 @@ function handleKeydown(e: KeyboardEvent) {
             type="primary"
             size="small"
             @click="submitAnswer"
-            :disabled="!answerText.trim() || isSubmitting"
+            :disabled="!canSubmit || isSubmitting"
             :loading="isSubmitting"
           >
             {{ t('interrupt.submitAnswer') }}
@@ -260,24 +281,28 @@ function handleKeydown(e: KeyboardEvent) {
   margin-top: 1px;
 }
 
+.question-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .question-text {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
 }
 
-.answer-area {
-  margin-bottom: 12px;
-}
-
-.answer-area :deep(textarea) {
+.question-content :deep(textarea) {
   font-size: 13px !important;
-  background: var(--bg-surface) !important;
+  background: var(--bg-deepest) !important;
   border-color: var(--border-subtle) !important;
   border-radius: var(--radius-md) !important;
 }
 
-.answer-area :deep(textarea:focus) {
+.question-content :deep(textarea:focus) {
   border-color: var(--accent-cyan-dim) !important;
 }
 

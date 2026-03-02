@@ -17,6 +17,7 @@
 - 输出结果: 响应式状态供 ChatPanel、MessageBubble、InterruptDialog、PlanPanel 等组件消费
 
 ## 4. 关键实现细节
+- **导出类型**: `TodoItem` 接口 — id, title, status (pending/in_progress/done/failed/blocked), depends_on?: string[]
 - **State 属性**:
   - `messages: Message[]` — 消息列表
   - `isStreaming: boolean` — 是否正在流式生成
@@ -26,18 +27,20 @@
   - `pendingInterrupt: InterruptEvent | null` — 待处理的中断事件
   - `agentMode: 'default' | 'plan'` — 当前代理模式
   - `planSteps: PlanStepDTO[]` — 计划步骤列表
+  - `latestTodos: TodoItem[]` — 最新 Todo 任务快照，从 write_todos/update_todo 工具事件中提取，供 ChatPanel 常驻 TodoBoard 消费
 - **Getters**:
   - `lastMessage` — 最后一条消息
   - `visibleMessages` — 过滤掉无内容且无事件的空助手消息
   - `hasInterrupt` — 是否有待处理中断
 - **Actions**:
   - `getOrCreateTurn()` — 获取或创建当前助手回复消息，实现"一轮对话一个消息"模型
-  - `addTimelineEvent(evt)` — 核心方法，处理 stream_chunk（累积到已有流式消息）、stream_end（标记流式结束）、tool_result（匹配到对应 tool_call）等事件类型
+  - `addTimelineEvent(evt)` — 核心方法，处理 stream_chunk（累积到已有流式消息）、stream_end（标记流式结束）、tool_result（匹配到对应 tool_call 并调用 tryUpdateTodosFromResult）、tool_call(write_todos) 时提取 todos 到 latestTodos
+  - `tryUpdateTodosFromResult(evt)` — 从 update_todo 工具结果中解析更新后的 todos 快照（以 `---\n` 分隔，取最后部分 JSON 解析）
   - `addUserMessage(content)` — 添加用户消息并重置轮次状态
   - `setInterrupt(evt)` / `clearInterrupt()` — 中断状态管理
   - `updatePlanSteps(steps)` / `setMode(mode)` — 计划模式管理
   - `setGenerating(generating, agent?)` — 更新生成状态
-  - `clearMessages()` — 清空所有状态
+  - `clearMessages()` — 清空所有状态（含 latestTodos）
 
 ## 5. 依赖关系
 - 内部依赖: `@/types/message` (Message, TurnEvent, InterruptEvent, PlanStepDTO)
@@ -48,6 +51,7 @@
 - 修改中断状态影响 InterruptDialog 组件
 - 修改计划步骤影响 PlanPanel 组件
 - `visibleMessages` 过滤逻辑影响 ChatPanel 消息列表显示
+- `latestTodos` 状态影响 ChatPanel 中常驻 TodoBoard 的显示
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

@@ -1,9 +1,9 @@
 <script lang="ts" setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { NIcon } from 'naive-ui'
 import {
   CheckmarkCircle, EllipseOutline, Reload, CloseCircle,
-  LockClosed, ArrowForward
+  LockClosed, ArrowForward, ChevronDown, ChevronForward
 } from '@vicons/ionicons5'
 
 export interface TodoItem {
@@ -13,9 +13,16 @@ export interface TodoItem {
   depends_on?: string[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   todos: TodoItem[]
-}>()
+  compact?: boolean
+}>(), { compact: false })
+
+const isExpanded = ref(false)
+
+function toggleExpand() {
+  isExpanded.value = !isExpanded.value
+}
 
 // Build adjacency info for rendering
 const todoMap = computed(() => {
@@ -105,9 +112,9 @@ const progressPercent = computed(() => {
 </script>
 
 <template>
-  <div class="todo-board">
+  <div class="todo-board" :class="{ compact }">
     <!-- Header with progress -->
-    <div class="todo-header">
+    <div class="todo-header" :class="{ clickable: compact }" @click="compact && toggleExpand()">
       <span class="todo-title">Task Progress</span>
       <span class="todo-progress">{{ progressPercent }}%</span>
       <div class="todo-progress-bar">
@@ -118,10 +125,14 @@ const progressPercent = computed(() => {
           {{ count }} {{ (status as string).replace('_', ' ') }}
         </span>
       </div>
+      <NIcon v-if="compact" size="12" class="expand-toggle" :style="{ color: '#5a5c72' }">
+        <ChevronDown v-if="isExpanded" />
+        <ChevronForward v-else />
+      </NIcon>
     </div>
 
     <!-- DAG layers -->
-    <div class="todo-layers">
+    <div v-if="!compact || isExpanded" class="todo-layers">
       <div v-for="(layer, li) in layers" :key="li" class="todo-layer">
         <div class="layer-connector" v-if="li > 0">
           <NIcon size="10" color="#5a5c72"><ArrowForward /></NIcon>
@@ -318,5 +329,37 @@ const progressPercent = computed(() => {
   font-family: var(--font-mono);
   color: var(--text-faint);
   flex-shrink: 0;
+}
+
+/* Compact mode */
+.todo-board.compact {
+  background: var(--bg-surface);
+  border-color: var(--border-subtle);
+  padding: 6px 10px;
+  margin: 4px 0;
+}
+
+.todo-board.compact .todo-header {
+  margin-bottom: 0;
+}
+
+.todo-board.compact .todo-layers {
+  margin-top: 8px;
+}
+
+.todo-header.clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 150ms ease;
+}
+
+.todo-header.clickable:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.expand-toggle {
+  flex-shrink: 0;
+  margin-left: 4px;
+  transition: transform 150ms ease;
 }
 </style>

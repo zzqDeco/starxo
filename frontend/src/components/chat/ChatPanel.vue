@@ -9,6 +9,7 @@ import MessageBubble from './MessageBubble.vue'
 import InputArea from './InputArea.vue'
 import InterruptDialog from './InterruptDialog.vue'
 import PlanPanel from './PlanPanel.vue'
+import TodoBoard from './TodoBoard.vue'
 import AgentStatus from '@/components/status/AgentStatus.vue'
 import { SendMessage, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
@@ -161,6 +162,13 @@ function handleStop() {
     <!-- Interrupt Dialog (overlays above input) -->
     <InterruptDialog />
 
+    <!-- Persistent Todo Panel -->
+    <Transition name="todo-panel">
+      <div v-if="chatStore.latestTodos.length > 0" class="persistent-todo">
+        <TodoBoard :todos="chatStore.latestTodos" compact />
+      </div>
+    </Transition>
+
     <!-- Input Area -->
     <InputArea
       :is-streaming="chatStore.isStreaming"
@@ -306,6 +314,26 @@ function handleStop() {
 
 .scroll-btn-enter-from,
 .scroll-btn-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+/* Persistent todo panel */
+.persistent-todo {
+  flex-shrink: 0;
+  padding: 0 24px 4px;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.todo-panel-enter-active,
+.todo-panel-leave-active {
+  transition: all 200ms ease;
+}
+
+.todo-panel-enter-from,
+.todo-panel-leave-to {
   opacity: 0;
   transform: translateY(8px);
 }

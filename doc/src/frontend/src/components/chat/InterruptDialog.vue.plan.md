@@ -23,10 +23,11 @@
   - `ResumeWithChoice(index)` — 提交选择的选项索引
   - `StopGeneration()` — 取消中断
 - **交互逻辑**:
-  - followup: 显示问题列表 + 文本输入框，Enter 提交
+  - followup: 显示问题列表，每个问题下方有独立的文本输入框（`answers: ref<string[]>([])`），支持多问题分别回答。单问题直接提交文本，多问题组合为结构化格式（`1. 问题\nAnswer: 回答`）
   - choice: 显示选项卡片列表，点击即提交
   - 取消: 点击背景或取消按钮，清除中断并停止生成
   - 提交中: isSubmitting 状态锁防止重复提交
+  - watch 监听 interrupt 变化，自动初始化 answers 数组长度匹配问题数量
 - **模板结构**: 固定定位背景遮罩 → NCard 对话框 → 条件渲染 followup 或 choice 模板
 
 ## 5. 依赖关系

@@ -65,6 +65,12 @@ export default {
     typeAnswer: '输入你的回答...',
     submitAnswer: '提交回答',
     chooseOption: '请选择一个选项',
+    answerPlaceholder: '输入回答...',
+  },
+  todo: {
+    taskProgress: '任务进度',
+    collapse: '收起',
+    expand: '展开',
   },
   plan: {
     title: '执行计划',

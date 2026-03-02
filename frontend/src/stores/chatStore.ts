@@ -2,6 +2,13 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Message, TurnEvent, InterruptEvent, PlanStepDTO } from '@/types/message'
 
+export interface TodoItem {
+  id: string
+  title: string
+  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'blocked'
+  depends_on?: string[]
+}
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([])
   const isStreaming = ref(false)
@@ -15,6 +22,9 @@ export const useChatStore = defineStore('chat', () => {
   // Plan mode state
   const agentMode = ref<'default' | 'plan'>('default')
   const planSteps = ref<PlanStepDTO[]>([])
+
+  // Persistent todo state (latest snapshot)
+  const latestTodos = ref<TodoItem[]>([])
 
   const lastMessage = computed(() =>
     messages.value.length > 0 ? messages.value[messages.value.length - 1] : null
@@ -110,12 +120,41 @@ export const useChatStore = defineStore('chat', () => {
       for (let i = turn.events.length - 1; i >= 0; i--) {
         if (turn.events[i].type === 'tool_call' && turn.events[i].toolId === evt.toolId) {
           turn.events[i].toolResult = evt.content
+          tryUpdateTodosFromResult(evt)
           return
         }
       }
     }
 
+    // Extract latest todo state from todo tool events
+    if (evt.type === 'tool_call' && evt.toolName === 'write_todos') {
+      try {
+        const args = JSON.parse(evt.toolArgs || '{}')
+        if (args?.todos && Array.isArray(args.todos)) {
+          latestTodos.value = args.todos
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
     turn.events.push(evt)
+  }
+
+  /** Update latestTodos when a tool_result for update_todo arrives */
+  function tryUpdateTodosFromResult(evt: TurnEvent) {
+    if (evt.type !== 'tool_result' || !evt.toolId) return
+    const turn = getOrCreateTurn()
+    for (let i = turn.events.length - 1; i >= 0; i--) {
+      if (turn.events[i].toolId === evt.toolId && turn.events[i].toolName === 'update_todo') {
+        const parts = evt.content.split('---\n')
+        if (parts.length >= 2) {
+          try {
+            const todos = JSON.parse(parts[parts.length - 1])
+            if (Array.isArray(todos)) latestTodos.value = todos
+          } catch { /* ignore */ }
+        }
+        break
+      }
+    }
   }
 
   /** Set interrupt state from agent:interrupt event */
@@ -158,6 +197,7 @@ export const useChatStore = defineStore('chat', () => {
     activeTurnId.value = null
     pendingInterrupt.value = null
     planSteps.value = []
+    latestTodos.value = []
   }
 
   return {
@@ -172,6 +212,7 @@ export const useChatStore = defineStore('chat', () => {
     lastMessage,
     visibleMessages,
     hasInterrupt,
+    latestTodos,
     addMessage,
     addUserMessage,
     addTimelineEvent,

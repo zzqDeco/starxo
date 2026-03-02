@@ -65,6 +65,12 @@ export default {
     typeAnswer: 'Type your answer...',
     submitAnswer: 'Submit Answer',
     chooseOption: 'Please choose an option',
+    answerPlaceholder: 'Type your answer...',
+  },
+  todo: {
+    taskProgress: 'Task Progress',
+    collapse: 'Collapse',
+    expand: 'Expand',
   },
   plan: {
     title: 'Execution Plan',

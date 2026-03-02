@@ -30,12 +30,13 @@
   - AgentStatus: isStreaming 时显示
   - 滚动到底部按钮: 非底部时显示，带闪烁动画提示新消息
   - InterruptDialog: 始终渲染（内部根据 interrupt 状态决定是否显示）
+  - TodoBoard (persistent): 当 `chatStore.latestTodos.length > 0` 时在输入区域上方常驻显示，使用 compact 模式，带 todo-panel 过渡动画
   - InputArea: 底部输入框，接收 send/stop 事件
 - **自动滚动逻辑**: 监听 messages.length 和最后消息的 events.length 变化，autoScroll 模式下自动滚动到底部
 - **提示卡片**: 点击 hint-card 会将国际化文本作为消息发送
 
 ## 5. 依赖关系
-- 内部依赖: `@/stores/chatStore`、`@/stores/connectionStore`、`@/composables/useHelpers` (useAutoScroll)、`./MessageBubble.vue`、`./InputArea.vue`、`./InterruptDialog.vue`、`./PlanPanel.vue`、`@/components/status/AgentStatus.vue`
+- 内部依赖: `@/stores/chatStore`、`@/stores/connectionStore`、`@/composables/useHelpers` (useAutoScroll)、`./MessageBubble.vue`、`./InputArea.vue`、`./InterruptDialog.vue`、`./PlanPanel.vue`、`./TodoBoard.vue`、`@/components/status/AgentStatus.vue`
 - 外部依赖: `vue` (ref, watch, nextTick, computed)、`naive-ui` (NIcon)、`@vicons/ionicons5` (ArrowDown)、`vue-i18n` (useI18n)
 - Wails 绑定: `wailsjs/go/service/ChatService` (SendMessage, StopGeneration)
 
