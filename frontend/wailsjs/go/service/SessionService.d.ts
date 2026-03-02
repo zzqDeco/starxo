@@ -37,6 +37,8 @@ export function SetContext(arg1:context.Context):Promise<void>;
 
 export function SetCtxEngine(arg1:agentctx.Engine):Promise<void>;
 
+export function SetOnDestroyContainer(arg1:any):Promise<void>;
+
 export function SetOnSessionSwitch(arg1:any):Promise<void>;
 
 export function SwitchSession(arg1:string):Promise<void>;

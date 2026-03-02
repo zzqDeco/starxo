@@ -24,4 +24,6 @@ export function SetOnConnect(arg1:any):Promise<void>;
 
 export function SetOnContainerBound(arg1:any):Promise<void>;
 
+export function SetSessionService(arg1:service.SessionService):Promise<void>;
+
 export function StartHealthMonitor(arg1:context.Context):Promise<void>;

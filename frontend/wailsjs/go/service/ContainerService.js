@@ -18,6 +18,10 @@ export function SetContext(arg1) {
   return window['go']['service']['ContainerService']['SetContext'](arg1);
 }
 
+export function SetSessionService(arg1) {
+  return window['go']['service']['ContainerService']['SetSessionService'](arg1);
+}
+
 export function StartContainer(arg1) {
   return window['go']['service']['ContainerService']['StartContainer'](arg1);
 }

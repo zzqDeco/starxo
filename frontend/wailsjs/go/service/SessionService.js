@@ -66,6 +66,10 @@ export function SetCtxEngine(arg1) {
   return window['go']['service']['SessionService']['SetCtxEngine'](arg1);
 }
 
+export function SetOnDestroyContainer(arg1) {
+  return window['go']['service']['SessionService']['SetOnDestroyContainer'](arg1);
+}
+
 export function SetOnSessionSwitch(arg1) {
   return window['go']['service']['SessionService']['SetOnSessionSwitch'](arg1);
 }

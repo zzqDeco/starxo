@@ -42,6 +42,10 @@ export function SetOnContainerBound(arg1) {
   return window['go']['service']['SandboxService']['SetOnContainerBound'](arg1);
 }
 
+export function SetSessionService(arg1) {
+  return window['go']['service']['SandboxService']['SetSessionService'](arg1);
+}
+
 export function StartHealthMonitor(arg1) {
   return window['go']['service']['SandboxService']['StartHealthMonitor'](arg1);
 }
