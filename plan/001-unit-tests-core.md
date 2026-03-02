@@ -19,12 +19,12 @@
 
 ## 具体任务
 
-- [ ] 添加 `github.com/stretchr/testify` 依赖到 go.mod
-- [ ] `internal/config/config_test.go`: 测试 DefaultConfig() 返回值、JSON 序列化/反序列化往返一致性
-- [ ] `internal/model/session_test.go`: 测试 Session 构造、字段验证、零值处理
-- [ ] `internal/model/container_test.go`: 测试 Container 状态转换（Created → Running → Stopped）
-- [ ] `internal/store/checkpoint_test.go`: 测试 Set/Get/Delete 基本操作、并发安全（goroutine 竞争）
-- [ ] `internal/context/windowing_test.go`: 测试 WindowMessages 截断逻辑、空输入、超长消息、边界条件
+- [x] 添加 `github.com/stretchr/testify` 依赖到 go.mod
+- [x] `internal/config/config_test.go`: 测试 DefaultConfig() 返回值、JSON 序列化/反序列化往返一致性
+- [x] `internal/model/session_test.go`: 测试 Session 构造、字段验证、零值处理
+- [x] `internal/model/container_test.go`: 测试 Container 状态转换（Created → Running → Stopped）
+- [x] `internal/store/checkpoint_test.go`: 测试 Set/Get/Delete 基本操作、并发安全（goroutine 竞争）
+- [x] `internal/context/windowing_test.go`: 测试 WindowMessages 截断逻辑、空输入、超长消息、边界条件
 
 ## 涉及文件
 
@@ -41,4 +41,4 @@
 
 ## 状态
 
-待实施
+已完成
