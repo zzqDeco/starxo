@@ -23,6 +23,7 @@
   - `WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Message` — 对消息列表应用窗口化策略
   - `TruncateContent(content string, maxLen int) string` — 智能截断单条消息内容
 - 未导出函数:
+  - `adjustForToolCallGroups(messages []*schema.Message, tailStart int) int` — 调整窗口裁剪点，避免将 tool call 组（assistant ToolCalls + 后续 tool result 消息）拆分到不同窗口，防止 LLM API 报 "No tool output found" 错误
   - `truncateAll(messages []*schema.Message, maxContentLen int) []*schema.Message` — 批量截断所有消息
   - `truncateMsg(msg *schema.Message, maxContentLen int) *schema.Message` — 截断单条消息（无需截断时返回原指针）
 - Wails 绑定方法: 无
@@ -30,6 +31,7 @@
 - 窗口化算法:
   1. 消息总数 <= MaxMessages: 仅截断超长内容
   2. 消息总数 > MaxMessages: 保留第 1 条 + 最后 (MaxMessages-1) 条，中间插入省略占位符
+  3. 裁剪点自动调整: 若 tailStart 落在 tool result 消息上，向前移动以保留完整的 tool call 组（assistant ToolCalls + tool results）
 - 内容截断算法: 保留前 60% + `...[truncated]...` 标记 + 后 20%
 
 ## 5. 依赖关系

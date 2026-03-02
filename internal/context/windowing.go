@@ -55,6 +55,11 @@ func WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Mess
 	if tailStart < 1 {
 		tailStart = 1
 	}
+
+	// Adjust tailStart to avoid splitting tool call groups.
+	// A tool call group = assistant message with ToolCalls + subsequent tool result messages.
+	tailStart = adjustForToolCallGroups(messages, tailStart)
+
 	omitted := tailStart - 1 // number of messages dropped (between first and tail)
 
 	result := make([]*schema.Message, 0, 1+1+keepTail)
@@ -72,6 +77,22 @@ func WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Mess
 	}
 
 	return result
+}
+
+// adjustForToolCallGroups ensures the window cut point does not land inside
+// a tool call group (assistant message with ToolCalls + its tool result messages).
+// If tailStart points to a tool result message, it moves backward to include
+// the entire group.
+func adjustForToolCallGroups(messages []*schema.Message, tailStart int) int {
+	if tailStart <= 1 || tailStart >= len(messages) {
+		return tailStart
+	}
+	// If the message at tailStart is a tool result, scan backward past all
+	// consecutive tool results to find the group's assistant+ToolCalls start.
+	for tailStart > 1 && messages[tailStart].Role == schema.Tool {
+		tailStart--
+	}
+	return tailStart
 }
 
 // TruncateContent truncates content that exceeds maxLen, keeping the first 60%

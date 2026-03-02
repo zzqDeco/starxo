@@ -354,6 +354,7 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 					})
 				}
 				s.mu.Unlock()
+				continue // Don't fall through to allContents — tool call content is already stored
 			}
 
 			// Emit tool result events
