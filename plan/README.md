@@ -1,22 +1,24 @@
-# Starxo 未来更新计划
+# Starxo 开发计划索引
 
-本目录包含 Starxo 项目的未来开发方向和路线图文档。
+## 状态图例
 
-## 文档索引
+| 标记 | 含义 |
+|------|------|
+| 待实施 | 尚未开始 |
+| 进行中 | 正在实施 |
+| 已完成 | 已完成并验证 |
 
-| 文件 | 主题 | 说明 |
-|------|------|------|
-| [testing-strategy.md](testing-strategy.md) | 测试策略路线图 | 从零开始建立完整的测试基础设施，覆盖单元测试、集成测试、前端测试和 E2E 测试 |
-| [plugin-system.md](plugin-system.md) | 插件/扩展体系 | 设计用户可扩展的插件系统，支持自定义工具注册、插件发现加载和安全隔离 |
-| [multi-agent-improvements.md](multi-agent-improvements.md) | 多 Agent 架构增强 | 增强现有 deep agent 架构，支持动态子 Agent 配置、并行执行和上下文共享 |
-| [ui-enhancements.md](ui-enhancements.md) | UI/UX 改进 | 改善文件浏览、代码 diff 查看、计划可视化、主题定制等用户体验 |
-| [performance-optimization.md](performance-optimization.md) | 性能与可靠性 | 优化上下文窗口管理、SSH 连接池、流式性能和长会话稳定性 |
-| [security-hardening.md](security-hardening.md) | 安全加固 | 加密凭证存储、SSH 密钥管理、容器安全隔离和操作审计 |
-| [session-management.md](session-management.md) | 会话管理增强 | 支持会话导出导入、搜索过滤、对话分支和持久化检查点存储 |
+## 计划文档
 
-## 优先级说明
-
-- **P0 (紧急)**：影响基本可用性和安全性的问题
-- **P1 (高)**：显著提升用户体验或开发效率的功能
-- **P2 (中)**：改善项目质量和可维护性的增强
-- **P3 (低)**：面向未来的前瞻性功能
+| 编号 | 文件 | 描述 | 预估 | 状态 |
+|------|------|------|------|------|
+| 001 | [unit-tests-core](001-unit-tests-core.md) | Go 核心包单元测试，建立测试基础 | 1 天 | 待实施 |
+| 002 | [credential-encryption](002-credential-encryption.md) | 凭证加密存储，替换明文敏感字段 | 1-2 天 | 待实施 |
+| 003 | [ssh-host-key-verify](003-ssh-host-key-verify.md) | SSH Host Key 验证，实现 TOFU | 1 天 | 待实施 |
+| 004 | [ssh-keepalive](004-ssh-keepalive.md) | SSH 连接保活，防止空闲断连 | 0.5 天 | 待实施 |
+| 005 | [checkpoint-persistence](005-checkpoint-persistence.md) | 检查点持久化，防止重启丢失 | 1 天 | 待实施 |
+| 006 | [keyboard-shortcuts](006-keyboard-shortcuts.md) | 键盘快捷键，提升操作效率 | 0.5 天 | 待实施 |
+| 007 | [session-search](007-session-search.md) | 会话搜索，侧边栏搜索过滤 | 0.5 天 | 待实施 |
+| 008 | [audit-log](008-audit-log.md) | 操作审计日志，记录关键操作 | 1 天 | 待实施 |
+| 009 | [event-batching](009-event-batching.md) | 事件流批处理，减少渲染压力 | 1 天 | 待实施 |
+| 010 | [conversation-limits](010-conversation-limits.md) | 对话硬限制，防止内存泄漏 | 0.5 天 | 待实施 |

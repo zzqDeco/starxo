@@ -155,3 +155,18 @@ Examples:
 - Frontend tests: Vitest for unit tests, Playwright for E2E
 - Test file naming: `<source>_test.go` (Go), `<source>.test.ts` (TS)
 - No test infrastructure exists yet; see `plan/testing-strategy.md` for the roadmap
+
+### Development Workflow
+
+Every feature, fix, or improvement follows a plan-first, doc-synced workflow:
+
+1. **Plan** — Create or update a plan document in `plan/` describing the goal, scope, and approach
+2. **Select** — Choose specific items from the plan to implement in the current iteration
+3. **Implement** — Write code on a feature branch following the conventions above
+4. **Sync Docs** — Update all affected documentation:
+   - `doc/src/<file>.plan.md` for any modified source files (keep the 7-section template in sync)
+   - `doc/` project-level docs if business rules, interfaces, or flows changed
+   - `doc/files.index.plan.md` and `doc/files.coverage.plan.md` if files were added/removed
+   - `README.md` / `README_CN.md` if user-facing features or config changed
+5. **Verify** — Run `wails dev`, manually verify the changes work correctly
+6. **Commit & Push** — Commit with conventional commit messages, push to remote
