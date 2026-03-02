@@ -60,6 +60,7 @@ func BuildDeepAgent(ctx context.Context, mdl model.ToolCallingChatModel,
 				Tools: directTools,
 			},
 		},
-		MaxIteration: 50,
+		MaxIteration:     50,
+		WithoutWriteTodos: true,
 	})
 }

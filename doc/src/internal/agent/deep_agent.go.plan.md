@@ -33,7 +33,9 @@
   - `github.com/cloudwego/eino/components/model`: LLM 模型接口
   - `github.com/cloudwego/eino/components/tool`: 工具接口
   - `github.com/cloudwego/eino/compose`: 组合配置
-- 关键配置: `MaxIteration: 50`（深度代理最大迭代次数）
+- 关键配置:
+  - `MaxIteration: 50`（深度代理最大迭代次数）
+  - `WithoutWriteTodos: true`（禁用 Eino 框架内置的 write_todos 工具，使用 starxo 自定义实现，含 DAG 验证和前端渲染）
 
 ## 6. 变更影响面
 - 修改子代理列表会影响代理的任务委派能力
