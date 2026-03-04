@@ -36,12 +36,14 @@ No test infrastructure exists yet.
 
 Go services are bound in `main.go` and auto-generate TypeScript bindings in `frontend/wailsjs/go/service/`. Frontend calls Go directly via these bindings (e.g., `ChatService.SendMessage()`).
 
-Backend-to-frontend communication uses Wails events (`wailsruntime.EventsEmit`). Key channels:
+Backend-to-frontend communication uses Wails events (`wailsruntime.EventsEmit`). All agent events carry `sessionId` for multi-session isolation — frontend filters events by active session. Key channels:
 - `agent:timeline` — unified stream for all agent activity (messages, tool calls, file transfers)
 - `agent:interrupt` — pauses agent for user input (follow-up questions, choices)
 - `agent:done`, `agent:error` — agent lifecycle
 - `agent:plan`, `agent:mode_changed` — plan execution state
-- `sandbox:progress`, `sandbox:ready`, `sandbox:disconnected` — sandbox lifecycle
+- `session:switched` — session switch with full live state snapshot (agentRunning, mode, interrupt)
+- `ssh:progress`, `ssh:connected`, `ssh:disconnected` — SSH connection lifecycle
+- `container:progress`, `container:ready`, `container:activated`, `container:deactivated` — container lifecycle
 
 ### Agent Architecture (Deep Agent Pattern)
 
@@ -58,6 +60,17 @@ Agent construction: `internal/agent/deep_agent.go` (orchestrator), individual su
 
 Tools like `ask_user` and `ask_choice` use `tool.StatefulInterrupt` to pause execution. Frontend shows a dialog, user responds, and `ResumeWithAnswer()`/`ResumeWithChoice()` continues via `runner.ResumeWithParams()`. State preserved in `InMemoryStore` (implements `compose.CheckPointStore`).
 
+### Multi-Session Execution Model
+
+`ChatService` supports multiple sessions running agents concurrently. Each session has its own `SessionRun` holding isolated state (ctxEngine, timeline, streaming, interrupts, mode). Runners and agents are shared across sessions (Eino ADK Runner is concurrent-safe — each `.Run()` creates independent per-call state).
+
+Key patterns:
+- **Per-session isolation**: `map[string]*SessionRun` indexed by sessionID — switching sessions does NOT cancel running agents
+- **Same-session guard**: Within one session, concurrent agent runs are rejected (`"agent is already running"`)
+- **SessionID propagation**: `context.WithValue` carries sessionID through tool execution chain → events tagged with `sessionId`
+- **Lock-gap elimination**: `buildRunnersLocked()` called under lock from `SendMessage` to prevent race with `InvalidateRunner()`
+- **Concurrency safety**: `SandboxService` uses `sync.RWMutex` on all public methods; `ChatService` uses `sync.Mutex` for session map access
+
 ### Sandbox Management
 
 `internal/sandbox/manager.go` coordinates: SSH connection → Docker container management → `RemoteOperator` (implements `commandline.Operator` over SSH+Docker exec) + `FileTransfer` (SFTP + docker cp). Small files use base64-encoded docker exec; large files (>64KB) use SFTP.
@@ -67,7 +80,7 @@ Tools like `ask_user` and `ask_choice` use `tool.StatefulInterrupt` to pause exe
 All persistent data at `~/.starxo/`:
 - `config.json` — app settings (SSH, Docker, LLM, MCP configs)
 - `containers.json` — container registry
-- `sessions/{id}/` — session.json, messages.json, display.json
+- `sessions/{id}/` — session.json (metadata), session_data.json (unified messages + display + streaming), messages.json/display.json (legacy fallback)
 
 ### Frontend State
 

@@ -15,8 +15,9 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
-- **Real-time Event Stream** — Unified `agent:timeline` event stream via Wails Events for live agent activity display
-- **Session Persistence** — Full session management with message history and rich timeline event storage
+- **Real-time Event Stream** — Unified `agent:timeline` event stream via Wails Events for live agent activity display, all events tagged with `sessionId` for multi-session isolation
+- **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
+- **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
 - **File Transfer** — Upload/download support; small files via base64 + docker exec, large files via SFTP + docker cp
 
 ## Tech Stack
@@ -69,9 +70,9 @@ starxo/
 │   │   └── tool_wrapper.go          #   eventEmittingTool wrapper
 │   │
 │   ├── service/                     # Wails-bound services (frontend API)
-│   │   ├── chat.go                  #   ChatService: agent lifecycle, messaging, streaming
-│   │   ├── sandbox_svc.go           #   SandboxService: connect/disconnect/reconnect, health monitor
-│   │   ├── session_svc.go           #   SessionService: session CRUD
+│   │   ├── chat.go                  #   ChatService: per-session agent lifecycle (SessionRun), messaging, streaming
+│   │   ├── sandbox_svc.go           #   SandboxService: connect/disconnect/reconnect, health monitor (RWMutex)
+│   │   ├── session_svc.go           #   SessionService: session CRUD, multi-session state coordination
 │   │   ├── settings_svc.go         #   SettingsService: config management, connection testing
 │   │   ├── file_svc.go              #   FileService: upload/download/preview
 │   │   ├── container_svc.go         #   ContainerService: container lifecycle
@@ -185,8 +186,9 @@ All persistent data is stored under `~/.starxo/`:
 └── sessions/
     └── {session-id}/
         ├── session.json       # Session metadata
-        ├── messages.json      # Conversation history (Eino schema)
-        └── display.json       # Rich display data (timeline events)
+        ├── session_data.json  # Unified session data (messages + display + streaming)
+        ├── messages.json      # Conversation history - legacy fallback
+        └── display.json       # Rich display data - legacy fallback
 ```
 
 ## Documentation
