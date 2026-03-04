@@ -22,6 +22,7 @@
   - `UpdateTodoInput` — `update_todo` 工具输入，包含 `ID`、`Status`、可选 `Title`
   - `todoStore` — 包级全局变量，内存中的任务存储（`sync.Mutex` + `[]TodoItem`）
 - 导出函数/方法:
+  - `ClearTodos()` — **新增**，重置内存中的 todo 存储。在会话切换（`SessionService.SwitchSession`、`SessionService.CreateSession`）和清除历史（`ChatService.ClearHistory`）时调用，确保 todo 状态不跨会话泄漏
   - `NewWriteTodosTool() tool.BaseTool` — 创建 `write_todos` 工具
     - 验证 DAG 有效性：检查所有 `DependsOn` 引用的 ID 是否存在
     - 全量替换 todoStore 中的任务列表
@@ -45,13 +46,14 @@
 - 关键配置: 无
 
 ## 6. 变更影响面
+- `ClearTodos()` 被 `internal/service/session_svc.go`（CreateSession、SwitchSession）和 `internal/service/chat.go`（ClearHistory）调用
 - `internal/tools/registry.go` — 通过 `RegisterBuiltin` 注册到工具注册表
 - 前端 DAG 组件 — 依赖工具返回的 JSON 格式（`TodoItem` 结构），字段变更需同步前端解析逻辑
 - `internal/agent/` — Agent 在多步骤任务中调用这两个工具追踪进度
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- `todoStore` 是包级全局变量，当前仅支持单会话任务追踪；如需多会话支持需重构为实例级存储。
+- `todoStore` 是包级全局变量，当前仅支持单会话任务追踪；`ClearTodos()` 在会话切换时调用以防止状态泄漏，但如需真正的 per-session 支持需重构为实例级存储。
 - `write_todos` 执行全量替换（`copy`），不支持增量更新；如需增量模式可新增工具或参数。
 - DAG 验证仅检查依赖 ID 存在性，不检测循环依赖；如任务依赖复杂度增加需增加环检测。
 - `TodoItem` 的 JSON 字段变更需同步前端 Vue 组件的解析逻辑。

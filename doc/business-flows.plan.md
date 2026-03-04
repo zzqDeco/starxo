@@ -20,14 +20,18 @@ main.go: NewApp()
               ├── logger.RegisterGlobalCallbacks()    -- 注册 Eino 全局回调
               ├── 所有 Service.SetContext(ctx)        -- 分发 Wails context
               ├── 连接 Service 间依赖 (回调注册)
-              │     ├── sessionService.SetCtxEngine()
-              │     ├── chatService.SetDependencies()
+              │     ├── chatService.SetDependencies(sbx, nil)  -- ctxEngine 传 nil（per-session 管理）
+              │     ├── chatService.SetSessionService()
+              │     ├── sessionService.SetChatService()        -- 注入 ChatService 用于 per-session 状态访问
               │     ├── sandboxService.SetOnConnect()       -> chatService.UpdateSandbox()
               │     ├── sandboxService.SetOnContainerBound() -> sessionService.BindContainer()
-              │     ├── sessionService.SetOnSessionSwitch()  -> sandboxService.ConnectExisting()
+              │     ├── sandboxService.SetOnContainerDeactivated() -> chatService.UpdateSandbox(nil)
+              │     ├── sessionService.SetOnSessionSwitch()  -> sandboxService.ActivateContainer/DeactivateContainer
+              │     ├── sessionService.SetOnDestroyContainer() -> containerService.DestroyContainer
               │     ├── settingsService.SetOnSettingsSave()   -> chatService.InvalidateRunner()
-              │     └── chatService.SetOnAgentDone()          -> sessionService.SaveCurrentSession()
-              ├── sessionService.EnsureDefaultSession()  -- 加载或创建默认会话
+              │     └── chatService.SetOnAgentDone(fn(sessionID))  -> sessionService.SaveCurrentSession()
+              ├── sessionService.EnsureDefaultSession()  -- 加载或创建默认会话，恢复数据到 per-session run
+              ├── chatService.SetActiveSessionID()       -- 同步活跃会话到 ChatService
               └── sandboxService.StartHealthMonitor()    -- 启动后台健康检查
 ```
 
@@ -35,48 +39,57 @@ main.go: NewApp()
 
 ```
 用户点击"连接"
-  └── SandboxService.Connect()
-        ├── 断开已有连接 (保留容器)
-        ├── emit sandbox:progress {step:"Connecting SSH...", percent:10}
-        ├── SSHClient.Connect()           -- 建立 SSH 连接
-        ├── emit sandbox:progress {step:"SSH connected", percent:30}
-        ├── RemoteDockerManager.Create()  -- 创建 Docker 容器
-        ├── emit sandbox:progress {step:"Container created", percent:60}
-        ├── SandboxManager 组装 (SSH + Docker + Operator + Transfer)
-        ├── 注册容器到 ContainerStore
-        ├── emit sandbox:progress {step:"Setting up...", percent:80}
-        ├── Setup.InitContainer()         -- 初始化容器环境
-        ├── onConnect(manager)            -> ChatService.UpdateSandbox()
-        ├── onContainerBound(regID, wsPath) -> SessionService.BindContainer()
-        └── emit sandbox:ready {sshConnected:true, dockerRunning:true, containerID:...}
+  └── SandboxService.ConnectSSH() + CreateAndActivateContainer()
+        ├── [SSH 阶段]
+        │     ├── 断开已有连接 (保留容器)
+        │     ├── emit ssh:progress {step:"Connecting SSH...", percent:10}
+        │     ├── SSHClient.Connect()           -- 建立 SSH 连接
+        │     ├── emit ssh:progress {step:"SSH connected", percent:50}
+        │     └── EnsureDocker()                -- 确认 Docker 可用
+        ├── emit ssh:connected
+        ├── [容器阶段]
+        │     ├── emit container:progress {step:"Creating container...", percent:10}
+        │     ├── CreateNewContainer()          -- 创建 Docker 容器
+        │     ├── 注册容器到 ContainerStore
+        │     ├── onConnect(manager)            -> ChatService.UpdateSandbox()
+        │     ├── onContainerBound(regID, wsPath) -> SessionService.BindContainer()
+        │     └── emit container:ready {containerID: regID}
+        └── setupOutputForwarding()             -- 设置终端输出转发
 ```
 
-### 1.3 用户消息处理流程
+### 1.3 用户消息处理流程 (Per-Session)
 
 ```
 用户输入消息 -> ChatService.SendMessage(userMessage)
-  ├── ctxEngine.AddUserMessage(userMessage)     -- 消息加入上下文
-  ├── [首次] BuildRunners()                     -- 构建 Agent 和 Runner
-  │     ├── llm.NewChatModel()                  -- 创建 LLM 模型
-  │     ├── tools.RegisterBuiltinTools()        -- 注册内置工具
-  │     ├── tools.ConnectMCPServer() x N        -- 连接 MCP 服务器
-  │     ├── agent.BuildDeepAgent()              -- 构建 Deep Agent + 3 子智能体
-  │     ├── agent.BuildDefaultRunner()          -- 构建默认模式 Runner
-  │     └── agent.BuildPlanRunner()             -- 构建计划模式 Runner
-  ├── ctxEngine.PrepareMessages()               -- 应用上下文窗口化
-  │     └── WindowMessages()                    -- 截断/裁剪消息历史
+  ├── 检查 activeSessionID 非空
+  ├── 获取 per-session SessionRun (getOrCreateRun)
+  ├── per-session 运行守卫: run.running == false
+  ├── run.ctxEngine.AddUserMessage(userMessage)     -- 消息加入 per-session 上下文
+  ├── run.timeline.AddUserTurn()                    -- 记录到 per-session 时间线
+  ├── [首次] buildRunnersLocked() (在锁内执行)      -- 构建 Agent 和 Runner
+  │     ├── llm.NewChatModel()                      -- 创建 LLM 模型
+  │     ├── tools.RegisterBuiltinTools()            -- 注册内置工具
+  │     ├── tools.ConnectMCPServer() x N            -- 连接 MCP 服务器
+  │     ├── agent.BuildDeepAgent()                  -- 构建 Deep Agent + 3 子智能体
+  │     │     └── buildAgentContext()               -- OnToolEvent 通过 ctx 传播 sessionID
+  │     ├── agent.BuildDefaultRunner()              -- 构建默认模式 Runner
+  │     └── agent.BuildPlanRunner()                 -- 构建计划模式 Runner
+  ├── 创建带 sessionID 的 cancellable context
+  │     └── contextWithSessionID(runCtx, sessionID)
+  ├── run.ctxEngine.PrepareMessages()               -- 应用上下文窗口化
   └── goroutine:
-        ├── runner.Run(ctx, messages, checkpointID)
-        ├── processEvents(events) 循环:
-        │     ├── TransferToAgent -> emit agent:timeline {type:"transfer"}
-        │     ├── ToolCall -> emit agent:timeline {type:"tool_call"}
-        │     ├── ToolResult -> emit agent:timeline {type:"tool_result"}
-        │     ├── MessageStream -> drainStream() -> emit agent:timeline {type:"stream_chunk"} x N
-        │     ├── Message -> emit agent:timeline {type:"message"}
-        │     └── Interrupt -> handleInterrupt() -> emit agent:interrupt
-        ├── ctxEngine.AddAssistantMessage(lastContent)
-        ├── emit agent:done
-        └── onAgentDone() -> sessionService.SaveCurrentSession()
+        ├── runner.Run(runCtx, messages, checkpointID)
+        ├── processEventsForRun(events, checkpointID, run) 循环:
+        │     ├── TransferToAgent -> emitTimelineForRun {type:"transfer"} + {type:"thinking"}
+        │     ├── ToolCall -> emitTimelineForRun {type:"reasoning"} + {type:"tool_call"}
+        │     ├── ToolResult -> emitTimelineForRun {type:"tool_result"} + {type:"thinking"}
+        │     ├── MessageStream -> drainStreamForRun() -> emitTimelineForRun {type:"stream_chunk"} x N
+        │     ├── Message -> emitTimelineForRun {type:"message"}
+        │     ├── Interrupt -> handleInterruptForRun() -> emit agent:interrupt {sessionId}
+        │     └── 孤立 tool_call 检测 -> 注入合成错误响应
+        ├── run.ctxEngine.AddAssistantMessage(lastContent)
+        ├── emit agent:done {sessionId}
+        └── onAgentDone(sessionID) -> sessionService.SaveCurrentSession()
 ```
 
 ### 1.4 Agent 内部执行流程 (默认模式)
@@ -88,6 +101,7 @@ Runner.Run(messages)
         ├── [工具调用] 直接使用 ask_user/ask_choice/write_todos/update_todo/notify_user/MCP工具
         ├── [子智能体] transfer_to_agent -> code_writer / code_executor / file_manager
         │     ├── code_writer: 使用 shell 命令编写代码文件
+        │     │     └── eventEmittingTool 通过 ctx 传播 sessionID -> emitTimelineForSession
         │     ├── code_executor: 使用 shell 命令执行代码
         │     └── file_manager: 使用 shell 命令管理文件
         ├── [中断] ask_user/ask_choice -> StatefulInterrupt -> 暂停等待用户
@@ -118,14 +132,16 @@ PlanRunner.Run(messages)
 ```
 Agent 调用 ask_user 工具
   ├── StatefulInterrupt 触发
-  ├── ChatService.handleInterrupt()
-  │     ├── 保存 PendingInterrupt {checkpointID, interruptID, info}
-  │     └── emit agent:interrupt {type:"followup", questions:[...]}
-  ├── 前端显示追问对话框
+  ├── ChatService.handleInterruptForRun(run)
+  │     ├── 保存 PendingInterrupt {checkpointID, interruptID, info} 到 run
+  │     └── emit agent:interrupt {type:"followup", questions:[...], sessionId}
+  ├── 前端 isActiveSession() 过滤后显示追问对话框
   ├── 用户输入回答
   └── ChatService.ResumeWithAnswer(answer)
+        ├── 获取活跃会话的 run 和 pendingInterrupt
+        ├── 创建带 sessionID 的 context
         ├── runner.ResumeWithParams(checkpointID, targets)
-        └── 继续 processEvents 循环
+        └── 继续 processEventsForRun 循环
 ```
 
 ### 2.2 中断/恢复流程 (ask_choice)
@@ -133,54 +149,82 @@ Agent 调用 ask_user 工具
 ```
 Agent 调用 ask_choice 工具
   ├── StatefulInterrupt 触发
-  ├── ChatService.handleInterrupt()
-  │     ├── 保存 PendingInterrupt
-  │     └── emit agent:interrupt {type:"choice", question, options:[{label,description}]}
-  ├── 前端显示选择对话框
+  ├── ChatService.handleInterruptForRun(run)
+  │     ├── 保存 PendingInterrupt 到 run
+  │     └── emit agent:interrupt {type:"choice", question, options:[{label,description}], sessionId}
+  ├── 前端 isActiveSession() 过滤后显示选择对话框
   ├── 用户选择选项
   └── ChatService.ResumeWithChoice(selectedIndex)
+        ├── 获取活跃会话的 run 和 pendingInterrupt
+        ├── 创建带 sessionID 的 context
         ├── runner.ResumeWithParams(checkpointID, targets)
-        └── 继续 processEvents 循环
+        └── 继续 processEventsForRun 循环
 ```
 
-### 2.3 会话切换流程
+### 2.3 会话切换流程 (Per-Session)
 
 ```
 用户选择另一个会话
   └── SessionService.SwitchSession(sessionID)
-        ├── 保存当前会话 (消息 + 时间线)
-        ├── 加载目标会话数据
-        ├── 重置 ctxEngine (加载历史消息)
-        ├── ChatService.InvalidateRunner()  -- 使 Runner 失效
-        ├── emit session:switched {session, containerID}
+        ├── 保存当前会话 (per-session 消息 + 时间线 + 流式状态)
+        │     └── saveCurrentLocked() -> chatService.SessionCtxEngine/SessionTimeline/SessionStreamingState
+        ├── chatService.SetActiveSessionID(sessionID)
+        ├── [若会话未运行中] 加载目标会话数据到 per-session run
+        │     ├── chatService.GetOrCreateRun(sessionID)
+        │     ├── run.ctxEngine.ImportMessages(sessionData.Messages)
+        │     └── run.timeline.Import(sessionData.Display)
+        ├── [若会话已运行中] 保持内存中的 run 不变（最新状态）
+        ├── tools.ClearTodos()
+        ├── 构建 SessionSwitchedEvent (含完整状态快照)
+        │     └── chatService.GetSessionRunSnapshot(sessionID)
+        │           -> running, currentAgent, mode, interrupt
+        ├── emit session:switched {session, containerID, agentRunning, currentAgent, mode, hasInterrupt, interrupt}
         └── [若目标会话绑定了容器]
               └── onSessionSwitch(containerRegID)
-                    └── SandboxService.ConnectExisting(containerRegID)
+                    └── go sandboxService.ActivateContainer(containerRegID)
 ```
 
-### 2.4 容器重连流程
+### 2.4 会话删除流程 (Per-Session)
+
+```
+用户删除会话
+  └── SessionService.DeleteSession(sessionID)
+        ├── 检查非活跃会话
+        ├── [若会话有运行中代理]
+        │     ├── chatService.StopSessionGeneration(sessionID)
+        │     └── chatService.WaitForSessionDone(sessionID, 10s)
+        ├── chatService.RemoveSession(sessionID) -- 清理 per-session 状态
+        ├── 加载会话获取容器列表
+        ├── 级联销毁所有子容器 (best-effort)
+        │     └── onDestroyContainer(cid) x N
+        └── sessionStore.Delete(sessionID)
+```
+
+### 2.5 容器重连流程
 
 ```
 SandboxService.ConnectExisting(containerRegID)
   ├── 从 ContainerStore 获取容器信息 (dockerID, sshHost, wsPath)
-  ├── SSHClient.Connect() -- 建立新 SSH 连接
-  ├── RemoteDockerManager -- 关联已存在的容器
-  ├── 组装 SandboxManager
-  ├── onConnect(manager) -> ChatService.UpdateSandbox()
-  └── emit sandbox:ready
+  ├── [若 SSH 未连接] ConnectSSH() + EnsureDocker()
+  └── ActivateContainer(containerRegID)
+        ├── 验证 SSH Host 匹配
+        ├── AttachToContainer()
+        ├── onConnect(manager) -> ChatService.UpdateSandbox()
+        ├── onContainerBound(regID, wsPath) -> SessionService.BindContainer()
+        └── emit container:activated {containerID}
 ```
 
-### 2.5 模式切换流程
+### 2.6 模式切换流程
 
 ```
 用户切换模式 (default <-> plan)
   └── ChatService.SetMode(mode)
         ├── 校验 mode 值 ("default" 或 "plan")
-        ├── 更新内部 mode 字段
-        └── emit agent:mode_changed {mode}
+        ├── 更新 per-session run.mode 字段
+        └── emit agent:mode_changed {mode, sessionId}
 ```
 
-### 2.6 文件上传流程
+### 2.7 文件上传流程
 
 ```
 用户点击上传
@@ -194,7 +238,7 @@ SandboxService.ConnectExisting(containerRegID)
               └── 返回 FileInfoDTO {name, path, size}
 ```
 
-### 2.7 文件下载流程
+### 2.8 文件下载流程
 
 ```
 用户选择文件下载
@@ -214,12 +258,11 @@ SandboxService.ConnectExisting(containerRegID)
 
 ```
 SSH 连接中断
-  ├── HealthMonitor 检测到断连
-  ├── emit sandbox:disconnected
-  ├── ChatService.UpdateSandbox(nil)  -- 清空沙箱引用
-  ├── ChatService.InvalidateRunner()  -- 使 Runner 失效
+  ├── HealthMonitor.healthCheck() 检测到断连 (短暂 RLock)
+  ├── 清理 manager 和 activeContainerRegID (短暂 Lock)
+  ├── emit ssh:disconnected
   └── 用户需手动重连
-        └── SandboxService.Connect() 或 SandboxService.Reconnect()
+        └── SandboxService.ConnectSSH() + CreateAndActivateContainer()
 ```
 
 ### 3.2 容器崩溃/停止
@@ -230,7 +273,7 @@ SSH 连接中断
   ├── ContainerStore 更新容器状态为 stopped
   └── 用户可选择:
         ├── 重启容器: ContainerService.StartContainer(regID)
-        └── 新建容器: SandboxService.Connect()
+        └── 新建容器: SandboxService.CreateAndActivateContainer()
 ```
 
 ### 3.3 LLM 请求失败
@@ -238,8 +281,8 @@ SSH 连接中断
 ```
 LLM API 调用返回错误
   ├── Agent event.Err 非空
-  ├── processEvents 捕获错误
-  ├── emit agent:timeline {type:"info", content:"Error: ..."}
+  ├── processEventsForRun 捕获错误
+  ├── emitTimelineForRun {type:"info", content:"Error: ...", sessionId}
   └── 事件循环继续 (不中断，后续事件可能恢复)
 ```
 
@@ -253,7 +296,7 @@ LLM API 调用返回错误
   │     ├── 换用其他工具
   │     ├── 向用户报告错误
   │     └── 使用 ask_user 向用户求助
-  └── emit agent:timeline {type:"tool_result", content:"Error: ..."}
+  └── emitTimelineForRun {type:"tool_result", content:"Error: ...", sessionId}
 ```
 
 ### 3.5 MCP 服务器连接失败
@@ -261,7 +304,7 @@ LLM API 调用返回错误
 ```
 MCP 服务器不可达
   ├── tools.ConnectMCPServer() 返回错误
-  ├── emit agent:error "MCP server {name} connection failed: {err}"
+  ├── emit agent:error {sessionId, error: "MCP server {name} connection failed: {err}"}
   ├── 跳过该 MCP 服务器，继续处理下一个
   └── Agent 正常运行，但缺少该 MCP 服务器提供的工具
       (非致命错误，记录为警告)
@@ -272,7 +315,19 @@ MCP 服务器不可达
 ```
 用户关闭窗口
   └── app.shutdown(ctx)
-        ├── sessionService.SaveCurrentSession()  -- 保存当前会话
+        ├── sessionService.SaveCurrentSession()  -- 保存当前会话 (per-session 持久化)
         ├── sandboxService.Disconnect()           -- 断开 SSH (保留容器)
         └── logger.Close()                        -- 关闭日志
+```
+
+### 3.7 后台会话代理运行
+
+```
+用户切换到新会话，但旧会话代理仍在运行
+  ├── SwitchSession 不取消旧会话代理
+  ├── 旧会话 run.running == true, run.runDone channel 未关闭
+  ├── 后台代理事件通过 emitTimelineForRun 发射 (携带旧 sessionId)
+  ├── 前端 isActiveSession() 过滤掉非活跃会话事件
+  ├── 后台代理完成 -> onAgentDone(sessionID) -> SaveCurrentSession
+  └── 切换回旧会话时 -> IsSessionRunning() == true -> 不从磁盘重新加载 (使用内存中最新状态)
 ```

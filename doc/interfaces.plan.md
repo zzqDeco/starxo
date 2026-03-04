@@ -22,34 +22,46 @@ Starxo 的所有外部接口均通过 **Wails v2 绑定机制** 暴露。前端 
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `SendMessage` | `(userMessage string) error` | 发送用户消息，触发 Agent 处理。异步执行，结果通过事件推送。前置条件: 沙箱已连接 |
-| `StopGeneration` | `() error` | 取消当前正在运行的 Agent 生成。取消 context 并清除挂起的中断 |
-| `ResumeWithAnswer` | `(answer string) error` | 用户回答追问后恢复 Agent 执行。需有挂起的 followup 中断 |
-| `ResumeWithChoice` | `(selectedIndex int) error` | 用户选择选项后恢复 Agent 执行。需有挂起的 choice 中断 |
-| `SetMode` | `(mode string) error` | 切换 Agent 模式。值: `"default"` (直接执行) 或 `"plan"` (计划执行) |
-| `GetMode` | `() string` | 获取当前 Agent 模式 |
-| `ClearHistory` | `() error` | 清除对话历史。重置 ctxEngine、失效 Runner、重建检查点存储 |
+| `SendMessage` | `(userMessage string) error` | 发送用户消息，触发 Agent 处理。Per-session 运行守卫，异步执行。前置条件: 沙箱已连接、活跃会话已设置 |
+| `StopGeneration` | `() error` | 取消活跃会话当前正在运行的 Agent 生成 |
+| `ResumeWithAnswer` | `(answer string) error` | 用户回答追问后恢复活跃会话的 Agent 执行 |
+| `ResumeWithChoice` | `(selectedIndex int) error` | 用户选择选项后恢复活跃会话的 Agent 执行 |
+| `SetMode` | `(mode string) error` | 切换活跃会话的 Agent 模式。值: `"default"` 或 `"plan"` |
+| `GetMode` | `() string` | 获取活跃会话当前 Agent 模式 |
+| `ClearHistory` | `() error` | 清除活跃会话对话历史。重置 per-session ctxEngine、timeline、streamingState、todos |
+| `BuildRunners` | `() error` | 构建 deep agent 和两种 runner |
 
 ### 2.2 SandboxService — 沙箱管理
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `Connect` | `() error` | 创建新容器并连接。流程: SSH连接 -> Docker创建 -> 容器初始化 -> 就绪 |
-| `Disconnect` | `() error` | 断开 SSH 连接，保留容器运行 |
-| `Reconnect` | `() error` | 重新连接到当前配置的沙箱 |
-| `ConnectExisting` | `(containerRegID string) error` | 连接到已注册的现有容器 |
-| `GetStatus` | `() SandboxStatusDTO` | 获取当前沙箱连接状态 (SSH连接/Docker运行/容器ID) |
+| `ConnectSSH` | `() error` | 建立 SSH 连接 + 确认 Docker 可用。不创建容器 |
+| `DisconnectSSH` | `() error` | 断开 SSH 连接，分离活跃容器 |
+| `CreateAndActivateContainer` | `() error` | 创建新容器 + 注册 + 激活 |
+| `ActivateContainer` | `(containerRegID string) error` | 切换到已注册容器（验证 SSH Host 匹配） |
+| `DeactivateContainer` | `() error` | 分离活跃容器（不停止），SSH 保持连接 |
+| `GetStatus` | `() SandboxStatusDTO` | 获取当前沙箱连接状态 |
+| `Connect` | `() error` | Legacy: ConnectSSH + CreateAndActivateContainer |
+| `ConnectExisting` | `(containerRegID string) error` | Legacy: 如 SSH 未连接先连接，再 ActivateContainer |
+| `Disconnect` | `() error` | Legacy: 委托 DisconnectSSH |
+| `DisconnectAndDestroy` | `() error` | 停止并移除活跃容器 |
 
 ### 2.3 SessionService — 会话管理
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `CreateSession` | `(name string) (*model.Session, error)` | 创建新会话，自动生成 UUID |
+| `CreateSession` | `(name string) (*model.Session, error)` | 创建新会话，自动保存当前会话，设置 ChatService 活跃会话，清除 todos |
 | `ListSessions` | `() ([]model.Session, error)` | 列出所有会话 |
-| `SwitchSession` | `(sessionID string) error` | 切换到指定会话。保存当前会话，加载目标会话，重置上下文 |
-| `DeleteSession` | `(sessionID string) error` | 删除指定会话及其数据文件 |
+| `ListSessionsEnriched` | `() ([]EnrichedSession, error)` | 列出会话（含容器状态信息） |
+| `SwitchSession` | `(sessionID string) error` | 切换到指定会话。保存当前、加载目标到 per-session run、发射含完整状态快照的 session:switched 事件 |
+| `DeleteSession` | `(sessionID string) error` | 删除会话。先停止运行中代理，清理 per-session 状态，级联销毁子容器 |
 | `RenameSession` | `(sessionID, name string) error` | 重命名会话 |
-| `GetCurrentSession` | `() *model.Session` | 获取当前活跃会话 |
+| `GetActiveSession` | `() *model.Session` | 获取当前活跃会话（返回副本） |
+| `GetActiveSessionMessages` | `() ([]model.PersistedMessage, error)` | 获取活动会话消息 |
+| `SaveChatDisplay` | `(data string) error` | 保存前端显示数据（旧版接口） |
+| `LoadChatDisplay` | `() (string, error)` | 加载前端显示数据（旧版接口） |
+| `SaveCurrentSession` | `() error` | 持久化当前会话（per-session 数据） |
+| `LoadSessionData` | `() (*model.SessionData, error)` | 加载统一会话数据（推荐接口） |
 
 ### 2.4 SettingsService — 配置管理
 
@@ -88,29 +100,29 @@ Starxo 的所有外部接口均通过 **Wails v2 绑定机制** 暴露。前端 
 
 | 事件名 | 载荷类型 | 字段 | 触发时机 |
 |--------|----------|------|----------|
-| `agent:timeline` | `TimelineEvent` | `id`, `type`, `agent`, `content`, `toolName?`, `toolArgs?`, `toolId?`, `timestamp` | Agent 产生任何可展示事件时。type 值: `message`, `tool_call`, `tool_result`, `transfer`, `info`, `interrupt`, `plan`, `stream_chunk`, `stream_end` |
-| `agent:done` | `nil` | - | Agent 完成一次完整处理 (非中断退出) |
-| `agent:error` | `string` | 错误信息文本 | Agent 运行出错、Runner 构建失败、MCP 连接失败等 |
-| `agent:interrupt` | `InterruptEvent` | `type` (`followup`/`choice`), `interruptId`, `checkpointId`, `questions?[]`, `options?[]`, `question?` | Agent 调用 ask_user 或 ask_choice 工具暂停执行 |
-| `agent:plan` | `PlanEvent` | `steps[]` -> `{taskId, status, desc, execResult?}` | 计划模式下计划状态变更 |
-| `agent:mode_changed` | `ModeChangedEvent` | `mode` (`default`/`plan`) | 用户切换 Agent 模式 |
-| `agent:action` | `AgentActionEvent` | `type` (`tool_call`/`transfer`/`info`), `agentName`, `details`, `toolId?` | Agent 执行动作 (工具调用、子智能体转移) |
-| `agent:message` | `MessageEvent` | `id`, `agent`, `content`, `role`, `timestamp` | 非流式完整消息产生 |
-| `agent:tool_result` | `ToolResultEvent` | `agentName`, `toolCallId`, `content` | 工具调用返回结果 |
+| `agent:timeline` | `TimelineEvent` | `id`, `type`, `agent`, `content`, `toolName?`, `toolArgs?`, `toolId?`, `timestamp`, **`sessionId?`** | Agent 产生任何可展示事件时。type 值: `message`, `tool_call`, `tool_result`, `transfer`, `info`, `interrupt`, `stream_chunk`, `stream_end`, `reasoning`, `thinking` |
+| `agent:done` | `map[string]string` | **`sessionId`** | Agent 完成一次完整处理 (非中断退出) |
+| `agent:error` | `map[string]interface{}` | **`sessionId`**, `error` | Agent 运行出错、Runner 构建失败、MCP 连接失败等 |
+| `agent:interrupt` | `InterruptEvent` | `type` (`followup`/`choice`), `interruptId`, `checkpointId`, `questions?[]`, `options?[]`, `question?`, **`sessionId?`** | Agent 调用 ask_user 或 ask_choice 工具暂停执行 |
+| `agent:mode_changed` | `ModeChangedEvent` | `mode` (`default`/`plan`), **`sessionId?`** | 用户切换 Agent 模式 |
 
-### 3.2 Sandbox 事件
+### 3.2 SSH/容器事件
 
 | 事件名 | 载荷类型 | 字段 | 触发时机 |
 |--------|----------|------|----------|
-| `sandbox:progress` | `SandboxProgressEvent` | `step` (描述文本), `percent` (0-100) | 沙箱连接过程中的进度更新 |
-| `sandbox:ready` | `SandboxStatusDTO` | `sshConnected`, `dockerRunning`, `containerID` | 沙箱连接成功并就绪 |
-| `sandbox:disconnected` | `nil` | - | 沙箱连接断开 (SSH断连或主动断开) |
+| `ssh:progress` | `SandboxProgressEvent` | `step`, `percent` (0-100) | SSH 连接和 Docker 检查进度 |
+| `ssh:connected` | `nil` | - | SSH 连接成功并 Docker 就绪 |
+| `ssh:disconnected` | `nil` | - | SSH 断连（健康检查失败或主动断开） |
+| `container:progress` | `SandboxProgressEvent` | `step`, `percent` (0-100) | 容器创建/激活进度 |
+| `container:ready` | `map[string]string` | `containerID` | 新容器创建并激活就绪 |
+| `container:activated` | `map[string]string` | `containerID` | 切换到已有容器就绪 |
+| `container:deactivated` | `nil` | - | 容器分离 |
 
 ### 3.3 Session 事件
 
 | 事件名 | 载荷类型 | 字段 | 触发时机 |
 |--------|----------|------|----------|
-| `session:switched` | `SessionSwitchedEvent` | `session` (Session对象), `containerID?` | 活跃会话切换完成 |
+| `session:switched` | `SessionSwitchedEvent` | `session`, `containerID?`, **`agentRunning`**, **`currentAgent?`**, **`mode`**, **`hasInterrupt`**, **`interrupt?`** | 活跃会话切换完成，包含完整的 per-session 状态快照 |
 
 ---
 

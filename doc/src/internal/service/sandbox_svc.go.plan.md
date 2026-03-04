@@ -9,6 +9,7 @@
 
 ## 2. 核心职责
 - 该文件实现了 `SandboxService`，管理 SSH 连接和容器两个**独立的生命周期**。SSH 连接通过 `ConnectSSH`/`DisconnectSSH` 管理；容器通过 `CreateAndActivateContainer`/`ActivateContainer`/`DeactivateContainer` 管理。支持在同一 SSH 连接上创建和切换多个容器，同一时间只有一个活跃容器供 Agent 使用。通过回调通知 ChatService 和 SessionService 关于状态变更。
+- **并发安全**: 使用 `sync.RWMutex` 保护所有共享状态。写操作使用 `s.mu.Lock()`，读操作使用 `s.mu.RLock()`。回调在锁外调用以防止死锁。`healthCheck` 方法使用短暂锁读取状态后在锁外执行实际检查。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -24,25 +25,25 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
-  - `SandboxService`: 持有 Wails 上下文、SandboxManager、配置存储、容器存储、SessionService 引用、三个回调（onConnect、onContainerBound、onContainerDeactivated）、activeContainerRegID
+  - `SandboxService`: 持有 `mu sync.RWMutex`（并发安全锁）、Wails 上下文、SandboxManager、配置存储、容器存储、SessionService 引用、三个回调（onConnect、onContainerBound、onContainerDeactivated）、activeContainerRegID
 - 导出函数/方法:
   - `NewSandboxService(store, containerStore) *SandboxService`: 构造函数
-  - `SetContext(ctx)`: 设置 Wails 上下文
-  - `SetOnConnect(fn)`: 注册容器激活后回调
-  - `SetOnContainerBound(fn)`: 注册容器绑定到会话的回调
-  - `SetOnContainerDeactivated(fn)`: 注册容器分离回调（新增）
-  - `SetSessionService(svc)`: 设置 SessionService 引用
+  - `SetContext(ctx)`: 设置 Wails 上下文（加锁）
+  - `SetOnConnect(fn)`: 注册容器激活后回调（加锁）
+  - `SetOnContainerBound(fn)`: 注册容器绑定到会话的回调（加锁）
+  - `SetOnContainerDeactivated(fn)`: 注册容器分离回调（加锁）
+  - `SetSessionService(svc)`: 设置 SessionService 引用（加锁）
   - **SSH 生命周期**:
-    - `ConnectSSH() error`: 建立 SSH 连接 + EnsureDocker，发射 `ssh:progress` 和 `ssh:connected` 事件
-    - `DisconnectSSH() error`: 分离活跃容器 + 关闭 SSH，发射 `ssh:disconnected` 事件
+    - `ConnectSSH() error`: 建立 SSH 连接 + EnsureDocker，长时间操作在锁外执行
+    - `DisconnectSSH() error`: 分离活跃容器 + 关闭 SSH，回调在锁外调用
   - **容器生命周期**:
-    - `CreateAndActivateContainer() error`: 创建新容器 + 注册 + 激活，发射 `container:progress` 和 `container:ready` 事件
-    - `ActivateContainer(containerRegID) error`: 切换到已注册容器（验证 SSH Host 匹配），发射 `container:activated` 事件
-    - `DeactivateContainer() error`: 分离活跃容器（不停止），发射 `container:deactivated` 事件
+    - `CreateAndActivateContainer() error`: 创建新容器 + 注册 + 激活，长时间操作在锁外执行，回调在锁外调用
+    - `ActivateContainer(containerRegID) error`: 切换到已注册容器（验证 SSH Host 匹配），长时间操作在锁外执行
+    - `DeactivateContainer() error`: 分离活跃容器（不停止），回调在锁外调用
   - **状态查询**:
-    - `GetStatus() SandboxStatusDTO`: 返回 SSH 连接状态、Docker 可用性、活跃容器信息
-    - `Manager() *sandbox.SandboxManager`: 返回底层 SandboxManager
-    - `ActiveContainerRegID() string`: 返回当前活跃容器注册 ID
+    - `GetStatus() SandboxStatusDTO`: 使用 RLock 读取状态
+    - `Manager() *sandbox.SandboxManager`: 使用 RLock 返回底层 SandboxManager
+    - `ActiveContainerRegID() string`: 使用 RLock 返回当前活跃容器注册 ID
   - **健康监控**:
     - `StartHealthMonitor(ctx)`: 双模式健康检查 — 无容器时 SSH ping，有容器时 operator ping
   - **向后兼容 Legacy 方法**:
@@ -50,6 +51,9 @@
     - `ConnectExisting(regID) error`: 如 SSH 未连接先 ConnectSSH，再 ActivateContainer
     - `Disconnect() error`: 委托 DisconnectSSH
     - `DisconnectAndDestroy() error`: 停止并移除活跃容器
+- 未导出函数/方法:
+  - `setupOutputForwarding()`: 使用 RLock 读取 manager，设置终端输出转发
+  - `healthCheck(ctx)`: 单次健康检查，使用短暂 RLock 读取状态后在锁外执行检查
 - Wails 绑定方法: `ConnectSSH`、`DisconnectSSH`、`CreateAndActivateContainer`、`ActivateContainer`、`DeactivateContainer`、`GetStatus`、`Connect`、`ConnectExisting`、`Disconnect`、`DisconnectAndDestroy`
 - 事件发射: `ssh:progress`、`ssh:connected`、`ssh:disconnected`、`container:progress`、`container:ready`、`container:activated`、`container:deactivated`、`terminal:output`
 
@@ -60,6 +64,7 @@
   - `starxo/internal/sandbox`: SandboxManager
   - `starxo/internal/storage`: ContainerStore
 - 外部依赖:
+  - `sync`: RWMutex（并发安全）
   - `github.com/google/uuid`: 生成容器注册 ID
   - `github.com/wailsapp/wails/v2/pkg/runtime` (wailsruntime): EventsEmit
 
@@ -70,9 +75,11 @@
 - `onContainerDeactivated` 回调影响 ChatService 清除 sandbox 引用
 - 容器注册逻辑影响 ContainerService 和 SessionService
 - 健康检查双模式：无容器时 SSH 级别检查，有容器时 operator 级别检查
+- 所有公开方法均已加锁，变更锁策略需评估死锁风险（尤其是回调调用链）
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - SSH 和容器是独立生命周期，事件命名空间已分离（`ssh:*` vs `container:*`），修改时保持一致。
 - `ActivateContainer` 会校验容器的 SSH Host 与当前连接是否匹配，跨主机需先断开再重连。
 - 健康检查中无容器模式使用 `ssh.RunCommand`，有容器模式使用 `op.RunCommand`，注意两者接口不同。
+- **并发安全模式**: 所有回调（onConnect、onContainerBound、onContainerDeactivated）必须在锁外调用，否则会导致死锁（回调可能反过来调用 ChatService/SessionService 的加锁方法）。长时间操作（SSH 连接、容器创建、容器附加）也必须在锁外执行。

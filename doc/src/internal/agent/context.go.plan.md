@@ -24,25 +24,27 @@
     - `SSHHost string`: SSH 主机地址
     - `SSHPort int`: SSH 端口
     - `SSHUser string`: SSH 用户名
-    - `OnToolEvent func(agentName, eventType, toolName, toolArgs, toolID, result string)`: 工具事件回调，用于向前端发射时间线事件
+    - `OnToolEvent func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string)`: 工具事件回调。**签名变更**: 新增 `ctx context.Context` 作为首参数，ctx 中携带 session 身份信息（使用 `SessionIDFromContext` 提取）。参数依次为: ctx, agentName, eventType ("tool_call"/"tool_result"), toolName, toolArgs, toolID, result
 - 导出函数/方法:
   - `DefaultAgentContext() AgentContext`: 返回默认上下文（WorkspacePath="/workspace"、SSHPort=22、SSHUser="root"、ContainerName="unknown"），用于无会话绑定时的回退
 - Wails 绑定方法: 无
 - 事件发射: 无直接发射，`OnToolEvent` 回调由 `tool_wrapper.go` 中的 `eventEmittingTool` 调用
+- 依赖: 导入 `context` 标准库包
 
 ## 5. 依赖关系
 - 内部依赖: 无
-- 外部依赖: 无
+- 外部依赖: `context`（标准库）
 - 关键配置: 无
 
 ## 6. 变更影响面
 - `AgentContext` 被整个 agent 包的所有文件引用：`deep_agent.go`、`prompts.go`、`codewriter.go`、`codeexecutor.go`、`filemanager.go`、`tool_wrapper.go`
 - 新增字段需在 `internal/service/chat.go` 的 `buildAgentContext()` 中赋值
-- `OnToolEvent` 回调的签名变更会影响 `tool_wrapper.go` 和 `chat.go`
+- `OnToolEvent` 回调签名变更（新增 `ctx context.Context`）影响 `tool_wrapper.go`（调用方）和 `chat.go`（回调注册方）
 - `DefaultAgentContext()` 的默认值变更影响无绑定会话时的代理行为
+- `ctx` 参数通过 `SessionIDFromContext(ctx)` 提取 sessionID，使事件路由到正确的会话
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - 新增环境信息字段时需同时更新 `DefaultAgentContext()` 的默认值和 `chat.go` 中的构建逻辑。
-- `OnToolEvent` 回调的参数较多（6 个 string），如后续需扩展建议考虑使用结构体参数。
+- `OnToolEvent` 回调通过 `context.Context` 传播 session 身份，使调用方无需额外维护 sessionID 参数。修改回调签名时需同步更新 `tool_wrapper.go` 和 `chat.go`。
 - 该结构体是代理层与服务层的核心桥梁，保持其稳定性对整体架构至关重要。
