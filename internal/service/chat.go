@@ -18,6 +18,7 @@ import (
 	agentctx "starxo/internal/context"
 	"starxo/internal/llm"
 	"starxo/internal/logger"
+	"starxo/internal/model"
 	"starxo/internal/sandbox"
 	checkpoint "starxo/internal/store"
 	"starxo/internal/tools"
@@ -37,6 +38,7 @@ type ChatService struct {
 	defaultRunner  *adk.Runner
 	planRunner     *adk.Runner
 	ctxEngine      *agentctx.Engine
+	timeline       *agentctx.TimelineCollector
 	sandbox        *sandbox.SandboxManager
 	store          *config.Store
 	sessionService *SessionService
@@ -46,6 +48,7 @@ type ChatService struct {
 	mode             string // "default" or "plan"
 	checkpointStore  compose.CheckPointStore
 	pendingInterrupt *PendingInterrupt
+	streamingState   *model.StreamingState // non-nil during active streaming
 
 	mu sync.Mutex
 }
@@ -56,6 +59,7 @@ func NewChatService(store *config.Store) *ChatService {
 		store:           store,
 		mode:            "default",
 		checkpointStore: checkpoint.NewInMemoryStore(),
+		timeline:        agentctx.NewTimelineCollector(),
 	}
 }
 
@@ -145,24 +149,21 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	// Add user message to context engine
 	s.ctxEngine.AddUserMessage(userMessage)
 
+	// Record user turn in timeline collector
+	s.timeline.AddUserTurn(
+		fmt.Sprintf("usr-%d", time.Now().UnixNano()),
+		userMessage,
+		time.Now().UnixMilli(),
+	)
+
 	// Build runners if not yet built
 	if s.deepAgent == nil {
 		s.mu.Unlock()
-		wailsruntime.EventsEmit(s.ctx, "agent:action", AgentActionEvent{
-			Type:      "info",
-			AgentName: "system",
-			Details:   "Building agent runner...",
-		})
 		if err := s.BuildRunners(); err != nil {
 			logger.Error("[CHAT] Failed to build runners", err)
 			wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Failed to build runner: %v", err))
 			return fmt.Errorf("failed to build runners: %w", err)
 		}
-		wailsruntime.EventsEmit(s.ctx, "agent:action", AgentActionEvent{
-			Type:      "info",
-			AgentName: "system",
-			Details:   "Agent runner ready, processing...",
-		})
 		s.mu.Lock()
 	}
 
@@ -234,6 +235,22 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	return nil
 }
 
+// emitTimeline emits a timeline event to the frontend AND records it in the
+// timeline collector for backend persistence.
+func (s *ChatService) emitTimeline(evt TimelineEvent) {
+	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	s.timeline.AddEvent(model.DisplayEvent{
+		ID:        evt.ID,
+		Type:      evt.Type,
+		Agent:     evt.Agent,
+		Content:   evt.Content,
+		ToolName:  evt.ToolName,
+		ToolArgs:  evt.ToolArgs,
+		ToolID:    evt.ToolID,
+		Timestamp: evt.Timestamp,
+	}, evt.Agent)
+}
+
 // processEvents consumes the event stream, emits frontend events, and detects interrupts.
 // Returns the last message content, transfer count, and whether an interrupt occurred.
 func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string) (string, int, bool) {
@@ -265,7 +282,7 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 			logger.Error("[CHAT] Agent event error", event.Err, "agent", event.AgentName)
 			// Emit error as timeline info event so the user sees it, but do NOT break
 			// the event loop — subsequent events (including sub-agent work) may follow.
-			wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+			s.emitTimeline(TimelineEvent{
 				ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 				Type:      "info",
 				Agent:     event.AgentName,
@@ -289,12 +306,7 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 				logger.Transfer(event.AgentName, event.Action.TransferToAgent.DestAgentName,
 					"transfer_count", transferCount,
 				)
-				wailsruntime.EventsEmit(s.ctx, "agent:action", AgentActionEvent{
-					Type:      "transfer",
-					AgentName: event.AgentName,
-					Details:   event.Action.TransferToAgent.DestAgentName,
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+				s.emitTimeline(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "transfer",
 					Agent:     event.AgentName,
@@ -327,16 +339,10 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 				continue
 			}
 
-			// Emit tool call actions + timeline events
+			// Emit tool call timeline events
 			if len(msg.ToolCalls) > 0 {
 				for _, tc := range msg.ToolCalls {
-					wailsruntime.EventsEmit(s.ctx, "agent:action", AgentActionEvent{
-						Type:      "tool_call",
-						AgentName: event.AgentName,
-						Details:   formatToolCall(tc),
-						ToolID:    tc.ID,
-					})
-					wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+					s.emitTimeline(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 						Type:      "tool_call",
 						Agent:     event.AgentName,
@@ -366,12 +372,7 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 
 			// Emit tool result events
 			if msg.Role == schema.Tool && msg.ToolCallID != "" {
-				wailsruntime.EventsEmit(s.ctx, "agent:tool_result", ToolResultEvent{
-					AgentName:  event.AgentName,
-					ToolCallID: msg.ToolCallID,
-					Content:    truncateResult(msg.Content, 1000),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+				s.emitTimeline(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "tool_result",
 					Agent:     event.AgentName,
@@ -404,16 +405,9 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 				lastContentByAgent[event.AgentName] = msg.Content
 				allContents = append(allContents, msg.Content)
 
-				// Only emit full message event if content was NOT already streamed
+				// Only emit timeline event if content was NOT already streamed
 				if !wasStreamed {
-					wailsruntime.EventsEmit(s.ctx, "agent:message", MessageEvent{
-						ID:        fmt.Sprintf("msg-%d", time.Now().UnixNano()),
-						Agent:     event.AgentName,
-						Content:   msg.Content,
-						Role:      string(msg.Role),
-						Timestamp: time.Now().Unix(),
-					})
-					wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+					s.emitTimeline(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 						Type:      "message",
 						Agent:     event.AgentName,
@@ -481,7 +475,7 @@ func (s *ChatService) handleInterrupt(interruptCtx *adk.InterruptCtx, checkpoint
 	}
 
 	wailsruntime.EventsEmit(s.ctx, "agent:interrupt", evt)
-	wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+	s.emitTimeline(TimelineEvent{
 		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 		Type:      "interrupt",
 		Agent:     "system",
@@ -678,10 +672,28 @@ func (s *ChatService) ClearHistory() error {
 	if s.ctxEngine != nil {
 		s.ctxEngine.ClearHistory()
 	}
+	s.timeline.Clear()
+	s.streamingState = nil
 	s.invalidateRunners()
 	s.checkpointStore = checkpoint.NewInMemoryStore()
 	s.pendingInterrupt = nil
 	return nil
+}
+
+// Timeline returns the timeline collector for session persistence.
+func (s *ChatService) Timeline() *agentctx.TimelineCollector {
+	return s.timeline
+}
+
+// StreamingState returns the current streaming state (nil if not streaming).
+func (s *ChatService) StreamingState() *model.StreamingState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.streamingState == nil {
+		return nil
+	}
+	ss := *s.streamingState
+	return &ss
 }
 
 // BuildRunners builds the deep agent and both runners using the current config.
@@ -812,9 +824,8 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 
 	// Set up OnToolEvent to emit sub-agent tool calls as timeline events.
 	// This makes sub-agent internal activity visible to the frontend.
-	wailsCtx := s.ctx
 	ac.OnToolEvent = func(agentName, eventType, toolName, toolArgs, toolID, result string) {
-		wailsruntime.EventsEmit(wailsCtx, "agent:timeline", TimelineEvent{
+		s.emitTimeline(TimelineEvent{
 			ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 			Type:      eventType,
 			Agent:     agentName,
@@ -837,37 +848,76 @@ func (s *ChatService) getWorkspacePath() string {
 	return "/workspace"
 }
 
-// drainStream iterates a MessageStream, emitting stream_chunk timeline events
-// for each text chunk, and returns the final concatenated message.
+// drainStream iterates a MessageStream, batching stream_chunk timeline events
+// with a 50ms window to reduce IPC frequency, and returns the final concatenated message.
 func (s *ChatService) drainStream(stream adk.MessageStream, agentName string) (*schema.Message, error) {
 	defer stream.Close()
 
 	var chunks []*schema.Message
+	var streamingContent strings.Builder
 
-	for {
-		chunk, err := stream.Recv()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
+	const batchInterval = 50 * time.Millisecond
+	ticker := time.NewTicker(batchInterval)
+	defer ticker.Stop()
+
+	var pendingText strings.Builder
+
+	flushChunks := func() {
+		if pendingText.Len() == 0 {
+			return
 		}
-		chunks = append(chunks, chunk)
+		merged := pendingText.String()
+		pendingText.Reset()
+		s.emitTimeline(TimelineEvent{
+			ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+			Type:      "stream_chunk",
+			Agent:     agentName,
+			Content:   merged,
+			Timestamp: time.Now().UnixMilli(),
+		})
+	}
 
-		// Emit text content as stream_chunk events
-		if chunk.Content != "" {
-			wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
-				ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
-				Type:      "stream_chunk",
-				Agent:     agentName,
-				Content:   chunk.Content,
-				Timestamp: time.Now().UnixMilli(),
-			})
+	done := false
+	for !done {
+		select {
+		case <-ticker.C:
+			flushChunks()
+			// Update streaming state for mid-stream saves
+			s.mu.Lock()
+			s.streamingState = &model.StreamingState{
+				PartialContent: streamingContent.String(),
+				AgentName:      agentName,
+			}
+			s.mu.Unlock()
+		default:
+			chunk, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					done = true
+					break
+				}
+				flushChunks()
+				return nil, err
+			}
+			chunks = append(chunks, chunk)
+
+			if chunk.Content != "" {
+				pendingText.WriteString(chunk.Content)
+				streamingContent.WriteString(chunk.Content)
+			}
 		}
 	}
 
+	// Flush remaining
+	flushChunks()
+
+	// Clear streaming state
+	s.mu.Lock()
+	s.streamingState = nil
+	s.mu.Unlock()
+
 	// Signal stream end
-	wailsruntime.EventsEmit(s.ctx, "agent:timeline", TimelineEvent{
+	s.emitTimeline(TimelineEvent{
 		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 		Type:      "stream_end",
 		Agent:     agentName,

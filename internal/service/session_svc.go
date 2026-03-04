@@ -14,14 +14,15 @@ import (
 
 // SessionService manages chat sessions for the frontend.
 type SessionService struct {
-	ctx              context.Context
-	sessionStore     *storage.SessionStore
-	containerStore   *storage.ContainerStore
-	ctxEngine        *agentctx.Engine
-	activeSession    *model.Session
-	onSessionSwitch  func(containerRegID string)
+	ctx                context.Context
+	sessionStore       *storage.SessionStore
+	containerStore     *storage.ContainerStore
+	ctxEngine          *agentctx.Engine
+	chatService        *ChatService
+	activeSession      *model.Session
+	onSessionSwitch    func(containerRegID string)
 	onDestroyContainer func(containerRegID string) error
-	mu               sync.Mutex
+	mu                 sync.Mutex
 }
 
 // NewSessionService creates a new SessionService.
@@ -42,6 +43,13 @@ func (s *SessionService) SetCtxEngine(engine *agentctx.Engine) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ctxEngine = engine
+}
+
+// SetChatService sets the chat service dependency for timeline/streaming access.
+func (s *SessionService) SetChatService(cs *ChatService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.chatService = cs
 }
 
 // SetOnSessionSwitch registers a callback fired when the active session changes.
@@ -166,17 +174,24 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 	}
 
 	// Load messages
-	messages, err := s.sessionStore.LoadMessages(sessionID)
+	sessionData, err := s.sessionStore.LoadSessionData(sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to load messages: %w", err)
+		return fmt.Errorf("failed to load session data: %w", err)
 	}
 
-	// Restore into context engine
+	// Restore into context engine and timeline
 	if s.ctxEngine != nil {
-		if messages != nil {
-			s.ctxEngine.ImportMessages(messages)
+		if sessionData != nil && sessionData.Messages != nil {
+			s.ctxEngine.ImportMessages(sessionData.Messages)
 		} else {
 			s.ctxEngine.ClearHistory()
+		}
+	}
+	if s.chatService != nil {
+		if sessionData != nil && sessionData.Display != nil {
+			s.chatService.Timeline().Import(sessionData.Display)
+		} else {
+			s.chatService.Timeline().Clear()
 		}
 	}
 
@@ -310,6 +325,22 @@ func (s *SessionService) LoadChatDisplay() (string, error) {
 	return s.sessionStore.LoadDisplayData(activeID)
 }
 
+// LoadSessionData loads the unified session data (messages + display + streaming) for the active session.
+// This is the preferred method for frontend session restore.
+func (s *SessionService) LoadSessionData() (*model.SessionData, error) {
+	s.mu.Lock()
+	activeID := ""
+	if s.activeSession != nil {
+		activeID = s.activeSession.ID
+	}
+	s.mu.Unlock()
+
+	if activeID == "" {
+		return nil, nil
+	}
+	return s.sessionStore.LoadSessionData(activeID)
+}
+
 // SaveCurrentSession persists the current session's conversation to disk.
 func (s *SessionService) SaveCurrentSession() error {
 	s.mu.Lock()
@@ -323,9 +354,20 @@ func (s *SessionService) saveCurrentLocked() error {
 		return nil
 	}
 
-	messages := s.ctxEngine.ExportMessages()
-	if err := s.sessionStore.SaveMessages(s.activeSession.ID, messages); err != nil {
-		return fmt.Errorf("failed to save messages: %w", err)
+	// Build unified session data
+	sd := &model.SessionData{
+		Version:  1,
+		Messages: s.ctxEngine.ExportMessages(),
+	}
+
+	// Include timeline and streaming state from chat service
+	if s.chatService != nil {
+		sd.Display = s.chatService.Timeline().Export()
+		sd.Streaming = s.chatService.StreamingState()
+	}
+
+	if err := s.sessionStore.SaveSessionData(s.activeSession.ID, sd); err != nil {
+		return fmt.Errorf("failed to save session data: %w", err)
 	}
 
 	// Update session metadata
@@ -362,13 +404,16 @@ func (s *SessionService) EnsureDefaultSession() error {
 	mostRecent := sessions[0]
 	s.activeSession = &mostRecent
 
-	// Restore messages
-	messages, err := s.sessionStore.LoadMessages(mostRecent.ID)
+	// Restore messages and timeline
+	sessionData, err := s.sessionStore.LoadSessionData(mostRecent.ID)
 	if err != nil {
 		return nil // non-fatal, just start with empty history
 	}
-	if s.ctxEngine != nil && messages != nil {
-		s.ctxEngine.ImportMessages(messages)
+	if s.ctxEngine != nil && sessionData != nil && sessionData.Messages != nil {
+		s.ctxEngine.ImportMessages(sessionData.Messages)
+	}
+	if s.chatService != nil && sessionData != nil && sessionData.Display != nil {
+		s.chatService.Timeline().Import(sessionData.Display)
 	}
 
 	return nil

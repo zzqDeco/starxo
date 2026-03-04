@@ -157,7 +157,8 @@ func (e *Engine) ExportMessages() []model.PersistedMessage {
 }
 
 // ImportMessages restores conversation history from persisted messages.
-// Clears existing history first.
+// Clears existing history first. Also repairs orphaned tool_calls that
+// were persisted without matching tool results (e.g., due to mid-stream crash).
 func (e *Engine) ImportMessages(messages []model.PersistedMessage) {
 	msgs := make([]*schema.Message, 0, len(messages))
 	for _, pm := range messages {
@@ -178,7 +179,40 @@ func (e *Engine) ImportMessages(messages []model.PersistedMessage) {
 		}
 		msgs = append(msgs, msg)
 	}
+
+	// Repair orphaned tool calls before setting history
+	msgs = repairOrphanToolCalls(msgs)
 	e.history.SetAll(msgs)
+}
+
+// repairOrphanToolCalls finds tool_call IDs that have no matching tool result
+// message and injects synthetic error responses. This prevents LLM API errors
+// like "tool_calls must be followed by tool messages responding to each tool_call_id".
+func repairOrphanToolCalls(msgs []*schema.Message) []*schema.Message {
+	// Collect all tool_call IDs that are pending (no matching result)
+	pending := make(map[string]bool)
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			pending[tc.ID] = true
+		}
+		if msg.ToolCallID != "" {
+			delete(pending, msg.ToolCallID)
+		}
+	}
+
+	if len(pending) == 0 {
+		return msgs
+	}
+
+	// Inject synthetic tool results for orphans
+	for id := range pending {
+		msgs = append(msgs, &schema.Message{
+			Role:       schema.Tool,
+			Content:    "Error: tool execution was interrupted",
+			ToolCallID: id,
+		})
+	}
+	return msgs
 }
 
 // MessageCount returns the number of messages in the conversation history.

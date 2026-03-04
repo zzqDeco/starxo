@@ -217,6 +217,90 @@ func (s *SessionStore) loadSession(id string) (*model.Session, error) {
 	return &sess, nil
 }
 
+// SaveSessionData atomically writes the unified session data (messages + display + streaming state).
+// Uses write-to-tmp + rename for crash safety.
+func (s *SessionStore) SaveSessionData(sessionID string, data *model.SessionData) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := filepath.Join(s.baseDir, sessionID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("ensure session dir: %w", err)
+	}
+
+	bytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session data: %w", err)
+	}
+
+	tmpFile := filepath.Join(dir, "session_data.tmp")
+	finalFile := filepath.Join(dir, "session_data.json")
+
+	if err := os.WriteFile(tmpFile, bytes, 0644); err != nil {
+		return fmt.Errorf("write tmp file: %w", err)
+	}
+	if err := os.Rename(tmpFile, finalFile); err != nil {
+		// On Windows, Rename may fail if target exists; remove first then retry
+		_ = os.Remove(finalFile)
+		if err := os.Rename(tmpFile, finalFile); err != nil {
+			return fmt.Errorf("atomic rename: %w", err)
+		}
+	}
+
+	// Also write messages.json for backward compatibility
+	msgBytes, err := json.MarshalIndent(data.Messages, "", "  ")
+	if err == nil {
+		msgPath := filepath.Join(dir, "messages.json")
+		_ = os.WriteFile(msgPath, msgBytes, 0644)
+	}
+
+	return nil
+}
+
+// LoadSessionData reads the unified session data file.
+// Falls back to loading messages.json + display.json separately if session_data.json doesn't exist.
+func (s *SessionStore) LoadSessionData(sessionID string) (*model.SessionData, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Try unified file first
+	dataPath := filepath.Join(s.baseDir, sessionID, "session_data.json")
+	data, err := os.ReadFile(dataPath)
+	if err == nil {
+		var sd model.SessionData
+		if err := json.Unmarshal(data, &sd); err != nil {
+			return nil, fmt.Errorf("unmarshal session data: %w", err)
+		}
+		return &sd, nil
+	}
+
+	// Fallback: reconstruct from legacy files
+	sd := &model.SessionData{Version: 1}
+
+	// Load messages.json
+	msgPath := filepath.Join(s.baseDir, sessionID, "messages.json")
+	if msgData, err := os.ReadFile(msgPath); err == nil {
+		var msgs []model.PersistedMessage
+		if json.Unmarshal(msgData, &msgs) == nil {
+			sd.Messages = msgs
+		}
+	}
+
+	// Load display.json
+	dispPath := filepath.Join(s.baseDir, sessionID, "display.json")
+	if dispData, err := os.ReadFile(dispPath); err == nil {
+		var turns []model.DisplayTurn
+		if json.Unmarshal(dispData, &turns) == nil {
+			sd.Display = turns
+		}
+	}
+
+	if sd.Messages == nil && sd.Display == nil {
+		return nil, nil
+	}
+	return sd, nil
+}
+
 // saveSession writes a session.json to disk (caller must hold lock).
 func (s *SessionStore) saveSession(sess *model.Session) error {
 	path := filepath.Join(s.baseDir, sess.ID, "session.json")

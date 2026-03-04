@@ -84,6 +84,7 @@ func (a *App) startup(ctx context.Context) {
 	// Manager may be nil at startup since sandbox is not yet connected.
 	a.chatService.SetDependencies(a.sandboxService.Manager(), a.ctxEngine)
 	a.chatService.SetSessionService(a.sessionService)
+	a.sessionService.SetChatService(a.chatService)
 	a.fileService.SetSessionService(a.sessionService)
 
 	// Give sandbox service access to session service for container ownership
