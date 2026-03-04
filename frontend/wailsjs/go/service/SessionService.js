@@ -62,12 +62,12 @@ export function SaveCurrentSession() {
   return window['go']['service']['SessionService']['SaveCurrentSession']();
 }
 
-export function SetContext(arg1) {
-  return window['go']['service']['SessionService']['SetContext'](arg1);
-}
-
 export function SetChatService(arg1) {
   return window['go']['service']['SessionService']['SetChatService'](arg1);
+}
+
+export function SetContext(arg1) {
+  return window['go']['service']['SessionService']['SetContext'](arg1);
 }
 
 export function SetCtxEngine(arg1) {

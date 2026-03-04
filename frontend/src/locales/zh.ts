@@ -59,6 +59,7 @@ export default {
     executing: '执行中...',
     actions: '个操作',
     showFull: '展开全部',
+    thinking: '正在思考...',
   },
   interrupt: {
     agentNeedsInfo: '智能体需要更多信息',

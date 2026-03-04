@@ -22,11 +22,11 @@
 - **Tab 页结构**: ssh / docker / llm / mcp，各 Tab 渲染对应的子表单组件
 - **子表单组件**: SSHConfigForm (SSHConfig.vue)、DockerConfigForm (DockerConfig.vue)、LLMConfigForm (LLMConfig.vue)、MCPConfigForm (MCPConfig.vue)
 - **Footer 操作**: 恢复默认 (resetToDefaults) | 取消 (关闭模态) | 保存 (saveSettings + 关闭模态)
-- **模态配置**: NModal + NCard，600px 宽度，支持遮罩点击和 ESC 关闭
+- **模态实现**: 使用自定义 position:fixed 遮罩层 + Transition 动画（替代 NModal，因 NModal teleport 到 body 在 Wails WebView2 中导致事件处理问题）。ESC 关闭通过 onMounted/onBeforeUnmount 的 keydown 监听器实现，背景点击关闭通过 @mousedown + e.target === e.currentTarget 判断
 
 ## 5. 依赖关系
 - 内部依赖: `@/stores/settingsStore`、`./SSHConfig.vue`、`./DockerConfig.vue`、`./LLMConfig.vue`、`./MCPConfig.vue`
-- 外部依赖: `vue` (ref)、`naive-ui` (NModal, NCard, NTabs, NTabPane, NButton, NIcon)、`@vicons/ionicons5` (Close)、`vue-i18n` (useI18n)
+- 外部依赖: `vue` (ref, onMounted, onBeforeUnmount, Transition)、`naive-ui` (NCard, NTabs, NTabPane, NButton, NIcon)、`@vicons/ionicons5` (Close)、`vue-i18n` (useI18n)
 
 ## 6. 变更影响面
 - 新增配置 Tab 需添加子表单组件和 Tab 页

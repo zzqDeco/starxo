@@ -9,7 +9,7 @@
 
 ## 2. 核心职责
 - 时间线事件项组件，负责渲染单个 TurnEvent 的可视化表示。
-- 按事件类型和工具类别提供差异化的渲染样式（消息、工具调用、transfer、中断、信息）。
+- 按事件类型和工具类别提供差异化的渲染样式（消息、工具调用、transfer、中断、信息、reasoning、thinking）。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -30,6 +30,9 @@
   - `notify`: notify_user — 青色 (#22d3ee)
   - `other`: 未分类工具 — 黄色 (#f59e0b)
 - **特殊渲染**:
+  - `reasoning`: agent 标签 + 推理文本，浅色背景条（.event-reasoning）
+  - `thinking`: 三个脉冲圆点动画 + agent 标签 + "Thinking..." 文本（.event-thinking，keyframes thinking-bounce）
+  - `transfer`: 显示 event.toolArgs 作为转移描述（.transfer-desc）
   - `notify_user`: 内联状态横幅（不使用折叠面板）
   - `task` (agent): 委派卡片（显示子代理名称 + 描述 + 状态）
   - `write_todos` / `update_todo`: 渲染 TodoBoard 组件
@@ -44,6 +47,7 @@
 ## 6. 变更影响面
 - 工具分类修改影响所有 tool_call 事件的渲染
 - 新增工具类型需在 toolInfo computed 中添加分支
+- reasoning/thinking 事件类型的渲染样式影响用户对代理思考过程的感知
 - 结果截断阈值修改影响长输出的展示
 
 ## 7. 维护建议

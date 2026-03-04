@@ -43,6 +43,7 @@
 ## 5. 依赖关系
 - 内部依赖: `./Header.vue`、`./Sidebar.vue`、`./SplitHandle.vue`、`@/components/chat/ChatPanel.vue`、`@/components/terminal/TerminalPanel.vue`、`@/components/files/FileExplorer.vue`、`@/components/containers/ContainerPanel.vue`、`@/components/settings/SettingsPanel.vue`
 - 外部依赖: `vue` (ref, computed)、`@vueuse/core` (useWindowSize)、`vue-i18n` (useI18n)
+- 注: 已移除 watch 导入（不再需要 debug 监听 showSettings）
 
 ## 6. 变更影响面
 - 布局结构从 Naive UI NLayout 迁移到纯 flexbox，不再依赖 NLayout/NLayoutSider/NLayoutContent

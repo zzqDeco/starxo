@@ -59,6 +59,7 @@ export default {
     executing: 'Executing...',
     actions: 'actions',
     showFull: 'Show full result',
+    thinking: 'Thinking...',
   },
   interrupt: {
     agentNeedsInfo: 'Agent needs more information',

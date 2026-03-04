@@ -74,7 +74,8 @@ IMPORTANT RULES:
 - You are self-sufficient. You have read_file and list_files — use them directly.
 - When editing files, use precise old_str matching in str_replace_editor.
 - Always write clean, well-documented code following best practices.
-- Handle edge cases and add error handling where appropriate.`, ac.WorkspacePath, ac.WorkspacePath)
+- Handle edge cases and add error handling where appropriate.
+- Before each tool call, briefly explain what you are about to do and why (1-2 sentences). This helps the user understand your progress in real-time.`, ac.WorkspacePath, ac.WorkspacePath)
 }
 
 // CodeExecutorPrompt returns the code_executor system prompt.
@@ -103,7 +104,8 @@ IMPORTANT RULES:
 - You are self-sufficient. You have read_file — use it directly to inspect files.
 - Before executing code, verify that all dependencies are available.
 - Always report results clearly, including stdout, stderr, and exit codes.
-- If execution fails, analyze the error and report what went wrong.`, ac.WorkspacePath)
+- If execution fails, analyze the error and report what went wrong.
+- Before each tool call, briefly explain what you are about to do and why (1-2 sentences). This helps the user understand your progress in real-time.`, ac.WorkspacePath)
 }
 
 // FileManagerPrompt returns the file_manager system prompt.
@@ -132,5 +134,6 @@ WORKFLOW:
 IMPORTANT RULES:
 - You are self-sufficient. Use your own tools to complete the task.
 - Always use absolute paths starting with %s.
-- Report any errors clearly, such as files not found or permission issues.`, ac.WorkspacePath, ac.WorkspacePath, ac.WorkspacePath)
+- Report any errors clearly, such as files not found or permission issues.
+- Before each tool call, briefly explain what you are about to do and why (1-2 sentences). This helps the user understand your progress in real-time.`, ac.WorkspacePath, ac.WorkspacePath, ac.WorkspacePath)
 }

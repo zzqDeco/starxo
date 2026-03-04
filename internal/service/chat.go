@@ -303,14 +303,32 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 
 			if event.Action.TransferToAgent != nil {
 				transferCount++
-				logger.Transfer(event.AgentName, event.Action.TransferToAgent.DestAgentName,
+				destName := event.Action.TransferToAgent.DestAgentName
+				logger.Transfer(event.AgentName, destName,
 					"transfer_count", transferCount,
 				)
+
+				// Agent descriptions for enriched transfer events
+				agentDescs := map[string]string{
+					"code_writer":   "代码读写与编辑",
+					"code_executor": "命令与脚本执行",
+					"file_manager":  "文件批量操作",
+				}
+
 				s.emitTimeline(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "transfer",
 					Agent:     event.AgentName,
-					Content:   event.Action.TransferToAgent.DestAgentName,
+					Content:   destName,
+					ToolArgs:  agentDescs[destName],
+					Timestamp: time.Now().UnixMilli(),
+				})
+
+				// Emit thinking indicator so the user sees the sub-agent is active
+				s.emitTimeline(TimelineEvent{
+					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+					Type:      "thinking",
+					Agent:     destName,
 					Timestamp: time.Now().UnixMilli(),
 				})
 			}
@@ -341,6 +359,29 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 
 			// Emit tool call timeline events
 			if len(msg.ToolCalls) > 0 {
+				// Surface the LLM's reasoning text before tool calls.
+				// The LLM often explains its intent (e.g. "I'll read the file to understand...")
+				// but this content was previously discarded by the continue below.
+				if msg.Content != "" {
+					logger.Info("[CHAT] Reasoning text found with tool calls",
+						"agent", event.AgentName,
+						"content_len", len(msg.Content),
+						"preview", truncateResult(msg.Content, 100),
+					)
+					s.emitTimeline(TimelineEvent{
+						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+						Type:      "reasoning",
+						Agent:     event.AgentName,
+						Content:   msg.Content,
+						Timestamp: time.Now().UnixMilli(),
+					})
+				} else {
+					logger.Info("[CHAT] No reasoning text with tool calls (Content empty)",
+						"agent", event.AgentName,
+						"tool_count", len(msg.ToolCalls),
+					)
+				}
+
 				for _, tc := range msg.ToolCalls {
 					s.emitTimeline(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
@@ -392,6 +433,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 
 				// Debounced intermediate save
 				maybeSave()
+
+				// Emit thinking indicator after sub-agent tool result
+				// so the user knows the sub-agent is still working
+				if event.AgentName != "coding_agent" {
+					s.emitTimeline(TimelineEvent{
+						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+						Type:      "thinking",
+						Agent:     event.AgentName,
+						Timestamp: time.Now().UnixMilli(),
+					})
+				}
 
 				continue
 			}

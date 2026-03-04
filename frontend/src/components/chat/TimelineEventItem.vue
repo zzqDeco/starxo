@@ -260,6 +260,7 @@ const notifyMessage = computed(() => {
           <span class="transfer-arrow">&rarr;</span>
           <span :style="{ color: agentColor(event.content) }">{{ agentLabel(event.content) }}</span>
         </span>
+        <span v-if="event.toolArgs" class="transfer-desc">{{ event.toolArgs }}</span>
       </div>
     </template>
 
@@ -276,6 +277,31 @@ const notifyMessage = computed(() => {
       <div class="event-info">
         <NIcon size="12"><InformationCircle /></NIcon>
         <span>{{ event.content }}</span>
+      </div>
+    </template>
+
+    <!-- Reasoning: agent's intent explanation before tool calls -->
+    <template v-else-if="event.type === 'reasoning'">
+      <div class="event-reasoning">
+        <span class="reasoning-agent" :style="{ color: agentColor(event.agent) }">
+          {{ agentLabel(event.agent) }}
+        </span>
+        <span class="reasoning-text">{{ event.content }}</span>
+      </div>
+    </template>
+
+    <!-- Thinking: fallback "thinking..." animation -->
+    <template v-else-if="event.type === 'thinking'">
+      <div class="event-thinking">
+        <span class="thinking-dots">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </span>
+        <span class="thinking-agent" :style="{ color: agentColor(event.agent) }">
+          {{ agentLabel(event.agent) }}
+        </span>
+        <span class="thinking-label">{{ t('message.thinking') }}</span>
       </div>
     </template>
   </div>
@@ -563,5 +589,94 @@ const notifyMessage = computed(() => {
 
 .event-tool-call :deep(.n-collapse-item__content-inner) {
   padding-top: 4px !important;
+}
+
+/* Reasoning: agent intent explanation */
+.event-reasoning {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: rgba(139, 141, 163, 0.06);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid rgba(139, 141, 163, 0.3);
+  margin: 2px 0;
+}
+
+.reasoning-agent {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.reasoning-text {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Thinking: animated dots indicator */
+.event-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 6px 12px;
+  margin: 2px 0;
+}
+
+.thinking-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.thinking-dots .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: thinking-bounce 1.4s ease-in-out infinite;
+}
+
+.thinking-dots .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-dots .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes thinking-bounce {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.thinking-agent {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.thinking-label {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Transfer description */
+.transfer-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
 }
 </style>

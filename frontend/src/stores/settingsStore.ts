@@ -42,7 +42,17 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const result = await GetSettings()
       if (result) {
-        settings.value = result as unknown as AppSettings
+        const merged = structuredClone(defaultSettings)
+        const src = result as unknown as Partial<AppSettings>
+        // Merge top-level sections, preserving defaults for missing fields
+        if (src.ssh) Object.assign(merged.ssh, src.ssh)
+        if (src.docker) Object.assign(merged.docker, src.docker)
+        if (src.llm) Object.assign(merged.llm, src.llm)
+        if (src.agent) Object.assign(merged.agent, src.agent)
+        if (src.mcp) {
+          merged.mcp.servers = Array.isArray(src.mcp.servers) ? src.mcp.servers : []
+        }
+        settings.value = merged
       }
       loaded.value = true
     } catch (e) {
@@ -76,6 +86,9 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function addMCPServer(server: AppSettings['mcp']['servers'][0]) {
+    if (!settings.value.mcp.servers) {
+      settings.value.mcp.servers = []
+    }
     settings.value.mcp.servers.push(server)
   }
 

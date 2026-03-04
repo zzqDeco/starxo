@@ -31,7 +31,8 @@
 - **会话恢复 (`restoreActiveMessages`)**:
   - 优先通过 `sessionStore.loadSessionData()` 从后端 `session_data.json` 加载统一的 display 数据
   - 如有 `streaming` 中途状态，追加 `[streaming interrupted]` 标记的不完整消息
-  - 后备逻辑: 若 `loadSessionData` 返回空，则尝试旧版 `loadChatDisplay` + `loadActiveMessages`
+  - 恢复消息后调用 `chatStore.restoreTodosFromMessages()` 从历史事件中提取最新 todos 快照
+  - 后备逻辑: 若 `loadSessionData` 返回空，则尝试旧版 `loadChatDisplay` + `loadActiveMessages`（此路径也调用 `restoreTodosFromMessages()`）
 - **前端不再保存 display 数据**: `agent:done` 处理器中移除了 `saveChatDisplay` 调用，前端变为纯读取消费者
 
 ## 5. 依赖关系

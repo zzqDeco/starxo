@@ -95,6 +95,8 @@ async function restoreActiveMessages() {
         events: []
       })
     }
+    // Restore todo state from restored events
+    chatStore.restoreTodosFromMessages()
     return
   }
 
@@ -111,6 +113,7 @@ async function restoreActiveMessages() {
         events: msg.events || []
       })
     }
+    chatStore.restoreTodosFromMessages()
     return
   }
 

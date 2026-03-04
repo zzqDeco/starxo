@@ -22,7 +22,7 @@
   - `sidebar` — 侧边栏 (新对话、会话管理、容器状态)
   - `chat` — 聊天区域 (标题、空状态提示、提示卡片)
   - `input` — 输入区域 (占位符、附件、发送提示)
-  - `message` — 消息展示 (复制、参数、结果、展开)
+  - `message` — 消息展示 (复制、参数、结果、展开、thinking="Thinking...")
   - `interrupt` — 中断对话框 (标题、输入提示、选项)
   - `todo` — 任务看板 (taskProgress、collapse、expand)
   - `plan` — 计划面板 (标题)

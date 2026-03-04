@@ -46,7 +46,7 @@
   - `drainStream(stream, agentName)`: 流式输出消费方法，使用 50ms ticker 批量窗口合并 stream_chunk 事件，同时跟踪 `streamingState`
 - Wails 绑定方法: `SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`StopGeneration`、`ClearHistory`、`SetMode`、`GetMode`、`BuildRunners`
 - 事件发射:
-  - `agent:timeline`: 统一时间线事件（消息、工具调用、工具结果、转移、中断、流式块、流式结束、信息）
+  - `agent:timeline`: 统一时间线事件（消息、工具调用、工具结果、转移、中断、流式块、流式结束、信息、reasoning、thinking）
   - `agent:error`: 错误信息
   - `agent:done`: 代理执行完成
   - `agent:interrupt`: 中断事件（followup/choice）
@@ -79,12 +79,15 @@
 - 消息处理变更影响会话历史的完整性
 - `processEvents` 将工具调用请求（assistant + ToolCalls）和工具执行结果（tool role）同步加入上下文历史，确保持久化后可完整恢复
 - `processEvents` 中 ToolCalls 事件处理后使用 `continue` 跳过后续的 `allContents` 累积，避免将工具调用内容重复添加为孤立的 assistant 消息（否则会导致 LLM API 报 "No tool output found" 错误）
+- `processEvents` 在工具调用事件前发射 reasoning 事件（Type: "reasoning"，当 msg.Content 非空时），在 transfer 事件后和子代理 tool_result 事件后发射 thinking 事件（Type: "thinking"）；transfer 事件附带 agentDescs 中文描述映射（code_writer/code_executor/file_manager），存入 ToolArgs 字段
+- `processEvents` 包含 reasoning 文本存在/缺失的 debug 日志
 - `processEvents` 通过 `pendingToolCalls` map 跟踪已存入的 tool_call_id，在事件循环结束后为未收到结果的孤立 tool_call 注入合成错误响应（"Error: tool execution failed or was interrupted"），防止 LLM API 因缺失 tool result 返回 400 错误
 - Agent 执行过程中通过防抖机制（每 10 秒）中间保存会话，降低崩溃丢失风险
 - `emitTimeline` 辅助方法确保每次 `agent:timeline` 事件同步写入 `TimelineCollector`，使后端成为唯一的 display 数据持久化生产者
 - `drainStream` 使用 50ms ticker 窗口合并流式 chunk，将 IPC 频率从 10-50 次/秒降至 ~20 次/秒
 - `drainStream` 同时维护 `streamingState`，使 `maybeSave` 能在流式中途保存包含部分内容的快照
 - `Timeline()` 和 `StreamingState()` getter 被 `SessionService` 调用，用于构建统一的 `SessionData` 进行持久化
+- 新增的 reasoning/thinking 事件类型影响前端 TimelineEventItem 的渲染逻辑
 - 流式输出逻辑影响前端实时内容显示
 - 是整个后端最核心的服务文件，变更需格外谨慎
 

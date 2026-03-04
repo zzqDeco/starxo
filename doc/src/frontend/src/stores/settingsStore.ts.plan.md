@@ -28,10 +28,10 @@
   - `loaded: boolean` — 是否已从后端加载
   - `saving: boolean` — 是否正在保存
 - **Actions**:
-  - `loadSettings()` — 从后端加载配置，失败则使用默认值
+  - `loadSettings()` — 从后端加载配置并与默认值合并（而非直接覆盖），mcp.servers 使用 Array.isArray() 防御性检查；失败则使用默认值
   - `saveSettings()` — 保存配置到后端
   - `updateSSH/updateDocker/updateLLM(partial)` — 使用 Object.assign 部分更新配置
-  - `addMCPServer(server)` / `removeMCPServer(index)` — MCP 服务器增删
+  - `addMCPServer(server)` / `removeMCPServer(index)` — MCP 服务器增删；addMCPServer 在 servers 为 null 时先初始化为空数组
   - `resetToDefaults()` — 重置为默认配置
 
 ## 5. 依赖关系

@@ -1,6 +1,6 @@
 export interface TurnEvent {
   id: string
-  type: 'message' | 'tool_call' | 'tool_result' | 'transfer' | 'info' | 'interrupt' | 'plan' | 'stream_chunk' | 'stream_end'
+  type: 'message' | 'tool_call' | 'tool_result' | 'transfer' | 'info' | 'interrupt' | 'plan' | 'stream_chunk' | 'stream_end' | 'reasoning' | 'thinking'
   agent: string
   content: string
   toolName?: string

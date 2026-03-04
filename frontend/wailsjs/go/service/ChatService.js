@@ -54,6 +54,14 @@ export function StopGeneration() {
   return window['go']['service']['ChatService']['StopGeneration']();
 }
 
+export function StreamingState() {
+  return window['go']['service']['ChatService']['StreamingState']();
+}
+
+export function Timeline() {
+  return window['go']['service']['ChatService']['Timeline']();
+}
+
 export function UpdateSandbox(arg1) {
   return window['go']['service']['ChatService']['UpdateSandbox'](arg1);
 }

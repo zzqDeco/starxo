@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import {
   NButton, NIcon, NInput, NSelect, NSwitch, NCard,
-  NSpace, NEmpty, NPopconfirm
+  NEmpty
 } from 'naive-ui'
 import { Add, TrashOutline } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const confirmingDelete = ref<number | null>(null)
 
 const transportOptions = [
   { label: 'Stdio', value: 'stdio' },
@@ -49,7 +50,7 @@ function getArgsText(server: MCPServerConfig): string {
   <div class="config-form">
     <div class="server-list">
       <NEmpty
-        v-if="settingsStore.settings.mcp.servers.length === 0"
+        v-if="!settingsStore.settings.mcp.servers || settingsStore.settings.mcp.servers.length === 0"
         :description="t('settings.mcp.noServers')"
         size="small"
         class="empty-servers"
@@ -62,7 +63,7 @@ function getArgsText(server: MCPServerConfig): string {
         </template>
       </NEmpty>
 
-      <template v-for="(server, i) in settingsStore.settings.mcp.servers" :key="i">
+      <template v-for="(server, i) in (settingsStore.settings.mcp.servers || [])" :key="i">
         <NCard size="small" class="server-card" :bordered="true">
           <div class="server-header">
             <div class="server-enable">
@@ -74,25 +75,26 @@ function getArgsText(server: MCPServerConfig): string {
               size="small"
               class="server-name-input"
             />
-            <NPopconfirm
-              @positive-click="removeServer(i)"
-              :positive-text="t('common.remove')"
-              :negative-text="t('common.cancel')"
+            <NButton
+              v-if="confirmingDelete !== i"
+              quaternary
+              circle
+              size="tiny"
+              type="error"
+              @click="confirmingDelete = i"
             >
-              <template #trigger>
-                <NButton
-                  quaternary
-                  circle
-                  size="tiny"
-                  type="error"
-                >
-                  <template #icon>
-                    <NIcon size="14"><TrashOutline /></NIcon>
-                  </template>
-                </NButton>
+              <template #icon>
+                <NIcon size="14"><TrashOutline /></NIcon>
               </template>
-              {{ server.name ? t('settings.mcp.removeConfirm', { name: server.name }) : t('settings.mcp.removeThis') }}
-            </NPopconfirm>
+            </NButton>
+            <div v-else class="confirm-delete">
+              <NButton size="tiny" type="error" @click="removeServer(i); confirmingDelete = null">
+                {{ t('common.remove') }}
+              </NButton>
+              <NButton size="tiny" @click="confirmingDelete = null">
+                {{ t('common.cancel') }}
+              </NButton>
+            </div>
           </div>
 
           <div class="server-fields">
@@ -146,7 +148,7 @@ function getArgsText(server: MCPServerConfig): string {
       </template>
     </div>
 
-    <div v-if="settingsStore.settings.mcp.servers.length > 0" class="add-more">
+    <div v-if="settingsStore.settings.mcp.servers && settingsStore.settings.mcp.servers.length > 0" class="add-more">
       <NButton size="small" dashed block @click="addServer">
         <template #icon><NIcon><Add /></NIcon></template>
         {{ t('settings.mcp.addServer') }}
@@ -224,5 +226,11 @@ function getArgsText(server: MCPServerConfig): string {
 
 .add-more {
   margin-top: 10px;
+}
+
+.confirm-delete {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
 }
 </style>

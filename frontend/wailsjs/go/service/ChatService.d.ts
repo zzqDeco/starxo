@@ -4,6 +4,7 @@ import {context} from '../models';
 import {sandbox} from '../models';
 import {agentctx} from '../models';
 import {service} from '../models';
+import {model} from '../models';
 
 export function BuildRunners():Promise<void>;
 
@@ -30,5 +31,9 @@ export function SetOnAgentDone(arg1:any):Promise<void>;
 export function SetSessionService(arg1:service.SessionService):Promise<void>;
 
 export function StopGeneration():Promise<void>;
+
+export function StreamingState():Promise<model.StreamingState>;
+
+export function Timeline():Promise<agentctx.TimelineCollector>;
 
 export function UpdateSandbox(arg1:sandbox.SandboxManager):Promise<void>;

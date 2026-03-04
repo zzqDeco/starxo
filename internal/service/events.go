@@ -74,7 +74,7 @@ type SessionSwitchedEvent struct {
 // Every meaningful action (message, tool call, transfer, etc.) is sent as a TimelineEvent.
 type TimelineEvent struct {
 	ID        string `json:"id"`
-	Type      string `json:"type"` // "message" | "tool_call" | "tool_result" | "transfer" | "info" | "interrupt" | "plan"
+	Type      string `json:"type"` // "message" | "tool_call" | "tool_result" | "transfer" | "info" | "interrupt" | "reasoning" | "thinking"
 	Agent     string `json:"agent"`
 	Content   string `json:"content"`
 	ToolName  string `json:"toolName,omitempty"`

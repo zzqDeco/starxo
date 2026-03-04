@@ -34,12 +34,13 @@
   - `hasInterrupt` — 是否有待处理中断
 - **Actions**:
   - `getOrCreateTurn()` — 获取或创建当前助手回复消息，实现"一轮对话一个消息"模型
-  - `addTimelineEvent(evt)` — 核心方法，处理 stream_chunk（累积到已有流式消息）、stream_end（标记流式结束）、tool_result（匹配到对应 tool_call 并调用 tryUpdateTodosFromResult）、tool_call(write_todos) 时提取 todos 到 latestTodos
+  - `addTimelineEvent(evt)` — 核心方法，处理 stream_chunk（累积到已有流式消息）、stream_end（标记流式结束）、tool_result（匹配到对应 tool_call 并调用 tryUpdateTodosFromResult）、tool_call(write_todos) 时提取 todos 到 latestTodos、thinking 事件管理（替换同一 agent 的前一个 thinking 事件，收到非 thinking 事件时清除已有 thinking）
   - `tryUpdateTodosFromResult(evt)` — 从 update_todo 工具结果中解析更新后的 todos 快照（以 `---\n` 分隔，取最后部分 JSON 解析）
   - `addUserMessage(content)` — 添加用户消息并重置轮次状态
   - `setInterrupt(evt)` / `clearInterrupt()` — 中断状态管理
   - `updatePlanSteps(steps)` / `setMode(mode)` — 计划模式管理
   - `setGenerating(generating, agent?)` — 更新生成状态
+  - `restoreTodosFromMessages()` — 扫描所有已恢复消息的 events，提取最新的 todos 快照用于会话恢复
   - `clearMessages()` — 清空所有状态（含 latestTodos）
 
 ## 5. 依赖关系

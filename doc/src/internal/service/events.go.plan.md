@@ -26,7 +26,7 @@
   - `FileInfoDTO`: 文件信息 DTO（Name、Path、Size、IsOutput）
   - `SandboxStatusDTO`: 沙箱状态 DTO（SSHConnected、DockerRunning、ContainerID、**ActiveContainerID**、**ActiveContainerName**、**DockerAvailable**）— 扩展了活跃容器信息和 Docker 可用性
   - `SessionSwitchedEvent`: 会话切换事件（Session、ContainerID）
-  - `TimelineEvent`: 统一时间线事件
+  - `TimelineEvent`: 统一时间线事件（Type 字段支持 "reasoning" 和 "thinking" 事件类型）
   - `InterruptEvent`: 中断事件（followup/choice）
   - `InterruptOption`: 中断选项（Label、Description）
   - `PlanEvent`: 计划事件（Steps []PlanStepDTO）

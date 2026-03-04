@@ -84,6 +84,22 @@ export const useChatStore = defineStore('chat', () => {
   function addTimelineEvent(evt: TurnEvent) {
     const turn = getOrCreateTurn()
 
+    // --- thinking event management ---
+    // When a thinking event arrives: replace any previous thinking from the same agent
+    if (evt.type === 'thinking') {
+      const idx = turn.events.findLastIndex(
+        (e: TurnEvent) => e.type === 'thinking' && e.agent === evt.agent
+      )
+      if (idx !== -1) turn.events.splice(idx, 1)
+      turn.events.push(evt)
+      return
+    }
+    // When any non-thinking event arrives: clear thinking from the same agent
+    const thinkIdx = turn.events.findLastIndex(
+      (e: TurnEvent) => e.type === 'thinking' && e.agent === evt.agent
+    )
+    if (thinkIdx !== -1) turn.events.splice(thinkIdx, 1)
+
     // Stream chunk: accumulate into existing streaming message or create new one
     if (evt.type === 'stream_chunk') {
       const lastEvt = turn.events.length > 0 ? turn.events[turn.events.length - 1] : null
@@ -200,6 +216,33 @@ export const useChatStore = defineStore('chat', () => {
     latestTodos.value = []
   }
 
+  /** Scan all restored messages to extract the latest todos (for session restore) */
+  function restoreTodosFromMessages() {
+    for (const msg of messages.value) {
+      if (!msg.events) continue
+      for (const evt of msg.events) {
+        if (evt.type === 'tool_call' && evt.toolName === 'write_todos') {
+          try {
+            const args = JSON.parse(evt.toolArgs || '{}')
+            if (args?.todos && Array.isArray(args.todos)) {
+              latestTodos.value = args.todos
+            }
+          } catch { /* ignore */ }
+        }
+        // update_todo: check toolResult for updated list
+        if (evt.type === 'tool_call' && evt.toolName === 'update_todo' && evt.toolResult) {
+          const parts = evt.toolResult.split('---\n')
+          if (parts.length >= 2) {
+            try {
+              const todos = JSON.parse(parts[parts.length - 1])
+              if (Array.isArray(todos)) latestTodos.value = todos
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+  }
+
   return {
     messages,
     isStreaming,
@@ -221,6 +264,7 @@ export const useChatStore = defineStore('chat', () => {
     updatePlanSteps,
     setMode,
     setGenerating,
-    clearMessages
+    clearMessages,
+    restoreTodosFromMessages
   }
 })

@@ -19,9 +19,9 @@
 - 结构体/接口定义: 无
 - 导出函数/方法:
   - `DeepAgentPrompt(ac AgentContext) string`: 生成核心代理提示词，定义了直接工具（ask_user、ask_choice、write_todos、update_todo、notify_user）和子代理（code_writer、code_executor、file_manager）的使用规则及决策逻辑
-  - `CodeWriterPrompt(ac AgentContext) string`: 生成代码编写代理提示词，强调使用 str_replace_editor、read_file、list_files 工具进行代码相关操作
-  - `CodeExecutorPrompt(ac AgentContext) string`: 生成代码执行代理提示词，定义 python_execute、shell_execute、read_file 工具的使用方式
-  - `FileManagerPrompt(ac AgentContext) string`: 生成文件管理代理提示词，使用 list_files、read_file、write_file 工具处理非代码文件和批量操作
+  - `CodeWriterPrompt(ac AgentContext) string`: 生成代码编写代理提示词，强调使用 str_replace_editor、read_file、list_files 工具进行代码相关操作；包含 reasoning 指导（"Before each tool call, briefly explain what you are about to do and why"）
+  - `CodeExecutorPrompt(ac AgentContext) string`: 生成代码执行代理提示词，定义 python_execute、shell_execute、read_file 工具的使用方式；包含 reasoning 指导
+  - `FileManagerPrompt(ac AgentContext) string`: 生成文件管理代理提示词，使用 list_files、read_file、write_file 工具处理非代码文件和批量操作；包含 reasoning 指导
 - Wails 绑定方法: 无
 - 事件发射: 无
 
@@ -41,7 +41,7 @@
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- 修改提示词时应通过实际对话测试验证代理行为变化，避免引入意外的行为回归。
+- 修改提示词时应通过实际对话测试验证代理行为变化，避免引入意外的行为回归。reasoning 指导行影响前端 reasoning 事件的内容质量。
 - 新增子代理时需在 `DeepAgentPrompt` 的 SUB-AGENTS 部分添加描述，并创建对应的 `*Prompt` 函数。
 - 新增工具时需在对应代理的 YOUR TOOLS 部分添加工具说明，包括名称和使用场景。
 - 提示词中的环境变量（SSH、容器信息）来自 `AgentContext`，确保 `context.go` 中的字段与提示词模板匹配。

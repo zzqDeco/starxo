@@ -17,7 +17,7 @@
 
 ## 4. 关键实现细节
 - **导出类型/接口**:
-  - `TurnEvent` — 时间线事件，type 字段区分 8 种类型: message / tool_call / tool_result / transfer / info / interrupt / plan / stream_chunk / stream_end。包含可选字段 toolName/toolArgs/toolId/toolResult/isStreaming
+  - `TurnEvent` — 时间线事件，type 字段区分 10 种类型: message / tool_call / tool_result / transfer / info / interrupt / plan / stream_chunk / stream_end / reasoning / thinking。包含可选字段 toolName/toolArgs/toolId/toolResult/isStreaming
   - `Message` — 聊天消息，role 区分 user/assistant/system，包含 events 数组（TurnEvent[]）和可选 agent/isStreaming
   - `TerminalOutputEvent` — 终端输出事件（stdout/stderr/exitCode）
   - `PersistedMessage` — 持久化消息（简化格式，用于后端存储回退）
