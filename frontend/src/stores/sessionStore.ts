@@ -13,6 +13,7 @@ import {
   GetActiveSessionMessages,
   SaveChatDisplay,
   LoadChatDisplay,
+  LoadSessionData,
 } from '../../wailsjs/go/service/SessionService'
 
 export const useSessionStore = defineStore('session', () => {
@@ -120,6 +121,16 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /** Load unified session data (messages + display + streaming state) from backend */
+  async function loadSessionData(): Promise<any | null> {
+    try {
+      return await LoadSessionData()
+    } catch (e) {
+      console.error('Failed to load session data:', e)
+      return null
+    }
+  }
+
   /** Update local session data (e.g., after session:switched event) */
   function setActiveSession(session: Session) {
     activeSessionId.value = session.id
@@ -144,6 +155,7 @@ export const useSessionStore = defineStore('session', () => {
     loadActiveMessages,
     saveChatDisplay,
     loadChatDisplay,
+    loadSessionData,
     setActiveSession,
   }
 })

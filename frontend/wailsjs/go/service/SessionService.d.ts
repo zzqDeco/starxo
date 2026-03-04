@@ -27,6 +27,8 @@ export function ListSessionsEnriched():Promise<Array<service.EnrichedSession>>;
 
 export function LoadChatDisplay():Promise<string>;
 
+export function LoadSessionData():Promise<model.SessionData>;
+
 export function RenameSession(arg1:string,arg2:string):Promise<void>;
 
 export function SaveChatDisplay(arg1:string):Promise<void>;
@@ -34,6 +36,8 @@ export function SaveChatDisplay(arg1:string):Promise<void>;
 export function SaveCurrentSession():Promise<void>;
 
 export function SetContext(arg1:context.Context):Promise<void>;
+
+export function SetChatService(arg1:service.ChatService):Promise<void>;
 
 export function SetCtxEngine(arg1:agentctx.Engine):Promise<void>;
 

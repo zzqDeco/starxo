@@ -46,6 +46,10 @@ export function LoadChatDisplay() {
   return window['go']['service']['SessionService']['LoadChatDisplay']();
 }
 
+export function LoadSessionData() {
+  return window['go']['service']['SessionService']['LoadSessionData']();
+}
+
 export function RenameSession(arg1, arg2) {
   return window['go']['service']['SessionService']['RenameSession'](arg1, arg2);
 }
@@ -60,6 +64,10 @@ export function SaveCurrentSession() {
 
 export function SetContext(arg1) {
   return window['go']['service']['SessionService']['SetContext'](arg1);
+}
+
+export function SetChatService(arg1) {
+  return window['go']['service']['SessionService']['SetChatService'](arg1);
 }
 
 export function SetCtxEngine(arg1) {

@@ -3,7 +3,6 @@ import { ref, onMounted, computed } from 'vue'
 import { NTree, NButton, NIcon, NEmpty, NTag, NSpin } from 'naive-ui'
 import type { TreeOption } from 'naive-ui'
 import { FolderOpen, Document, CloudUpload, CloudDownload, Refresh } from '@vicons/ionicons5'
-import { useWailsEvent } from '@/composables/useWailsEvent'
 import type { FileInfo } from '@/types/config'
 import FileTransfer from './FileTransfer.vue'
 import { ListWorkspaceFiles, DownloadFile, ReadFilePreview } from '../../../wailsjs/go/service/FileService'
@@ -112,10 +111,6 @@ async function loadPreview(path: string) {
     previewLoading.value = false
   }
 }
-
-useWailsEvent('files:updated', () => {
-  refreshFiles()
-})
 
 onMounted(() => {
   refreshFiles()

@@ -9,7 +9,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useContainerStore } from '@/stores/containerStore'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
-import type { Message, TurnEvent, InterruptEvent, PlanEvent, ModeChangedEvent } from '@/types/message'
+import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent } from '@/types/message'
 
 const settingsStore = useSettingsStore()
 const connectionStore = useConnectionStore()
@@ -71,7 +71,34 @@ async function restoreActiveMessages() {
   // Always clear first — prevents stale messages when switching to empty sessions
   chatStore.clearMessages()
 
-  // Try rich display data first (includes timeline events)
+  // Load unified session data from backend (includes messages + display + streaming state)
+  const data = await sessionStore.loadSessionData()
+  if (data?.display?.length > 0) {
+    for (const turn of data.display) {
+      chatStore.addMessage({
+        id: turn.id || crypto.randomUUID(),
+        role: turn.role as any,
+        content: turn.content || '',
+        agent: turn.agent,
+        timestamp: turn.timestamp || Date.now(),
+        events: turn.events || []
+      })
+    }
+    // If there was an interrupted streaming state, show it as an incomplete message
+    if (data.streaming?.partialContent) {
+      chatStore.addMessage({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: data.streaming.partialContent + '\n\n[streaming interrupted]',
+        agent: data.streaming.agentName || 'coding_agent',
+        timestamp: Date.now(),
+        events: []
+      })
+    }
+    return
+  }
+
+  // Fallback: try legacy display data
   const display = await sessionStore.loadChatDisplay()
   if (display && display.length > 0) {
     for (const msg of display) {
@@ -190,8 +217,6 @@ onMounted(async () => {
   EventsOn('agent:done', () => {
     chatStore.setGenerating(false)
     sessionStore.loadSessions()
-    // Persist rich display messages (with timeline events)
-    sessionStore.saveChatDisplay(chatStore.messages)
   })
 
   // Agent error
@@ -212,13 +237,6 @@ onMounted(async () => {
   EventsOn('agent:interrupt', (data: InterruptEvent) => {
     if (data) {
       chatStore.setInterrupt(data)
-    }
-  })
-
-  // Plan event — plan state updated
-  EventsOn('agent:plan', (data: PlanEvent) => {
-    if (data?.steps) {
-      chatStore.updatePlanSteps(data.steps)
     }
   })
 

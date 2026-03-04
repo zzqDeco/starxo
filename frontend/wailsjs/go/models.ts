@@ -306,8 +306,8 @@ export namespace model {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class Session {
 	    id: string;
 	    title: string;
@@ -317,11 +317,11 @@ export namespace model {
 	    createdAt: number;
 	    updatedAt: number;
 	    messageCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -333,6 +333,130 @@ export namespace model {
 	        this.updatedAt = source["updatedAt"];
 	        this.messageCount = source["messageCount"];
 	    }
+	}
+
+	export class DisplayEvent {
+	    id: string;
+	    type: string;
+	    agent?: string;
+	    content?: string;
+	    toolName?: string;
+	    toolArgs?: string;
+	    toolId?: string;
+	    toolResult?: string;
+	    timestamp: number;
+	    isStreaming?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new DisplayEvent(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.agent = source["agent"];
+	        this.content = source["content"];
+	        this.toolName = source["toolName"];
+	        this.toolArgs = source["toolArgs"];
+	        this.toolId = source["toolId"];
+	        this.toolResult = source["toolResult"];
+	        this.timestamp = source["timestamp"];
+	        this.isStreaming = source["isStreaming"];
+	    }
+	}
+
+	export class DisplayTurn {
+	    id: string;
+	    role: string;
+	    content: string;
+	    agent?: string;
+	    timestamp: number;
+	    events: DisplayEvent[];
+
+	    static createFrom(source: any = {}) {
+	        return new DisplayTurn(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.role = source["role"];
+	        this.content = source["content"];
+	        this.agent = source["agent"];
+	        this.timestamp = source["timestamp"];
+	        this.events = this.convertValues(source["events"], DisplayEvent);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+	export class StreamingState {
+	    partialContent?: string;
+	    agentName?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new StreamingState(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.partialContent = source["partialContent"];
+	        this.agentName = source["agentName"];
+	    }
+	}
+
+	export class SessionData {
+	    version: number;
+	    messages: PersistedMessage[];
+	    display: DisplayTurn[];
+	    streaming?: StreamingState;
+
+	    static createFrom(source: any = {}) {
+	        return new SessionData(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.messages = this.convertValues(source["messages"], PersistedMessage);
+	        this.display = this.convertValues(source["display"], DisplayTurn);
+	        this.streaming = this.convertValues(source["streaming"], StreamingState);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
