@@ -8,12 +8,12 @@
 - 所属模块: storage
 
 ## 2. 核心职责
-- 该文件实现了会话的磁盘持久化存储层 `SessionStore`，管理会话元数据和对话消息的读写。每个会话以独立目录存储在 `~/.starxo/sessions/{id}/` 下，包含 `session.json`（元数据）、`messages.json`（对话历史）和 `display.json`（前端展示数据）三个文件。提供会话的 CRUD 操作、消息的保存/加载以及前端展示数据的持久化，所有操作通过读写锁保证线程安全。
+- 该文件实现了会话的磁盘持久化存储层 `SessionStore`，管理会话元数据和对话消息的读写。每个会话以独立目录存储在 `~/.starxo/sessions/{id}/` 下，包含 `session.json`（元数据）、`session_data.json`（统一的消息+显示数据）和兼容保留的 `messages.json`/`display.json`。提供会话的 CRUD 操作、统一的 `SaveSessionData`/`LoadSessionData`（原子写入 + 自动向后兼容加载），以及旧版的消息和展示数据持久化接口。所有操作通过读写锁保证线程安全。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: 会话 ID (string)、会话标题 (string)、`model.Session` 对象、`[]model.PersistedMessage` 消息列表、前端展示数据 (JSON string)
-- 输出结果: `model.Session` 对象、`[]model.PersistedMessage` 消息列表、前端展示数据字符串；磁盘文件的创建/修改/删除
+- 输入来源: 会话 ID (string)、会话标题 (string)、`model.Session` 对象、`[]model.PersistedMessage` 消息列表、`*model.SessionData` 统一存储对象、前端展示数据 (JSON string)
+- 输出结果: `model.Session` 对象、`[]model.PersistedMessage` 消息列表、`*model.SessionData` 统一存储对象、前端展示数据字符串；磁盘文件的创建/修改/删除
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
@@ -27,8 +27,10 @@
   - `(s *SessionStore) Delete(id string) error` — 删除会话及其全部数据
   - `(s *SessionStore) SaveMessages(sessionID string, messages []model.PersistedMessage) error` — 保存对话消息
   - `(s *SessionStore) LoadMessages(sessionID string) ([]model.PersistedMessage, error)` — 加载对话消息
-  - `(s *SessionStore) SaveDisplayData(sessionID string, data string) error` — 保存前端展示数据
-  - `(s *SessionStore) LoadDisplayData(sessionID string) (string, error)` — 加载前端展示数据
+  - `(s *SessionStore) SaveSessionData(sessionID string, data *model.SessionData) error` — 原子保存统一会话数据（先写 tmp 再 rename），同时写出 `messages.json` 用于向后兼容
+  - `(s *SessionStore) LoadSessionData(sessionID string) (*model.SessionData, error)` — 加载统一会话数据，优先读取 `session_data.json`，若不存在则自动从旧版 `messages.json` + `display.json` 组装 `SessionData` 对象
+  - `(s *SessionStore) SaveDisplayData(sessionID string, data string) error` — 保存前端展示数据（旧版接口，保留兼容）
+  - `(s *SessionStore) LoadDisplayData(sessionID string) (string, error)` — 加载前端展示数据（旧版接口，保留兼容）
 - 未导出函数:
   - `(s *SessionStore) loadSession(id string) (*model.Session, error)` — 从磁盘读取会话元数据，包含旧格式迁移逻辑（单 `containerID` → `containers` 数组）
   - `(s *SessionStore) saveSession(sess *model.Session) error` — 将会话元数据写入磁盘
@@ -37,7 +39,7 @@
 
 ## 5. 依赖关系
 - 内部依赖:
-  - `starxo/internal/model` (Session, PersistedMessage 类型)
+  - `starxo/internal/model` (Session, PersistedMessage, SessionData, DisplayTurn, DisplayEvent 类型)
 - 外部依赖:
   - `encoding/json` (JSON 序列化)
   - `fmt` (错误格式化)
@@ -52,7 +54,9 @@
 ## 6. 变更影响面
 - 修改存储路径或目录结构会影响已有用户的会话数据访问
 - 修改 `Create` 方法的 ID 生成策略可能导致 ID 冲突风险变化
-- `SaveDisplayData`/`LoadDisplayData` 的格式变更会影响前端会话恢复
+- `SaveSessionData`/`LoadSessionData` 的格式变更会影响前端会话恢复
+- `SaveSessionData` 使用原子写入（tmp+rename），Windows 上先 remove 旧文件再 rename（`os.Rename` 不支持覆盖）
+- `LoadSessionData` 的向后兼容逻辑确保旧版 `messages.json` + `display.json` 数据可被自动迁移
 - 该存储层被 `service.SessionService` 使用，接口变更需同步更新服务层
 - `List` 方法遍历目录结构，会话数量过多时可能有性能问题
 
@@ -61,5 +65,6 @@
 - 会话 ID 使用 UUID 前 8 位（`uuid.New().String()[:8]`），在会话数量极大时存在碰撞风险，可考虑使用完整 UUID。
 - `loadSession` 包含向后兼容迁移：检测旧格式的 `containerID` 字段，自动迁移到 `containers` 数组并持久化新格式。确保 `Containers` 字段不为 nil（空时初始化为空切片）。
 - `List` 方法对损坏的会话数据采用静默跳过策略 (`continue`)，可考虑添加日志记录。
-- `SaveDisplayData` 接收原始 JSON 字符串而非结构体，未做格式校验，依赖调用方确保数据合法性。
+- `SaveSessionData` 的原子写入依赖文件系统的 rename 语义，Windows 上需 remove+rename 两步操作，非崩溃安全（极端情况下可能丢失数据）。
+- `LoadSessionData` 的向后兼容逻辑（从 messages.json + display.json 组装）在所有旧会话迁移完成后可考虑移除。
 - 存储目录名 `.starxo` 与 `config.Store` 共享，应保持一致。

@@ -90,6 +90,7 @@
 | `internal/context/windowing.go` | `doc/src/internal/context/windowing.plan.md` | Go | context |
 | `internal/context/history.go` | `doc/src/internal/context/history.plan.md` | Go | context |
 | `internal/context/filecontext.go` | `doc/src/internal/context/filecontext.plan.md` | Go | context |
+| `internal/context/timeline.go` | `doc/src/internal/context/timeline.plan.md` | Go | context |
 
 ### internal/llm/ — LLM 适配模块
 
@@ -104,6 +105,7 @@
 | `internal/model/session.go` | `doc/src/internal/model/session.plan.md` | Go | model |
 | `internal/model/message.go` | `doc/src/internal/model/message.plan.md` | Go | model |
 | `internal/model/container.go` | `doc/src/internal/model/container.plan.md` | Go | model |
+| `internal/model/session_data.go` | `doc/src/internal/model/session_data.plan.md` | Go | model |
 
 ### internal/storage/ — 持久化模块
 
@@ -242,9 +244,9 @@
 | internal/sandbox/ | 6 |
 | internal/tools/ | 8 |
 | internal/config/ | 2 |
-| internal/context/ | 4 |
+| internal/context/ | 5 |
 | internal/llm/ | 1 |
-| internal/model/ | 3 |
+| internal/model/ | 4 |
 | internal/storage/ | 2 |
 | internal/store/ | 1 |
 | internal/logger/ | 2 |
@@ -261,4 +263,4 @@
 | frontend/src/composables/ | 2 |
 | frontend/src/locales/ | 3 |
 | 配置文件 | 3 |
-| **总计** | **88** |
+| **总计** | **90** |

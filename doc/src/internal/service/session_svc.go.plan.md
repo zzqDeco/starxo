@@ -8,13 +8,13 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 该文件实现了 `SessionService`，负责管理聊天会话的完整生命周期。提供会话的创建、切换、删除、重命名、保存和加载功能。每个会话拥有多个容器（通过 Containers 列表和 ActiveContainerID 管理），形成严格的父子关系。会话切换时自动保存当前会话、加载目标会话的消息历史到上下文引擎、并通知沙箱服务进行容器重连。删除会话时级联销毁所有子容器。还提供增强版会话列表（包含容器状态信息）和前端显示数据的持久化。
+- 该文件实现了 `SessionService`，负责管理聊天会话的完整生命周期。提供会话的创建、切换、删除、重命名、保存和加载功能。每个会话拥有多个容器（通过 Containers 列表和 ActiveContainerID 管理），形成严格的父子关系。会话切换时自动保存当前会话、加载目标会话的消息历史到上下文引擎、并通知沙箱服务进行容器重连。删除会话时级联销毁所有子容器。还提供增强版会话列表（包含容器状态信息）、统一的会话数据加载（`LoadSessionData`，返回 `model.SessionData`），以及前端显示数据的持久化。持有 `ChatService` 引用以访问 `TimelineCollector` 和 `StreamingState`，实现统一的后端持久化。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
 - 输入来源:
-  - 前端 Wails 绑定调用: `CreateSession(title)`、`SwitchSession(sessionID)`、`DeleteSession(sessionID)`、`RenameSession(sessionID, title)`、`ListSessions()`、`ListSessionsEnriched()`、`GetActiveSession()`、`GetActiveSessionMessages()`、`SaveChatDisplay(data)`、`LoadChatDisplay()`、`SaveCurrentSession()`
-  - 依赖注入: `storage.SessionStore`、`storage.ContainerStore`、`agentctx.Engine`
+  - 前端 Wails 绑定调用: `CreateSession(title)`、`SwitchSession(sessionID)`、`DeleteSession(sessionID)`、`RenameSession(sessionID, title)`、`ListSessions()`、`ListSessionsEnriched()`、`GetActiveSession()`、`GetActiveSessionMessages()`、`SaveChatDisplay(data)`、`LoadChatDisplay()`、`SaveCurrentSession()`、`LoadSessionData()`
+  - 依赖注入: `storage.SessionStore`、`storage.ContainerStore`、`agentctx.Engine`、`ChatService`
 - 输出结果:
   - Wails 事件发射: `session:switched`（会话切换完成）
   - 回调通知: `onSessionSwitch`（会话切换时传递容器注册 ID）
@@ -22,7 +22,7 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
-  - `SessionService`: 会话服务结构体，包含 Wails 上下文、SessionStore、ContainerStore、上下文引擎、活动会话、会话切换回调、容器销毁回调 (`onDestroyContainer`)、互斥锁
+  - `SessionService`: 会话服务结构体，包含 Wails 上下文、SessionStore、ContainerStore、上下文引擎、活动会话、会话切换回调、容器销毁回调 (`onDestroyContainer`)、`ChatService` 引用、互斥锁
   - `EnrichedSession`: 扩展会话类型，内嵌 `model.Session` 并添加 `ContainerStatus`、`ContainerName`、`ContainerSSH` 字段（基于 ActiveContainerID 查询）
 - 导出函数/方法:
   - `NewSessionService(sessionStore, containerStore) *SessionService`: 构造函数
@@ -30,6 +30,7 @@
   - `SetCtxEngine(engine)`: 设置上下文引擎
   - `SetOnSessionSwitch(fn)`: 注册会话切换回调
   - `SetOnDestroyContainer(fn)`: 注册容器销毁回调（级联删除时调用）
+  - `SetChatService(cs *ChatService)`: 注入 ChatService 引用（用于访问 TimelineCollector 和 StreamingState）
   - `BindContainer(containerRegID, workspacePath)`: 将容器绑定到当前会话，校验容器未被其他会话绑定（唯一性），设置容器的 SessionID，追加到 Containers 列表并设为 ActiveContainerID
   - `GetBoundContainerID() string`: 获取当前会话绑定的容器 ID
   - `GetWorkspacePath() string`: 获取当前会话工作区路径，默认 "/workspace"
@@ -43,16 +44,17 @@
   - `SaveChatDisplay(data) error`: 保存前端显示数据
   - `LoadChatDisplay() (string, error)`: 加载前端显示数据
   - `SaveCurrentSession() error`: 持久化当前会话
-  - `EnsureDefaultSession() error`: 确保存在默认会话，加载最近会话
+  - `EnsureDefaultSession() error`: 确保存在默认会话，加载最近会话，从 `LoadSessionData` 恢复 display timeline 到 TimelineCollector
   - `ListSessionsEnriched() ([]EnrichedSession, error)`: 列出包含容器信息的增强会话列表
-- Wails 绑定方法: `CreateSession`、`SwitchSession`、`DeleteSession`、`RenameSession`、`ListSessions`、`ListSessionsEnriched`、`GetActiveSession`、`GetActiveSessionMessages`、`SaveChatDisplay`、`LoadChatDisplay`、`SaveCurrentSession`
+  - `LoadSessionData() (*model.SessionData, error)`: 加载当前活跃会话的统一会话数据（通过 SessionStore.LoadSessionData），暴露为 Wails 绑定供前端调用
+- Wails 绑定方法: `CreateSession`、`SwitchSession`、`DeleteSession`、`RenameSession`、`ListSessions`、`ListSessionsEnriched`、`GetActiveSession`、`GetActiveSessionMessages`、`SaveChatDisplay`、`LoadChatDisplay`、`SaveCurrentSession`、`LoadSessionData`
 - 事件发射: `session:switched`
 
 ## 5. 依赖关系
 - 内部依赖:
-  - `starxo/internal/context` (agentctx): Engine（消息历史管理）
-  - `starxo/internal/model`: Session、PersistedMessage
-  - `starxo/internal/storage`: SessionStore、ContainerStore
+  - `starxo/internal/context` (agentctx): Engine（消息历史管理）、TimelineCollector（通过 ChatService 间接访问）
+  - `starxo/internal/model`: Session、PersistedMessage、SessionData、DisplayTurn
+  - `starxo/internal/storage`: SessionStore（含 SaveSessionData/LoadSessionData）、ContainerStore
 - 外部依赖:
   - `github.com/wailsapp/wails/v2/pkg/runtime` (wailsruntime): EventsEmit
 - 关键配置: 无
@@ -62,6 +64,9 @@
 - `BindContainer` 被 SandboxService 的 `onContainerBound` 回调调用
 - `GetWorkspacePath` 被 ChatService 和 FileService 使用
 - `SaveCurrentSession` 被 ChatService 的 `onAgentDone` 回调触发
+- `saveCurrentLocked` 通过 `chatService.Timeline().Export()` 和 `chatService.StreamingState()` 构建统一的 `SessionData` 进行原子持久化
+- `SwitchSession` 和 `EnsureDefaultSession` 加载会话时通过 `LoadSessionData` 获取 display 数据并导入 `TimelineCollector`
+- `LoadSessionData` 暴露为 Wails 绑定，前端 `restoreActiveMessages` 直接调用
 - `EnsureDefaultSession` 在应用启动时由 `app.go` 调用
 - 会话存储格式变更影响已有会话数据的加载
 
@@ -69,5 +74,7 @@
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - `SwitchSession` 中的锁释放和重获取逻辑（调用 `onSessionSwitch` 时临时释放锁）需特别注意，防止竞态条件。
 - `GetActiveSession` 返回会话副本以避免外部修改，应保持此模式。
-- 前端显示数据（`SaveChatDisplay`/`LoadChatDisplay`）以 raw string 存储，格式由前端定义。
+- `saveCurrentLocked` 依赖 `chatService` 不为 nil 来获取 timeline 和 streaming state；若 `chatService` 未注入，则 display 数据为空。确保 `app.go` 中 `SetChatService` 在任何保存操作之前调用。
+- `LoadSessionData` 同时用于 Wails 绑定（前端调用）和内部会话恢复（SwitchSession/EnsureDefaultSession），修改时需兼顾两种使用场景。
+- 前端显示数据（`SaveChatDisplay`/`LoadChatDisplay`）为旧版接口，保留向后兼容，新代码应使用 `LoadSessionData`。
 - `EnrichedSession` 的容器信息查询可能在大量会话时产生 N+1 查询问题，可考虑批量查询优化。

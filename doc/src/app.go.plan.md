@@ -28,6 +28,7 @@
   - `sessionService.SetOnDestroyContainer` → 级联删除时调用 containerService.DestroyContainer
   - `settingsService.SetOnSettingsSave` → chatService runner 失效重建
   - `chatService.SetOnAgentDone` → 自动保存当前会话
+  - `sessionService.SetChatService` → 注入 ChatService 引用，使 SessionService 能访问 TimelineCollector 和 StreamingState 进行统一持久化
 - **关键行为变更**:
   - 会话切换不再断开/重连 SSH，仅通过 `ActivateContainer`/`DeactivateContainer` 切换活跃容器
   - 新增 `onContainerDeactivated` 回调确保容器分离时 ChatService 的 sandbox 引用被清除
