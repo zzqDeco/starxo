@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"starxo/internal/config"
-	agentctx "starxo/internal/context"
 	"starxo/internal/logger"
 	"starxo/internal/sandbox"
 	"starxo/internal/service"
@@ -25,7 +24,6 @@ type App struct {
 	settingsService  *service.SettingsService
 	sessionService   *service.SessionService
 	containerService *service.ContainerService
-	ctxEngine        *agentctx.Engine
 }
 
 // NewApp creates a new App with all services initialized.
@@ -48,7 +46,6 @@ func NewApp() *App {
 		settingsService:  service.NewSettingsService(store),
 		sessionService:   sessionSvc,
 		containerService: containerSvc,
-		ctxEngine:        agentctx.NewEngine("You are an intelligent coding agent that helps users write, debug, and execute code in a sandboxed environment. You have access to tools for file operations, shell commands, and code execution. Always explain your approach before taking action.", 8000),
 	}
 }
 
@@ -77,12 +74,9 @@ func (a *App) startup(ctx context.Context) {
 	a.sessionService.SetContext(ctx)
 	a.containerService.SetContext(ctx)
 
-	// Wire up session service dependencies
-	a.sessionService.SetCtxEngine(a.ctxEngine)
-
 	// Wire up chat service dependencies.
 	// Manager may be nil at startup since sandbox is not yet connected.
-	a.chatService.SetDependencies(a.sandboxService.Manager(), a.ctxEngine)
+	a.chatService.SetDependencies(a.sandboxService.Manager(), nil)
 	a.chatService.SetSessionService(a.sessionService)
 	a.sessionService.SetChatService(a.chatService)
 	a.fileService.SetSessionService(a.sessionService)
@@ -126,13 +120,18 @@ func (a *App) startup(ctx context.Context) {
 		a.chatService.InvalidateRunner()
 	})
 
-	// Auto-save session after agent finishes
-	a.chatService.SetOnAgentDone(func() {
+	// Auto-save session after agent finishes (callback receives sessionID)
+	a.chatService.SetOnAgentDone(func(sessionID string) {
 		_ = a.sessionService.SaveCurrentSession()
 	})
 
 	// Load or create default session
 	_ = a.sessionService.EnsureDefaultSession()
+
+	// Set ChatService's active session to match the loaded session
+	if activeSession := a.sessionService.GetActiveSession(); activeSession != nil {
+		a.chatService.SetActiveSessionID(activeSession.ID)
+	}
 
 	// Start background health monitor for sandbox connection
 	a.sandboxService.StartHealthMonitor(ctx)

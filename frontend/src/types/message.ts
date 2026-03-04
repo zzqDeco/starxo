@@ -9,6 +9,7 @@ export interface TurnEvent {
   toolResult?: string
   timestamp: number
   isStreaming?: boolean
+  sessionId?: string
 }
 
 export interface Message {
@@ -42,6 +43,7 @@ export interface InterruptEvent {
   questions?: string[]
   options?: InterruptOption[]
   question?: string
+  sessionId?: string
 }
 
 export interface InterruptOption {
@@ -64,4 +66,5 @@ export interface PlanStepDTO {
 // Mode changed event
 export interface ModeChangedEvent {
   mode: 'default' | 'plan'
+  sessionId?: string
 }

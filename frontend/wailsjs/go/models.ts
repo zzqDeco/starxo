@@ -550,6 +550,63 @@ export namespace service {
 	        this.isOutput = source["isOutput"];
 	    }
 	}
+	export class InterruptOption {
+	    label: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InterruptOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.description = source["description"];
+	    }
+	}
+	export class InterruptEvent {
+	    type: string;
+	    interruptId: string;
+	    checkpointId: string;
+	    questions?: string[];
+	    options?: InterruptOption[];
+	    question?: string;
+	    sessionId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InterruptEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.interruptId = source["interruptId"];
+	        this.checkpointId = source["checkpointId"];
+	        this.questions = source["questions"];
+	        this.options = this.convertValues(source["options"], InterruptOption);
+	        this.question = source["question"];
+	        this.sessionId = source["sessionId"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class SandboxStatusDTO {
 	    sshConnected: boolean;
 	    dockerRunning: boolean;
@@ -570,6 +627,18 @@ export namespace service {
 	        this.activeContainerID = source["activeContainerID"];
 	        this.activeContainerName = source["activeContainerName"];
 	        this.dockerAvailable = source["dockerAvailable"];
+	    }
+	}
+	export class SessionRun {
+	
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionRun(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	
 	    }
 	}
 	export class SessionService {

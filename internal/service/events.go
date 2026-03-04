@@ -66,8 +66,13 @@ type SandboxStatusDTO struct {
 
 // SessionSwitchedEvent is emitted when the active session changes.
 type SessionSwitchedEvent struct {
-	Session     model.Session `json:"session"`
-	ContainerID string        `json:"containerID,omitempty"`
+	Session      model.Session   `json:"session"`
+	ContainerID  string          `json:"containerID,omitempty"`
+	AgentRunning bool            `json:"agentRunning"`
+	CurrentAgent string          `json:"currentAgent,omitempty"`
+	Mode         string          `json:"mode"`
+	HasInterrupt bool            `json:"hasInterrupt"`
+	Interrupt    *InterruptEvent `json:"interrupt,omitempty"`
 }
 
 // TimelineEvent is the unified event type for the chat timeline.
@@ -81,6 +86,7 @@ type TimelineEvent struct {
 	ToolArgs  string `json:"toolArgs,omitempty"`
 	ToolID    string `json:"toolId,omitempty"`
 	Timestamp int64  `json:"timestamp"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // InterruptEvent is emitted when the agent interrupts execution to ask the user.
@@ -91,6 +97,7 @@ type InterruptEvent struct {
 	Questions    []string          `json:"questions,omitempty"`
 	Options      []InterruptOption `json:"options,omitempty"`
 	Question     string            `json:"question,omitempty"`
+	SessionID    string            `json:"sessionId,omitempty"`
 }
 
 // InterruptOption represents a single choice option in an interrupt.
@@ -114,5 +121,6 @@ type PlanStepDTO struct {
 
 // ModeChangedEvent is emitted when the agent mode switches.
 type ModeChangedEvent struct {
-	Mode string `json:"mode"` // "default" | "plan"
+	Mode      string `json:"mode"` // "default" | "plan"
+	SessionID string `json:"sessionId,omitempty"`
 }

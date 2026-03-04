@@ -15,7 +15,7 @@ type eventEmittingTool struct {
 	inner     tool.BaseTool
 	agentName string
 	toolName  string
-	onEvent   func(agentName, eventType, toolName, toolArgs, toolID, result string)
+	onEvent   func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string)
 }
 
 func (t *eventEmittingTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
@@ -27,7 +27,7 @@ func (t *eventEmittingTool) InvokableRun(ctx context.Context, argumentsInJSON st
 
 	// Emit tool_call event
 	if t.onEvent != nil {
-		t.onEvent(t.agentName, "tool_call", t.toolName, argumentsInJSON, callID, "")
+		t.onEvent(ctx, t.agentName, "tool_call", t.toolName, argumentsInJSON, callID, "")
 	}
 
 	// Execute the actual tool
@@ -45,7 +45,7 @@ func (t *eventEmittingTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		if err != nil {
 			resultStr = fmt.Sprintf("Error: %v", err)
 		}
-		t.onEvent(t.agentName, "tool_result", t.toolName, "", callID, resultStr)
+		t.onEvent(ctx, t.agentName, "tool_result", t.toolName, "", callID, resultStr)
 	}
 
 	return result, err

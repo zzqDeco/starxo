@@ -1,5 +1,7 @@
 package agent
 
+import "context"
+
 // AgentContext provides runtime environment information that is injected
 // into agent prompts and tool defaults. This removes all hard-coded
 // "/workspace" references and makes agents aware of their container.
@@ -12,8 +14,9 @@ type AgentContext struct {
 	SSHUser       string // e.g. "root"
 
 	// OnToolEvent is called by sub-agent tool wrappers to emit timeline events.
-	// Parameters: agentName, eventType ("tool_call"/"tool_result"), toolName, toolArgs, toolID, result.
-	OnToolEvent func(agentName, eventType, toolName, toolArgs, toolID, result string)
+	// The ctx carries session identity (use SessionIDFromContext to extract).
+	// Parameters: ctx, agentName, eventType ("tool_call"/"tool_result"), toolName, toolArgs, toolID, result.
+	OnToolEvent func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string)
 }
 
 // DefaultAgentContext returns a fallback context when no session binding exists.

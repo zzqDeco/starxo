@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	agentctx "starxo/internal/context"
 	"starxo/internal/model"
 	"starxo/internal/storage"
+	"starxo/internal/tools"
 )
 
 // SessionService manages chat sessions for the frontend.
@@ -17,7 +18,6 @@ type SessionService struct {
 	ctx                context.Context
 	sessionStore       *storage.SessionStore
 	containerStore     *storage.ContainerStore
-	ctxEngine          *agentctx.Engine
 	chatService        *ChatService
 	activeSession      *model.Session
 	onSessionSwitch    func(containerRegID string)
@@ -38,14 +38,7 @@ func (s *SessionService) SetContext(ctx context.Context) {
 	s.ctx = ctx
 }
 
-// SetCtxEngine sets the context engine dependency.
-func (s *SessionService) SetCtxEngine(engine *agentctx.Engine) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ctxEngine = engine
-}
-
-// SetChatService sets the chat service dependency for timeline/streaming access.
+// SetChatService sets the chat service dependency for per-session state access.
 func (s *SessionService) SetChatService(cs *ChatService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,12 +118,13 @@ func (s *SessionService) ListSessions() ([]model.Session, error) {
 }
 
 // CreateSession creates a new session, saves the current one first if it exists.
+// Does NOT cancel any running agent — the old session continues running in the background.
 func (s *SessionService) CreateSession(title string) (*model.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Auto-save current session
-	if s.activeSession != nil && s.ctxEngine != nil {
+	if s.activeSession != nil {
 		s.saveCurrentLocked()
 	}
 
@@ -143,16 +137,21 @@ func (s *SessionService) CreateSession(title string) (*model.Session, error) {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Clear context engine for new session
-	if s.ctxEngine != nil {
-		s.ctxEngine.ClearHistory()
+	// Tell ChatService to switch to the new session
+	// (its per-session ctxEngine will be auto-created in getOrCreateRun)
+	if s.chatService != nil {
+		s.chatService.SetActiveSessionID(sess.ID)
 	}
+
+	// Clear todo state for the new session
+	tools.ClearTodos()
 
 	s.activeSession = sess
 	return sess, nil
 }
 
 // SwitchSession saves the current session and loads the target one.
+// Does NOT cancel any running agent — background sessions continue independently.
 func (s *SessionService) SwitchSession(sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +162,7 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 	}
 
 	// Save current session
-	if s.activeSession != nil && s.ctxEngine != nil {
+	if s.activeSession != nil {
 		s.saveCurrentLocked()
 	}
 
@@ -173,36 +172,56 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 		return fmt.Errorf("failed to load session: %w", err)
 	}
 
-	// Load messages
+	// Load session data from disk
 	sessionData, err := s.sessionStore.LoadSessionData(sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to load session data: %w", err)
 	}
 
-	// Restore into context engine and timeline
-	if s.ctxEngine != nil {
-		if sessionData != nil && sessionData.Messages != nil {
-			s.ctxEngine.ImportMessages(sessionData.Messages)
-		} else {
-			s.ctxEngine.ClearHistory()
-		}
-	}
+	// Tell ChatService to switch active session
 	if s.chatService != nil {
-		if sessionData != nil && sessionData.Display != nil {
-			s.chatService.Timeline().Import(sessionData.Display)
-		} else {
-			s.chatService.Timeline().Clear()
+		s.chatService.SetActiveSessionID(sessionID)
+
+		// Only load from disk if the session is NOT currently running
+		// (a running session already has up-to-date state in its SessionRun)
+		if !s.chatService.IsSessionRunning(sessionID) {
+			run := s.chatService.GetOrCreateRun(sessionID)
+			if sessionData != nil && sessionData.Messages != nil {
+				run.ctxEngine.ImportMessages(sessionData.Messages)
+			} else {
+				run.ctxEngine.ClearHistory()
+			}
+			if sessionData != nil && sessionData.Display != nil {
+				run.timeline.Import(sessionData.Display)
+			} else {
+				run.timeline.Clear()
+			}
 		}
 	}
+
+	// Clear per-session todo state
+	tools.ClearTodos()
 
 	s.activeSession = sess
 
+	// Build enriched session switched event with live state snapshot
+	switchEvt := SessionSwitchedEvent{
+		Session:     *sess,
+		ContainerID: sess.ActiveContainerID,
+		Mode:        "default",
+	}
+	if s.chatService != nil {
+		running, currentAgent, mode, interrupt := s.chatService.GetSessionRunSnapshot(sessionID)
+		switchEvt.AgentRunning = running
+		switchEvt.CurrentAgent = currentAgent
+		switchEvt.Mode = mode
+		switchEvt.HasInterrupt = interrupt != nil
+		switchEvt.Interrupt = interrupt
+	}
+
 	// Emit event so frontend can update
 	if s.ctx != nil {
-		wailsruntime.EventsEmit(s.ctx, "session:switched", SessionSwitchedEvent{
-			Session:     *sess,
-			ContainerID: sess.ActiveContainerID,
-		})
+		wailsruntime.EventsEmit(s.ctx, "session:switched", switchEvt)
 	}
 
 	// Notify listeners (e.g. sandbox auto-reconnect or disconnect)
@@ -218,12 +237,26 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 }
 
 // DeleteSession deletes a session and cascade-destroys all its owned containers.
+// If the session has a running agent, it is stopped first.
 func (s *SessionService) DeleteSession(sessionID string) error {
 	s.mu.Lock()
 
 	if s.activeSession != nil && s.activeSession.ID == sessionID {
 		s.mu.Unlock()
 		return fmt.Errorf("cannot delete the active session")
+	}
+
+	// Stop any running agent in this session
+	if s.chatService != nil && s.chatService.IsSessionRunning(sessionID) {
+		s.mu.Unlock()
+		s.chatService.StopSessionGeneration(sessionID)
+		_ = s.chatService.WaitForSessionDone(sessionID, 10*time.Second)
+		s.mu.Lock()
+	}
+
+	// Clean up ChatService session state
+	if s.chatService != nil {
+		s.chatService.RemoveSession(sessionID)
 	}
 
 	// Load session to get its container list
@@ -349,29 +382,37 @@ func (s *SessionService) SaveCurrentSession() error {
 }
 
 // saveCurrentLocked persists the current session (caller must hold the lock).
+// Uses ChatService's per-session ctxEngine and timeline.
 func (s *SessionService) saveCurrentLocked() error {
-	if s.activeSession == nil || s.ctxEngine == nil {
+	if s.activeSession == nil || s.chatService == nil {
 		return nil
 	}
 
-	// Build unified session data
+	sessionID := s.activeSession.ID
+	ctxEngine := s.chatService.SessionCtxEngine(sessionID)
+	if ctxEngine == nil {
+		return nil
+	}
+
+	// Build unified session data from the session's per-session state
 	sd := &model.SessionData{
 		Version:  1,
-		Messages: s.ctxEngine.ExportMessages(),
+		Messages: ctxEngine.ExportMessages(),
 	}
 
-	// Include timeline and streaming state from chat service
-	if s.chatService != nil {
-		sd.Display = s.chatService.Timeline().Export()
-		sd.Streaming = s.chatService.StreamingState()
+	// Include timeline and streaming state
+	timeline := s.chatService.SessionTimeline(sessionID)
+	if timeline != nil {
+		sd.Display = timeline.Export()
 	}
+	sd.Streaming = s.chatService.SessionStreamingState(sessionID)
 
-	if err := s.sessionStore.SaveSessionData(s.activeSession.ID, sd); err != nil {
+	if err := s.sessionStore.SaveSessionData(sessionID, sd); err != nil {
 		return fmt.Errorf("failed to save session data: %w", err)
 	}
 
 	// Update session metadata
-	s.activeSession.MessageCount = s.ctxEngine.MessageCount()
+	s.activeSession.MessageCount = ctxEngine.MessageCount()
 	if err := s.sessionStore.Update(s.activeSession); err != nil {
 		return fmt.Errorf("failed to update session: %w", err)
 	}
@@ -380,7 +421,7 @@ func (s *SessionService) saveCurrentLocked() error {
 }
 
 // EnsureDefaultSession creates a default session if none exist,
-// and loads the most recent session into the context engine.
+// and loads the most recent session into the per-session context engine.
 func (s *SessionService) EnsureDefaultSession() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -404,16 +445,19 @@ func (s *SessionService) EnsureDefaultSession() error {
 	mostRecent := sessions[0]
 	s.activeSession = &mostRecent
 
-	// Restore messages and timeline
+	// Restore messages and timeline into per-session state via ChatService
 	sessionData, err := s.sessionStore.LoadSessionData(mostRecent.ID)
 	if err != nil {
 		return nil // non-fatal, just start with empty history
 	}
-	if s.ctxEngine != nil && sessionData != nil && sessionData.Messages != nil {
-		s.ctxEngine.ImportMessages(sessionData.Messages)
-	}
-	if s.chatService != nil && sessionData != nil && sessionData.Display != nil {
-		s.chatService.Timeline().Import(sessionData.Display)
+	if s.chatService != nil && sessionData != nil {
+		run := s.chatService.GetOrCreateRun(mostRecent.ID)
+		if sessionData.Messages != nil {
+			run.ctxEngine.ImportMessages(sessionData.Messages)
+		}
+		if sessionData.Display != nil {
+			run.timeline.Import(sessionData.Display)
+		}
 	}
 
 	return nil

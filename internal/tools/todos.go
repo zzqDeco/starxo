@@ -33,6 +33,13 @@ var todoStore struct {
 	todos []TodoItem
 }
 
+// ClearTodos resets the in-memory todo store (used on session switch).
+func ClearTodos() {
+	todoStore.mu.Lock()
+	todoStore.todos = nil
+	todoStore.mu.Unlock()
+}
+
 // NewWriteTodosTool creates a tool that tracks task progress as a DAG.
 // The agent calls this to declare/update the task list. The frontend renders it
 // as a visual DAG component.

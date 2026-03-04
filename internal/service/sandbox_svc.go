@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 
 // SandboxService manages sandbox lifecycle for the frontend.
 type SandboxService struct {
+	mu               sync.RWMutex
 	ctx              context.Context
 	manager          *sandbox.SandboxManager
 	store            *config.Store
@@ -38,28 +40,38 @@ func NewSandboxService(store *config.Store, containerStore *storage.ContainerSto
 
 // SetSessionService sets the session service dependency for container ownership.
 func (s *SandboxService) SetSessionService(ss *SessionService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessionService = ss
 }
 
 // SetContext stores the Wails application context. Called from app.go startup.
 func (s *SandboxService) SetContext(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ctx = ctx
 }
 
 // SetOnConnect registers a callback that fires after a container is activated.
 func (s *SandboxService) SetOnConnect(fn func(mgr *sandbox.SandboxManager)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.onConnect = fn
 }
 
 // SetOnContainerBound registers a callback that fires after a container is connected,
 // passing the registry ID and workspace path so they can be bound to the active session.
 func (s *SandboxService) SetOnContainerBound(fn func(containerRegID, workspacePath string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.onContainerBound = fn
 }
 
 // SetOnContainerDeactivated registers a callback that fires when the active container
 // is deactivated (e.g. user deactivates or session switches to one with no container).
 func (s *SandboxService) SetOnContainerDeactivated(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.onContainerDeactivated = fn
 }
 
@@ -68,6 +80,7 @@ func (s *SandboxService) SetOnContainerDeactivated(fn func()) {
 // ConnectSSH establishes SSH connection and ensures Docker is available on the remote host.
 // Does NOT create any container. Use CreateAndActivateContainer separately.
 func (s *SandboxService) ConnectSSH() error {
+	s.mu.Lock()
 	// Disconnect existing SSH (keep containers alive on remote)
 	if s.manager != nil {
 		wailsruntime.EventsEmit(s.ctx, "ssh:progress", SandboxProgressEvent{
@@ -83,64 +96,81 @@ func (s *SandboxService) ConnectSSH() error {
 	}
 
 	cfg := s.store.Get()
-	s.manager = sandbox.NewSandboxManager(*cfg)
+	mgr := sandbox.NewSandboxManager(*cfg)
+	s.manager = mgr
+	appCtx := s.ctx
+	s.mu.Unlock()
 
-	// Step 1: SSH connect
-	if err := s.manager.ConnectSSH(s.ctx, func(step string, percent int) {
-		wailsruntime.EventsEmit(s.ctx, "ssh:progress", SandboxProgressEvent{
+	// Step 1: SSH connect (long-running, outside lock)
+	if err := mgr.ConnectSSH(appCtx, func(step string, percent int) {
+		wailsruntime.EventsEmit(appCtx, "ssh:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: percent / 2, // 0-50%
 		})
 	}); err != nil {
+		s.mu.Lock()
 		s.manager = nil
+		s.mu.Unlock()
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 
-	// Step 2: Ensure Docker
-	if err := s.manager.EnsureDocker(s.ctx, func(step string, percent int) {
-		wailsruntime.EventsEmit(s.ctx, "ssh:progress", SandboxProgressEvent{
+	// Step 2: Ensure Docker (long-running, outside lock)
+	if err := mgr.EnsureDocker(appCtx, func(step string, percent int) {
+		wailsruntime.EventsEmit(appCtx, "ssh:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: 50 + percent/2, // 50-100%
 		})
 	}); err != nil {
-		_ = s.manager.Disconnect(s.ctx)
+		_ = mgr.Disconnect(appCtx)
+		s.mu.Lock()
 		s.manager = nil
+		s.mu.Unlock()
 		return fmt.Errorf("Docker setup failed: %w", err)
 	}
 
 	// Start health monitor in SSH-only mode
-	s.StartHealthMonitor(s.ctx)
+	s.StartHealthMonitor(appCtx)
 
-	wailsruntime.EventsEmit(s.ctx, "ssh:connected", nil)
+	wailsruntime.EventsEmit(appCtx, "ssh:connected", nil)
 	return nil
 }
 
 // DisconnectSSH closes the SSH connection. Detaches any active container first.
 func (s *SandboxService) DisconnectSSH() error {
+	s.mu.Lock()
 	if s.manager == nil {
+		s.mu.Unlock()
 		return nil
 	}
 
 	// Deactivate container if active (without emitting events since we're disconnecting entirely)
+	var deactivatedCb func()
 	if s.activeContainerRegID != "" {
 		s.manager.DetachContainer()
 		s.activeContainerRegID = ""
-		if s.onContainerDeactivated != nil {
-			s.onContainerDeactivated()
-		}
+		deactivatedCb = s.onContainerDeactivated
 	}
 
 	err := s.manager.Disconnect(s.ctx)
 	s.manager = nil
+	appCtx := s.ctx
+	s.mu.Unlock()
 
-	wailsruntime.EventsEmit(s.ctx, "ssh:disconnected", nil)
+	// Call callback outside lock to prevent deadlocks
+	if deactivatedCb != nil {
+		deactivatedCb()
+	}
+
+	wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
 	return err
 }
 
 // CreateAndActivateContainer creates a new container on the connected SSH host,
 // registers it, and activates it for agent use.
 func (s *SandboxService) CreateAndActivateContainer() error {
+	s.mu.Lock()
 	if s.manager == nil || !s.manager.SSHConnected() {
+		s.mu.Unlock()
 		return fmt.Errorf("SSH not connected")
 	}
 
@@ -150,11 +180,16 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 		s.activeContainerRegID = ""
 	}
 
+	mgr := s.manager
+	appCtx := s.ctx
+	s.mu.Unlock()
+
 	cfg := s.store.Get()
 	excludeIDs := s.containerStore.RegisteredDockerIDs()
 
-	dockerID, containerName, err := s.manager.CreateNewContainer(s.ctx, excludeIDs, func(step string, percent int) {
-		wailsruntime.EventsEmit(s.ctx, "container:progress", SandboxProgressEvent{
+	// Long-running operation outside lock
+	dockerID, containerName, err := mgr.CreateNewContainer(appCtx, excludeIDs, func(step string, percent int) {
+		wailsruntime.EventsEmit(appCtx, "container:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: percent,
 		})
@@ -167,9 +202,13 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 	regID := uuid.New().String()[:8]
 	now := time.Now().UnixMilli()
 
+	s.mu.RLock()
+	sessionSvc := s.sessionService
+	s.mu.RUnlock()
+
 	sessionID := ""
-	if s.sessionService != nil {
-		if active := s.sessionService.GetActiveSession(); active != nil {
+	if sessionSvc != nil {
+		if active := sessionSvc.GetActiveSession(); active != nil {
 			sessionID = active.ID
 		}
 	}
@@ -188,19 +227,25 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 		LastUsedAt:    now,
 	}
 	_ = s.containerStore.Add(container)
+
+	s.mu.Lock()
 	s.activeContainerRegID = regID
+	connectCb := s.onConnect
+	boundCb := s.onContainerBound
+	s.mu.Unlock()
 
 	s.setupOutputForwarding()
 
-	if s.onConnect != nil {
-		s.onConnect(s.manager)
+	// Call callbacks outside lock to prevent deadlocks
+	if connectCb != nil {
+		connectCb(mgr)
 	}
 
-	if s.onContainerBound != nil {
-		s.onContainerBound(regID, "/workspace")
+	if boundCb != nil {
+		boundCb(regID, "/workspace")
 	}
 
-	wailsruntime.EventsEmit(s.ctx, "container:ready", map[string]string{
+	wailsruntime.EventsEmit(appCtx, "container:ready", map[string]string{
 		"containerID": regID,
 	})
 	return nil
@@ -209,9 +254,14 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 // ActivateContainer switches the active container to a previously registered one.
 // The container must be on the same SSH host as the current connection.
 func (s *SandboxService) ActivateContainer(containerRegID string) error {
+	s.mu.Lock()
 	if s.manager == nil || !s.manager.SSHConnected() {
+		s.mu.Unlock()
 		return fmt.Errorf("SSH not connected")
 	}
+	mgr := s.manager
+	appCtx := s.ctx
+	s.mu.Unlock()
 
 	container, err := s.containerStore.Get(containerRegID)
 	if err != nil {
@@ -226,14 +276,16 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 	}
 
 	// Detach current container if any
+	s.mu.Lock()
 	if s.activeContainerRegID != "" {
 		s.manager.DetachContainer()
 		s.activeContainerRegID = ""
 	}
+	s.mu.Unlock()
 
-	// Attach to the target container
-	if err := s.manager.AttachToContainer(s.ctx, container.DockerID, container.Name, func(step string, percent int) {
-		wailsruntime.EventsEmit(s.ctx, "container:progress", SandboxProgressEvent{
+	// Attach to the target container (long-running, outside lock)
+	if err := mgr.AttachToContainer(appCtx, container.DockerID, container.Name, func(step string, percent int) {
+		wailsruntime.EventsEmit(appCtx, "container:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: percent,
 		})
@@ -245,19 +297,25 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 	container.Status = model.ContainerRunning
 	container.LastUsedAt = time.Now().UnixMilli()
 	_ = s.containerStore.Update(container)
+
+	s.mu.Lock()
 	s.activeContainerRegID = containerRegID
+	connectCb := s.onConnect
+	boundCb := s.onContainerBound
+	s.mu.Unlock()
 
 	s.setupOutputForwarding()
 
-	if s.onConnect != nil {
-		s.onConnect(s.manager)
+	// Call callbacks outside lock to prevent deadlocks
+	if connectCb != nil {
+		connectCb(mgr)
 	}
 
-	if s.onContainerBound != nil {
-		s.onContainerBound(containerRegID, "/workspace")
+	if boundCb != nil {
+		boundCb(containerRegID, "/workspace")
 	}
 
-	wailsruntime.EventsEmit(s.ctx, "container:activated", map[string]string{
+	wailsruntime.EventsEmit(appCtx, "container:activated", map[string]string{
 		"containerID": containerRegID,
 	})
 	return nil
@@ -266,22 +324,29 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 // DeactivateContainer detaches the active container without stopping it.
 // SSH remains connected.
 func (s *SandboxService) DeactivateContainer() error {
+	s.mu.Lock()
 	if s.manager == nil {
+		s.mu.Unlock()
 		return nil
 	}
 
 	if s.activeContainerRegID == "" {
+		s.mu.Unlock()
 		return nil
 	}
 
 	s.manager.DetachContainer()
 	s.activeContainerRegID = ""
+	deactivatedCb := s.onContainerDeactivated
+	appCtx := s.ctx
+	s.mu.Unlock()
 
-	if s.onContainerDeactivated != nil {
-		s.onContainerDeactivated()
+	// Call callback outside lock to prevent deadlocks
+	if deactivatedCb != nil {
+		deactivatedCb()
 	}
 
-	wailsruntime.EventsEmit(s.ctx, "container:deactivated", nil)
+	wailsruntime.EventsEmit(appCtx, "container:deactivated", nil)
 	return nil
 }
 
@@ -305,7 +370,9 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 	}
 
 	// If SSH is not connected or connected to a different host, reconnect
-	if s.manager == nil || !s.manager.SSHConnected() {
+	s.mu.Lock()
+	needsSSH := s.manager == nil || !s.manager.SSHConnected()
+	if needsSSH {
 		// Disconnect existing if any
 		if s.manager != nil {
 			_ = s.manager.Disconnect(s.ctx)
@@ -315,30 +382,40 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 		cfg := s.store.Get()
 		cfg.SSH.Host = container.SSHHost
 		cfg.SSH.Port = container.SSHPort
-		s.manager = sandbox.NewSandboxManager(*cfg)
+		mgr := sandbox.NewSandboxManager(*cfg)
+		s.manager = mgr
+		appCtx := s.ctx
+		s.mu.Unlock()
 
-		if err := s.manager.ConnectSSH(s.ctx, func(step string, percent int) {
-			wailsruntime.EventsEmit(s.ctx, "ssh:progress", SandboxProgressEvent{
+		// Long-running operations outside lock
+		if err := mgr.ConnectSSH(appCtx, func(step string, percent int) {
+			wailsruntime.EventsEmit(appCtx, "ssh:progress", SandboxProgressEvent{
 				Step:    step,
 				Percent: percent / 2,
 			})
 		}); err != nil {
+			s.mu.Lock()
 			s.manager = nil
+			s.mu.Unlock()
 			return fmt.Errorf("SSH connection failed: %w", err)
 		}
 
-		if err := s.manager.EnsureDocker(s.ctx, func(step string, percent int) {
-			wailsruntime.EventsEmit(s.ctx, "ssh:progress", SandboxProgressEvent{
+		if err := mgr.EnsureDocker(appCtx, func(step string, percent int) {
+			wailsruntime.EventsEmit(appCtx, "ssh:progress", SandboxProgressEvent{
 				Step:    step,
 				Percent: 50 + percent/2,
 			})
 		}); err != nil {
-			_ = s.manager.Disconnect(s.ctx)
+			_ = mgr.Disconnect(appCtx)
+			s.mu.Lock()
 			s.manager = nil
+			s.mu.Unlock()
 			return fmt.Errorf("Docker setup failed: %w", err)
 		}
 
-		wailsruntime.EventsEmit(s.ctx, "ssh:connected", nil)
+		wailsruntime.EventsEmit(appCtx, "ssh:connected", nil)
+	} else {
+		s.mu.Unlock()
 	}
 
 	return s.ActivateContainer(containerRegID)
@@ -351,17 +428,24 @@ func (s *SandboxService) Disconnect() error {
 
 // DisconnectAndDestroy stops and removes the active container, then closes SSH.
 func (s *SandboxService) DisconnectAndDestroy() error {
+	s.mu.Lock()
 	if s.manager == nil {
+		s.mu.Unlock()
 		return nil
 	}
 
-	err := s.manager.DisconnectAndDestroy(s.ctx)
+	mgr := s.manager
+	activeRegID := s.activeContainerRegID
+	appCtx := s.ctx
 	s.manager = nil
+	s.activeContainerRegID = ""
+	s.mu.Unlock()
+
+	err := mgr.DisconnectAndDestroy(appCtx)
 
 	// Remove from registry
-	if s.activeContainerRegID != "" {
-		_ = s.containerStore.Remove(s.activeContainerRegID)
-		s.activeContainerRegID = ""
+	if activeRegID != "" {
+		_ = s.containerStore.Remove(activeRegID)
 	}
 
 	return err
@@ -369,19 +453,24 @@ func (s *SandboxService) DisconnectAndDestroy() error {
 
 // GetStatus returns the current sandbox connection status.
 func (s *SandboxService) GetStatus() SandboxStatusDTO {
-	if s.manager == nil {
+	s.mu.RLock()
+	mgr := s.manager
+	activeRegID := s.activeContainerRegID
+	s.mu.RUnlock()
+
+	if mgr == nil {
 		return SandboxStatusDTO{}
 	}
 
 	status := SandboxStatusDTO{
-		SSHConnected:      s.manager.SSHConnected(),
+		SSHConnected:      mgr.SSHConnected(),
 		DockerRunning:     false,
 		ContainerID:       "",
-		DockerAvailable:   s.manager.Docker() != nil,
-		ActiveContainerID: s.activeContainerRegID,
+		DockerAvailable:   mgr.Docker() != nil,
+		ActiveContainerID: activeRegID,
 	}
 
-	docker := s.manager.Docker()
+	docker := mgr.Docker()
 	if docker != nil {
 		status.DockerRunning = docker.IsRunning()
 		status.ContainerID = docker.ContainerID()
@@ -393,23 +482,31 @@ func (s *SandboxService) GetStatus() SandboxStatusDTO {
 
 // Manager returns the underlying SandboxManager for internal use by other services.
 func (s *SandboxService) Manager() *sandbox.SandboxManager {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.manager
 }
 
 // ActiveContainerRegID returns the registry ID of the currently connected container.
 func (s *SandboxService) ActiveContainerRegID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.activeContainerRegID
 }
 
 // setupOutputForwarding sets up terminal output forwarding to the frontend.
 func (s *SandboxService) setupOutputForwarding() {
-	if s.manager == nil {
+	s.mu.RLock()
+	mgr := s.manager
+	appCtx := s.ctx
+	s.mu.RUnlock()
+
+	if mgr == nil {
 		return
 	}
-	if op := s.manager.Operator(); op != nil {
-		wailsCtx := s.ctx
+	if op := mgr.Operator(); op != nil {
 		op.SetOnOutput(func(stdout, stderr string, exitCode int) {
-			wailsruntime.EventsEmit(wailsCtx, "terminal:output", TerminalOutputEvent{
+			wailsruntime.EventsEmit(appCtx, "terminal:output", TerminalOutputEvent{
 				Stdout:   stdout,
 				Stderr:   stderr,
 				ExitCode: exitCode,
@@ -431,40 +528,50 @@ func (s *SandboxService) StartHealthMonitor(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if s.manager == nil {
-					continue
-				}
-
-				if !s.manager.SSHConnected() {
-					continue
-				}
-
-				// If there's an active container with an operator, ping through it
-				if s.manager.HasActiveContainer() {
-					op := s.manager.Operator()
-					if op == nil {
-						continue
-					}
-					_, err := op.RunCommand(ctx, []string{"echo", "ping"})
-					if err != nil {
-						// Connection lost
-						wailsruntime.EventsEmit(s.ctx, "ssh:disconnected", nil)
-						s.manager = nil
-						s.activeContainerRegID = ""
-					}
-				} else {
-					// SSH-only mode: check SSH is still alive via the SSH client
-					ssh := s.manager.SSH()
-					if ssh == nil {
-						continue
-					}
-					_, _, _, err := ssh.RunCommand(ctx, "echo ping")
-					if err != nil {
-						wailsruntime.EventsEmit(s.ctx, "ssh:disconnected", nil)
-						s.manager = nil
-					}
-				}
+				s.healthCheck(ctx)
 			}
 		}
 	}()
+}
+
+// healthCheck performs a single health check iteration with short-lived locks.
+func (s *SandboxService) healthCheck(ctx context.Context) {
+	s.mu.RLock()
+	mgr := s.manager
+	appCtx := s.ctx
+	s.mu.RUnlock()
+
+	if mgr == nil || !mgr.SSHConnected() {
+		return
+	}
+
+	// If there's an active container with an operator, ping through it
+	if mgr.HasActiveContainer() {
+		op := mgr.Operator()
+		if op == nil {
+			return
+		}
+		_, err := op.RunCommand(ctx, []string{"echo", "ping"})
+		if err != nil {
+			// Connection lost
+			s.mu.Lock()
+			s.manager = nil
+			s.activeContainerRegID = ""
+			s.mu.Unlock()
+			wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
+		}
+	} else {
+		// SSH-only mode: check SSH is still alive via the SSH client
+		ssh := mgr.SSH()
+		if ssh == nil {
+			return
+		}
+		_, _, _, err := ssh.RunCommand(ctx, "echo ping")
+		if err != nil {
+			s.mu.Lock()
+			s.manager = nil
+			s.mu.Unlock()
+			wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
+		}
+	}
 }

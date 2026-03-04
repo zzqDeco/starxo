@@ -24,6 +24,29 @@ import (
 	"starxo/internal/tools"
 )
 
+// Context key for propagating session identity through agent execution.
+type contextKey string
+
+const sessionIDCtxKey contextKey = "sessionID"
+
+func contextWithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionIDCtxKey, sessionID)
+}
+
+// SessionIDFromContext extracts the session ID from a context.
+func SessionIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(sessionIDCtxKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// Default context engine parameters.
+const (
+	defaultSystemPrompt = "You are an intelligent coding agent that helps users write, debug, and execute code in a sandboxed environment. You have access to tools for file operations, shell commands, and code execution. Always explain your approach before taking action."
+	defaultMaxTokens    = 8000
+)
+
 // PendingInterrupt holds the state needed to resume after an interrupt.
 type PendingInterrupt struct {
 	CheckpointID string
@@ -31,24 +54,42 @@ type PendingInterrupt struct {
 	Info         any
 }
 
+// SessionRun holds per-session agent execution state.
+// Each session gets its own context engine, timeline, and run lifecycle.
+type SessionRun struct {
+	sessionID string
+	ctxEngine *agentctx.Engine
+	timeline  *agentctx.TimelineCollector
+
+	// Run lifecycle
+	running          bool
+	cancelFn         context.CancelFunc
+	runDone          chan struct{}
+	pendingInterrupt *PendingInterrupt
+	streamingState   *model.StreamingState
+	mode             string // "default" or "plan"
+	currentAgent     string
+}
+
 // ChatService manages chat interactions between the frontend and the AI agent.
 type ChatService struct {
-	ctx            context.Context
-	deepAgent      adk.Agent
-	defaultRunner  *adk.Runner
-	planRunner     *adk.Runner
-	ctxEngine      *agentctx.Engine
-	timeline       *agentctx.TimelineCollector
-	sandbox        *sandbox.SandboxManager
-	store          *config.Store
-	sessionService *SessionService
-	cancelFn       context.CancelFunc
-	onAgentDone    func()
+	ctx context.Context
 
-	mode             string // "default" or "plan"
-	checkpointStore  compose.CheckPointStore
-	pendingInterrupt *PendingInterrupt
-	streamingState   *model.StreamingState // non-nil during active streaming
+	// Shared across all sessions (concurrent-safe, stateless)
+	deepAgent       adk.Agent
+	defaultRunner   *adk.Runner
+	planRunner      *adk.Runner
+	sandbox         *sandbox.SandboxManager
+	store           *config.Store
+	checkpointStore compose.CheckPointStore
+
+	// Per-session execution state
+	sessions        map[string]*SessionRun
+	activeSessionID string
+
+	// Service deps
+	sessionService *SessionService
+	onAgentDone    func(sessionID string)
 
 	mu sync.Mutex
 }
@@ -57,9 +98,8 @@ type ChatService struct {
 func NewChatService(store *config.Store) *ChatService {
 	return &ChatService{
 		store:           store,
-		mode:            "default",
 		checkpointStore: checkpoint.NewInMemoryStore(),
-		timeline:        agentctx.NewTimelineCollector(),
+		sessions:        make(map[string]*SessionRun),
 	}
 }
 
@@ -68,12 +108,13 @@ func (s *ChatService) SetContext(ctx context.Context) {
 	s.ctx = ctx
 }
 
-// SetDependencies injects the sandbox manager and context engine.
-func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, ctxEngine *agentctx.Engine) {
+// SetDependencies injects the sandbox manager.
+// The ctxEngine parameter is accepted for backward compatibility but ignored;
+// per-session context engines are managed inside SessionRun.
+func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, _ *agentctx.Engine) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sandbox = sbx
-	s.ctxEngine = ctxEngine
 }
 
 // UpdateSandbox updates the sandbox manager reference.
@@ -98,7 +139,8 @@ func (s *ChatService) invalidateRunners() {
 }
 
 // SetOnAgentDone registers a callback that fires after the agent finishes processing.
-func (s *ChatService) SetOnAgentDone(fn func()) {
+// The callback receives the sessionID of the completed run.
+func (s *ChatService) SetOnAgentDone(fn func(sessionID string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onAgentDone = fn
@@ -111,7 +153,68 @@ func (s *ChatService) SetSessionService(ss *SessionService) {
 	s.sessionService = ss
 }
 
-// SetMode switches between "default" and "plan" mode.
+// ---------------------------------------------------------------------------
+// Per-session state management
+// ---------------------------------------------------------------------------
+
+// getOrCreateRun returns the SessionRun for the given session.
+// Creates a new one if it doesn't exist. Caller must hold s.mu.
+func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
+	if run, ok := s.sessions[sessionID]; ok {
+		return run
+	}
+	run := &SessionRun{
+		sessionID: sessionID,
+		ctxEngine: agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
+		timeline:  agentctx.NewTimelineCollector(),
+		mode:      "default",
+	}
+	s.sessions[sessionID] = run
+	return run
+}
+
+// activeRun returns the SessionRun for the currently active session.
+// Returns nil if no active session is set. Caller must hold s.mu.
+func (s *ChatService) activeRun() *SessionRun {
+	if s.activeSessionID == "" {
+		return nil
+	}
+	return s.getOrCreateRun(s.activeSessionID)
+}
+
+// SetActiveSessionID sets the currently active session.
+func (s *ChatService) SetActiveSessionID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeSessionID = id
+}
+
+// GetActiveSessionID returns the currently active session ID.
+func (s *ChatService) GetActiveSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeSessionID
+}
+
+// GetOrCreateRun returns the SessionRun for the given session (for SessionService).
+func (s *ChatService) GetOrCreateRun(sessionID string) *SessionRun {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getOrCreateRun(sessionID)
+}
+
+// RemoveSession removes a session's run state from memory.
+func (s *ChatService) RemoveSession(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, sessionID)
+}
+
+// ---------------------------------------------------------------------------
+// Mode management
+// ---------------------------------------------------------------------------
+
+// SetMode switches the active session between "default" and "plan" mode.
 func (s *ChatService) SetMode(mode string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -120,126 +223,216 @@ func (s *ChatService) SetMode(mode string) error {
 		return fmt.Errorf("invalid mode: %s (must be 'default' or 'plan')", mode)
 	}
 
-	s.mode = mode
-	logger.Info("[CHAT] Mode changed", "mode", mode)
-	wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{Mode: mode})
+	run := s.activeRun()
+	if run == nil {
+		return fmt.Errorf("no active session")
+	}
+
+	run.mode = mode
+	logger.Info("[CHAT] Mode changed", "mode", mode, "session", s.activeSessionID)
+	wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
+		Mode:      mode,
+		SessionID: s.activeSessionID,
+	})
 	return nil
 }
 
-// GetMode returns the current agent mode.
+// GetMode returns the current agent mode for the active session.
 func (s *ChatService) GetMode() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.mode
+	run := s.activeRun()
+	if run == nil {
+		return "default"
+	}
+	return run.mode
 }
+
+// ---------------------------------------------------------------------------
+// Run status
+// ---------------------------------------------------------------------------
+
+// IsRunning returns whether the active session has a running agent.
+func (s *ChatService) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run := s.activeRun()
+	return run != nil && run.running
+}
+
+// IsSessionRunning returns whether a specific session has a running agent.
+func (s *ChatService) IsSessionRunning(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.sessions[sessionID]
+	return ok && run.running
+}
+
+// WaitForSessionDone waits for a specific session's agent run to complete.
+func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration) error {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	if !ok || !run.running {
+		s.mu.Unlock()
+		return nil
+	}
+	done := run.runDone
+	s.mu.Unlock()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out waiting for session %s", sessionID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SendMessage
+// ---------------------------------------------------------------------------
 
 // SendMessage processes a user message through the agent and streams results to the frontend.
 func (s *ChatService) SendMessage(userMessage string) error {
 	s.mu.Lock()
-	if s.ctxEngine == nil {
+
+	if s.activeSessionID == "" {
 		s.mu.Unlock()
-		return fmt.Errorf("chat service not initialized: context engine is nil")
+		return fmt.Errorf("no active session")
+	}
+
+	run := s.activeRun()
+
+	// Per-session concurrent run guard
+	if run.running {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
 	}
 
 	logger.Info("[CHAT] User message received",
 		"length", len(userMessage),
 		"preview", truncateResult(userMessage, 100),
+		"session", s.activeSessionID,
 	)
 
-	// Add user message to context engine
-	s.ctxEngine.AddUserMessage(userMessage)
+	// Add user message to session's context engine
+	run.ctxEngine.AddUserMessage(userMessage)
 
-	// Record user turn in timeline collector
-	s.timeline.AddUserTurn(
+	// Record user turn in session's timeline collector
+	run.timeline.AddUserTurn(
 		fmt.Sprintf("usr-%d", time.Now().UnixNano()),
 		userMessage,
 		time.Now().UnixMilli(),
 	)
 
-	// Build runners if not yet built
+	// Build runners if not yet built (under lock — no gap)
 	if s.deepAgent == nil {
-		s.mu.Unlock()
-		if err := s.BuildRunners(); err != nil {
+		if err := s.buildRunnersLocked(); err != nil {
+			s.mu.Unlock()
 			logger.Error("[CHAT] Failed to build runners", err)
-			wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Failed to build runner: %v", err))
+			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+				"sessionId": s.activeSessionID,
+				"error":     fmt.Sprintf("Failed to build runner: %v", err),
+			})
 			return fmt.Errorf("failed to build runners: %w", err)
 		}
-		s.mu.Lock()
 	}
 
-	// Select runner based on mode
+	// Select runner based on session's mode
 	runner := s.defaultRunner
-	if s.mode == "plan" {
+	if run.mode == "plan" {
 		runner = s.planRunner
 	}
 
-	ctxEngine := s.ctxEngine
-	mode := s.mode
+	sessionID := run.sessionID
 
-	// Create a cancellable context
+	// Create a cancellable context with session identity
 	runCtx, cancel := context.WithCancel(s.ctx)
-	s.cancelFn = cancel
+	runCtx = contextWithSessionID(runCtx, sessionID)
+	run.cancelFn = cancel
+	run.running = true
+	done := make(chan struct{})
+	run.runDone = done
 	s.mu.Unlock()
 
 	// Prepare messages
-	messages := ctxEngine.PrepareMessages()
+	messages := run.ctxEngine.PrepareMessages()
 	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 
 	// Launch the agent run in a goroutine
 	go func() {
+		defer close(done)
+		defer func() {
+			s.mu.Lock()
+			run.running = false
+			run.cancelFn = nil
+			s.mu.Unlock()
+		}()
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Agent panic: %v", r))
-				wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+					"sessionId": sessionID,
+					"error":     fmt.Sprintf("Agent panic: %v", r),
+				})
+				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+					"sessionId": sessionID,
+				})
 			}
 		}()
 
-		logger.Info("[CHAT] Agent run started", "message_count", len(messages), "mode", mode)
+		logger.Info("[CHAT] Agent run started",
+			"message_count", len(messages),
+			"mode", run.mode,
+			"session", sessionID,
+		)
 		startTime := time.Now()
 
 		events := runner.Run(runCtx, messages, adk.WithCheckPointID(checkpointID))
 
-		lastContent, transferCount, interrupted := s.processEvents(events, checkpointID)
+		lastContent, transferCount, interrupted := s.processEventsForRun(events, checkpointID, run)
 
 		if interrupted {
 			return // Don't emit done — waiting for user response
 		}
 
-		// Add final assistant response to context engine
+		// Add final assistant response to session's context engine
 		if lastContent != "" {
-			s.mu.Lock()
-			if s.ctxEngine != nil {
-				s.ctxEngine.AddAssistantMessage(lastContent)
-			}
-			s.mu.Unlock()
+			run.ctxEngine.AddAssistantMessage(lastContent)
 		}
 
-		wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+			"sessionId": sessionID,
+		})
 
 		logger.Info("[CHAT] Agent run completed",
 			"duration_ms", time.Since(startTime).Milliseconds(),
 			"transfer_count", transferCount,
 			"has_response", lastContent != "",
+			"session", sessionID,
 		)
 
-		// Notify listeners (e.g. session auto-save)
+		// Notify listeners (e.g. session auto-save) with sessionID
 		s.mu.Lock()
 		doneFn := s.onAgentDone
 		s.mu.Unlock()
 		if doneFn != nil {
-			doneFn()
+			doneFn(sessionID)
 		}
 	}()
 
 	return nil
 }
 
-// emitTimeline emits a timeline event to the frontend AND records it in the
-// timeline collector for backend persistence.
-func (s *ChatService) emitTimeline(evt TimelineEvent) {
+// ---------------------------------------------------------------------------
+// Timeline emission
+// ---------------------------------------------------------------------------
+
+// emitTimelineForRun emits a timeline event to the frontend AND records it in the
+// session's timeline collector for backend persistence.
+func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
+	evt.SessionID = run.sessionID
 	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
-	s.timeline.AddEvent(model.DisplayEvent{
+	run.timeline.AddEvent(model.DisplayEvent{
 		ID:        evt.ID,
 		Type:      evt.Type,
 		Agent:     evt.Agent,
@@ -251,9 +444,36 @@ func (s *ChatService) emitTimeline(evt TimelineEvent) {
 	}, evt.Agent)
 }
 
-// processEvents consumes the event stream, emits frontend events, and detects interrupts.
+// emitTimelineForSession emits a timeline event using a session ID lookup
+// (for OnToolEvent callbacks where we only have context, not a run reference).
+func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string) {
+	evt.SessionID = sessionID
+	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if ok {
+		run.timeline.AddEvent(model.DisplayEvent{
+			ID:        evt.ID,
+			Type:      evt.Type,
+			Agent:     evt.Agent,
+			Content:   evt.Content,
+			ToolName:  evt.ToolName,
+			ToolArgs:  evt.ToolArgs,
+			ToolID:    evt.ToolID,
+			Timestamp: evt.Timestamp,
+		}, evt.Agent)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Event processing
+// ---------------------------------------------------------------------------
+
+// processEventsForRun consumes the event stream for a specific session run,
+// emits frontend events, and detects interrupts.
 // Returns the last message content, transfer count, and whether an interrupt occurred.
-func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string) (string, int, bool) {
+func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string, run *SessionRun) (string, int, bool) {
 	var allContents []string
 	var transferCount int
 	lastContentByAgent := make(map[string]string) // dedup
@@ -261,12 +481,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 	// Track pending tool_call_ids to detect orphans (tool calls without results)
 	pendingToolCalls := make(map[string]bool)
 
+	sessionID := run.sessionID
+
 	// Debounced intermediate save: persist at most once per 10 seconds during agent execution
 	var lastSaveTime time.Time
 	maybeSave := func() {
 		if time.Since(lastSaveTime) > 10*time.Second {
-			if s.sessionService != nil {
-				go func() { _ = s.sessionService.SaveCurrentSession() }()
+			s.mu.Lock()
+			ss := s.sessionService
+			s.mu.Unlock()
+			if ss != nil {
+				go func() { _ = ss.SaveCurrentSession() }()
 			}
 			lastSaveTime = time.Now()
 		}
@@ -279,16 +504,16 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 		}
 
 		if event.Err != nil {
-			logger.Error("[CHAT] Agent event error", event.Err, "agent", event.AgentName)
+			logger.Error("[CHAT] Agent event error", event.Err, "agent", event.AgentName, "session", sessionID)
 			// Emit error as timeline info event so the user sees it, but do NOT break
 			// the event loop — subsequent events (including sub-agent work) may follow.
-			s.emitTimeline(TimelineEvent{
+			s.emitTimelineForRun(TimelineEvent{
 				ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 				Type:      "info",
 				Agent:     event.AgentName,
 				Content:   fmt.Sprintf("Error: %v", event.Err),
 				Timestamp: time.Now().UnixMilli(),
-			})
+			}, run)
 			continue
 		}
 
@@ -297,7 +522,7 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 			// Interrupt detection
 			if event.Action.Interrupted != nil && len(event.Action.Interrupted.InterruptContexts) > 0 {
 				interruptCtx := event.Action.Interrupted.InterruptContexts[0]
-				s.handleInterrupt(interruptCtx, checkpointID)
+				s.handleInterruptForRun(interruptCtx, checkpointID, run)
 				return strings.Join(allContents, "\n\n"), transferCount, true
 			}
 
@@ -315,22 +540,22 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 					"file_manager":  "文件批量操作",
 				}
 
-				s.emitTimeline(TimelineEvent{
+				s.emitTimelineForRun(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "transfer",
 					Agent:     event.AgentName,
 					Content:   destName,
 					ToolArgs:  agentDescs[destName],
 					Timestamp: time.Now().UnixMilli(),
-				})
+				}, run)
 
 				// Emit thinking indicator so the user sees the sub-agent is active
-				s.emitTimeline(TimelineEvent{
+				s.emitTimelineForRun(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "thinking",
 					Agent:     destName,
 					Timestamp: time.Now().UnixMilli(),
-				})
+				}, run)
 			}
 		}
 
@@ -342,15 +567,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 			var wasStreamed bool
 
 			if mv.IsStreaming && mv.MessageStream != nil {
-				msg, err = s.drainStream(mv.MessageStream, event.AgentName)
+				msg, err = s.drainStreamForRun(mv.MessageStream, event.AgentName, run)
 				wasStreamed = true
 			} else {
 				msg, err = mv.GetMessage()
 			}
 
 			if err != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error",
-					fmt.Sprintf("failed to get message: %v", err))
+				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+					"sessionId": sessionID,
+					"error":     fmt.Sprintf("failed to get message: %v", err),
+				})
 				continue
 			}
 			if msg == nil {
@@ -360,21 +587,19 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 			// Emit tool call timeline events
 			if len(msg.ToolCalls) > 0 {
 				// Surface the LLM's reasoning text before tool calls.
-				// The LLM often explains its intent (e.g. "I'll read the file to understand...")
-				// but this content was previously discarded by the continue below.
 				if msg.Content != "" {
 					logger.Info("[CHAT] Reasoning text found with tool calls",
 						"agent", event.AgentName,
 						"content_len", len(msg.Content),
 						"preview", truncateResult(msg.Content, 100),
 					)
-					s.emitTimeline(TimelineEvent{
+					s.emitTimelineForRun(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 						Type:      "reasoning",
 						Agent:     event.AgentName,
 						Content:   msg.Content,
 						Timestamp: time.Now().UnixMilli(),
-					})
+					}, run)
 				} else {
 					logger.Info("[CHAT] No reasoning text with tool calls (Content empty)",
 						"agent", event.AgentName,
@@ -383,7 +608,7 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 				}
 
 				for _, tc := range msg.ToolCalls {
-					s.emitTimeline(TimelineEvent{
+					s.emitTimelineForRun(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 						Type:      "tool_call",
 						Agent:     event.AgentName,
@@ -391,19 +616,15 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 						ToolArgs:  tc.Function.Arguments,
 						ToolID:    tc.ID,
 						Timestamp: time.Now().UnixMilli(),
-					})
+					}, run)
 				}
 
-				// Store tool call message in context history for persistence
-				s.mu.Lock()
-				if s.ctxEngine != nil {
-					s.ctxEngine.AddMessage(&schema.Message{
-						Role:      schema.Assistant,
-						Content:   msg.Content,
-						ToolCalls: msg.ToolCalls,
-					})
-				}
-				s.mu.Unlock()
+				// Store tool call message in session's context history
+				run.ctxEngine.AddMessage(&schema.Message{
+					Role:      schema.Assistant,
+					Content:   msg.Content,
+					ToolCalls: msg.ToolCalls,
+				})
 				// Track pending tool call IDs
 				for _, tc := range msg.ToolCalls {
 					pendingToolCalls[tc.ID] = true
@@ -413,21 +634,17 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 
 			// Emit tool result events
 			if msg.Role == schema.Tool && msg.ToolCallID != "" {
-				s.emitTimeline(TimelineEvent{
+				s.emitTimelineForRun(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "tool_result",
 					Agent:     event.AgentName,
 					Content:   truncateResult(msg.Content, 1000),
 					ToolID:    msg.ToolCallID,
 					Timestamp: time.Now().UnixMilli(),
-				})
+				}, run)
 
-				// Store tool result in context history for persistence
-				s.mu.Lock()
-				if s.ctxEngine != nil {
-					s.ctxEngine.AddToolResult(msg.ToolCallID, msg.Content)
-				}
-				s.mu.Unlock()
+				// Store tool result in session's context history
+				run.ctxEngine.AddToolResult(msg.ToolCallID, msg.Content)
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
 
@@ -435,14 +652,13 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 				maybeSave()
 
 				// Emit thinking indicator after sub-agent tool result
-				// so the user knows the sub-agent is still working
 				if event.AgentName != "coding_agent" {
-					s.emitTimeline(TimelineEvent{
+					s.emitTimelineForRun(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 						Type:      "thinking",
 						Agent:     event.AgentName,
 						Timestamp: time.Now().UnixMilli(),
-					})
+					}, run)
 				}
 
 				continue
@@ -459,41 +675,39 @@ func (s *ChatService) processEvents(events *adk.AsyncIterator[*adk.AgentEvent], 
 
 				// Only emit timeline event if content was NOT already streamed
 				if !wasStreamed {
-					s.emitTimeline(TimelineEvent{
+					s.emitTimelineForRun(TimelineEvent{
 						ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 						Type:      "message",
 						Agent:     event.AgentName,
 						Content:   msg.Content,
 						Timestamp: time.Now().UnixMilli(),
-					})
+					}, run)
 				}
 			}
 		}
 	}
 
 	// Fix orphaned tool calls: inject synthetic error responses for any tool_call_ids
-	// that were stored but never received a matching tool result. This prevents the
-	// OpenAI API from rejecting the next request with "tool_calls must be followed by
-	// tool messages responding to each tool_call_id".
+	// that were stored but never received a matching tool result.
 	if len(pendingToolCalls) > 0 {
-		s.mu.Lock()
-		if s.ctxEngine != nil {
-			for toolCallID := range pendingToolCalls {
-				logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
-					"tool_call_id", toolCallID)
-				s.ctxEngine.AddToolResult(toolCallID, "Error: tool execution failed or was interrupted")
-			}
+		for toolCallID := range pendingToolCalls {
+			logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
+				"tool_call_id", toolCallID, "session", sessionID)
+			run.ctxEngine.AddToolResult(toolCallID, "Error: tool execution failed or was interrupted")
 		}
-		s.mu.Unlock()
 	}
 
 	return strings.Join(allContents, "\n\n"), transferCount, false
 }
 
-// handleInterrupt processes an interrupt context and emits events to the frontend.
-func (s *ChatService) handleInterrupt(interruptCtx *adk.InterruptCtx, checkpointID string) {
+// ---------------------------------------------------------------------------
+// Interrupt handling
+// ---------------------------------------------------------------------------
+
+// handleInterruptForRun processes an interrupt context for a specific session run.
+func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, checkpointID string, run *SessionRun) {
 	s.mu.Lock()
-	s.pendingInterrupt = &PendingInterrupt{
+	run.pendingInterrupt = &PendingInterrupt{
 		CheckpointID: checkpointID,
 		InterruptID:  interruptCtx.ID,
 		Info:         interruptCtx.Info,
@@ -504,12 +718,13 @@ func (s *ChatService) handleInterrupt(interruptCtx *adk.InterruptCtx, checkpoint
 	var evt InterruptEvent
 	evt.InterruptID = interruptCtx.ID
 	evt.CheckpointID = checkpointID
+	evt.SessionID = run.sessionID
 
 	switch info := interruptCtx.Info.(type) {
 	case *tools.FollowUpInfo:
 		evt.Type = "followup"
 		evt.Questions = info.Questions
-		logger.Info("[CHAT] Interrupt: follow-up questions", "count", len(info.Questions))
+		logger.Info("[CHAT] Interrupt: follow-up questions", "count", len(info.Questions), "session", run.sessionID)
 	case *tools.ChoiceInfo:
 		evt.Type = "choice"
 		evt.Question = info.Question
@@ -519,7 +734,7 @@ func (s *ChatService) handleInterrupt(interruptCtx *adk.InterruptCtx, checkpoint
 				Description: opt.Description,
 			})
 		}
-		logger.Info("[CHAT] Interrupt: choice", "question", info.Question, "options", len(info.Options))
+		logger.Info("[CHAT] Interrupt: choice", "question", info.Question, "options", len(info.Options), "session", run.sessionID)
 	default:
 		logger.Warn("[CHAT] Unknown interrupt type", "type", fmt.Sprintf("%T", interruptCtx.Info))
 		evt.Type = "followup"
@@ -527,29 +742,46 @@ func (s *ChatService) handleInterrupt(interruptCtx *adk.InterruptCtx, checkpoint
 	}
 
 	wailsruntime.EventsEmit(s.ctx, "agent:interrupt", evt)
-	s.emitTimeline(TimelineEvent{
+	s.emitTimelineForRun(TimelineEvent{
 		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 		Type:      "interrupt",
 		Agent:     "system",
 		Content:   fmt.Sprintf("Waiting for user input: %s", evt.Type),
 		Timestamp: time.Now().UnixMilli(),
-	})
+	}, run)
 }
+
+// ---------------------------------------------------------------------------
+// Resume
+// ---------------------------------------------------------------------------
 
 // ResumeWithAnswer resumes execution after the user answers follow-up questions.
 func (s *ChatService) ResumeWithAnswer(answer string) error {
 	s.mu.Lock()
-	pending := s.pendingInterrupt
+	run := s.activeRun()
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("no active session")
+	}
+
+	pending := run.pendingInterrupt
 	if pending == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("no pending interrupt to resume")
 	}
-	s.pendingInterrupt = nil
+	run.pendingInterrupt = nil
+
+	if run.running {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
+	}
 
 	runner := s.defaultRunner
-	if s.mode == "plan" {
+	if run.mode == "plan" {
 		runner = s.planRunner
 	}
+
+	sessionID := run.sessionID
 	s.mu.Unlock()
 
 	// Build resume data with user's answer
@@ -561,20 +793,36 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 	}
 
 	runCtx, cancel := context.WithCancel(s.ctx)
+	runCtx = contextWithSessionID(runCtx, sessionID)
 	s.mu.Lock()
-	s.cancelFn = cancel
+	run.cancelFn = cancel
+	run.running = true
+	done := make(chan struct{})
+	run.runDone = done
 	s.mu.Unlock()
 
 	go func() {
+		defer close(done)
+		defer func() {
+			s.mu.Lock()
+			run.running = false
+			run.cancelFn = nil
+			s.mu.Unlock()
+		}()
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Resume panic: %v", r))
-				wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+					"sessionId": sessionID,
+					"error":     fmt.Sprintf("Resume panic: %v", r),
+				})
+				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+					"sessionId": sessionID,
+				})
 			}
 		}()
 
-		logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer))
+		logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer), "session", sessionID)
 		startTime := time.Now()
 
 		events, err := runner.ResumeWithParams(runCtx, pending.CheckpointID, &adk.ResumeParams{
@@ -583,36 +831,40 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 			},
 		})
 		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Resume failed: %v", err))
-			wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+				"sessionId": sessionID,
+				"error":     fmt.Sprintf("Resume failed: %v", err),
+			})
+			wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+				"sessionId": sessionID,
+			})
 			return
 		}
 
-		lastContent, transferCount, interrupted := s.processEvents(events, pending.CheckpointID)
+		lastContent, transferCount, interrupted := s.processEventsForRun(events, pending.CheckpointID, run)
 
 		if interrupted {
 			return
 		}
 
 		if lastContent != "" {
-			s.mu.Lock()
-			if s.ctxEngine != nil {
-				s.ctxEngine.AddAssistantMessage(lastContent)
-			}
-			s.mu.Unlock()
+			run.ctxEngine.AddAssistantMessage(lastContent)
 		}
 
-		wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+			"sessionId": sessionID,
+		})
 		logger.Info("[CHAT] Resume completed",
 			"duration_ms", time.Since(startTime).Milliseconds(),
 			"transfer_count", transferCount,
+			"session", sessionID,
 		)
 
 		s.mu.Lock()
 		doneFn := s.onAgentDone
 		s.mu.Unlock()
 		if doneFn != nil {
-			doneFn()
+			doneFn(sessionID)
 		}
 	}()
 
@@ -622,17 +874,30 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 // ResumeWithChoice resumes execution after the user selects a choice.
 func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 	s.mu.Lock()
-	pending := s.pendingInterrupt
+	run := s.activeRun()
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("no active session")
+	}
+
+	pending := run.pendingInterrupt
 	if pending == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("no pending interrupt to resume")
 	}
-	s.pendingInterrupt = nil
+	run.pendingInterrupt = nil
+
+	if run.running {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
+	}
 
 	runner := s.defaultRunner
-	if s.mode == "plan" {
+	if run.mode == "plan" {
 		runner = s.planRunner
 	}
+
+	sessionID := run.sessionID
 	s.mu.Unlock()
 
 	// Build resume data with user's selection
@@ -645,20 +910,36 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 	}
 
 	runCtx, cancel := context.WithCancel(s.ctx)
+	runCtx = contextWithSessionID(runCtx, sessionID)
 	s.mu.Lock()
-	s.cancelFn = cancel
+	run.cancelFn = cancel
+	run.running = true
+	done := make(chan struct{})
+	run.runDone = done
 	s.mu.Unlock()
 
 	go func() {
+		defer close(done)
+		defer func() {
+			s.mu.Lock()
+			run.running = false
+			run.cancelFn = nil
+			s.mu.Unlock()
+		}()
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Resume panic: %v", r))
-				wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+					"sessionId": sessionID,
+					"error":     fmt.Sprintf("Resume panic: %v", r),
+				})
+				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+					"sessionId": sessionID,
+				})
 			}
 		}()
 
-		logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex)
+		logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex, "session", sessionID)
 		startTime := time.Now()
 
 		events, err := runner.ResumeWithParams(runCtx, pending.CheckpointID, &adk.ResumeParams{
@@ -667,92 +948,252 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 			},
 		})
 		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error", fmt.Sprintf("Resume failed: %v", err))
-			wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+				"sessionId": sessionID,
+				"error":     fmt.Sprintf("Resume failed: %v", err),
+			})
+			wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+				"sessionId": sessionID,
+			})
 			return
 		}
 
-		lastContent, transferCount, interrupted := s.processEvents(events, pending.CheckpointID)
+		lastContent, transferCount, interrupted := s.processEventsForRun(events, pending.CheckpointID, run)
 
 		if interrupted {
 			return
 		}
 
 		if lastContent != "" {
-			s.mu.Lock()
-			if s.ctxEngine != nil {
-				s.ctxEngine.AddAssistantMessage(lastContent)
-			}
-			s.mu.Unlock()
+			run.ctxEngine.AddAssistantMessage(lastContent)
 		}
 
-		wailsruntime.EventsEmit(s.ctx, "agent:done", nil)
+		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+			"sessionId": sessionID,
+		})
 		logger.Info("[CHAT] Resume completed",
 			"duration_ms", time.Since(startTime).Milliseconds(),
 			"transfer_count", transferCount,
+			"session", sessionID,
 		)
 
 		s.mu.Lock()
 		doneFn := s.onAgentDone
 		s.mu.Unlock()
 		if doneFn != nil {
-			doneFn()
+			doneFn(sessionID)
 		}
 	}()
 
 	return nil
 }
 
-// StopGeneration cancels the currently running agent generation.
+// ---------------------------------------------------------------------------
+// Stop
+// ---------------------------------------------------------------------------
+
+// StopGeneration cancels the currently running agent in the active session.
 func (s *ChatService) StopGeneration() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.cancelFn != nil {
-		s.cancelFn()
-		s.cancelFn = nil
+	run := s.activeRun()
+	if run == nil || !run.running {
+		s.mu.Unlock()
+		return nil
 	}
-	s.pendingInterrupt = nil
+	if run.cancelFn != nil {
+		run.cancelFn()
+	}
+	run.pendingInterrupt = nil
+	done := run.runDone
+	s.mu.Unlock()
+
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			logger.Warn("[CHAT] StopGeneration timed out", "session", s.activeSessionID)
+		}
+	}
 	return nil
 }
 
-// ClearHistory resets the conversation history.
+// StopSessionGeneration cancels a running agent in a specific session.
+func (s *ChatService) StopSessionGeneration(sessionID string) {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	if !ok || !run.running {
+		s.mu.Unlock()
+		return
+	}
+	if run.cancelFn != nil {
+		run.cancelFn()
+	}
+	run.pendingInterrupt = nil
+	done := run.runDone
+	s.mu.Unlock()
+
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			logger.Warn("[CHAT] StopSessionGeneration timed out", "session", sessionID)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// History & state access
+// ---------------------------------------------------------------------------
+
+// ClearHistory resets the conversation history for the active session.
 func (s *ChatService) ClearHistory() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.ctxEngine != nil {
-		s.ctxEngine.ClearHistory()
+	run := s.activeRun()
+	if run == nil {
+		return nil
 	}
-	s.timeline.Clear()
-	s.streamingState = nil
+
+	run.ctxEngine.ClearHistory()
+	run.timeline.Clear()
+	run.streamingState = nil
+	run.pendingInterrupt = nil
 	s.invalidateRunners()
-	s.checkpointStore = checkpoint.NewInMemoryStore()
-	s.pendingInterrupt = nil
+	tools.ClearTodos()
 	return nil
 }
 
-// Timeline returns the timeline collector for session persistence.
+// Timeline returns the timeline collector for the active session.
 func (s *ChatService) Timeline() *agentctx.TimelineCollector {
-	return s.timeline
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run := s.activeRun()
+	if run == nil {
+		return agentctx.NewTimelineCollector() // return empty if no session
+	}
+	return run.timeline
 }
 
-// StreamingState returns the current streaming state (nil if not streaming).
+// StreamingState returns the current streaming state for the active session (nil if not streaming).
 func (s *ChatService) StreamingState() *model.StreamingState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.streamingState == nil {
+	run := s.activeRun()
+	if run == nil {
 		return nil
 	}
-	ss := *s.streamingState
+	if run.streamingState == nil {
+		return nil
+	}
+	ss := *run.streamingState
 	return &ss
 }
+
+// CtxEngine returns the context engine for the active session.
+func (s *ChatService) CtxEngine() *agentctx.Engine {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run := s.activeRun()
+	if run == nil {
+		return nil
+	}
+	return run.ctxEngine
+}
+
+// SessionCtxEngine returns the context engine for a specific session.
+func (s *ChatService) SessionCtxEngine(sessionID string) *agentctx.Engine {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		return nil
+	}
+	return run.ctxEngine
+}
+
+// SessionTimeline returns the timeline collector for a specific session.
+func (s *ChatService) SessionTimeline(sessionID string) *agentctx.TimelineCollector {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		return nil
+	}
+	return run.timeline
+}
+
+// SessionStreamingState returns the streaming state for a specific session.
+func (s *ChatService) SessionStreamingState(sessionID string) *model.StreamingState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.sessions[sessionID]
+	if !ok || run.streamingState == nil {
+		return nil
+	}
+	ss := *run.streamingState
+	return &ss
+}
+
+// GetSessionRunSnapshot returns a snapshot of a session's run state for the
+// SessionSwitchedEvent. Safe to call from SessionService.
+func (s *ChatService) GetSessionRunSnapshot(sessionID string) (running bool, currentAgent, mode string, interrupt *InterruptEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		return false, "", "default", nil
+	}
+	running = run.running
+	currentAgent = run.currentAgent
+	mode = run.mode
+	if run.pendingInterrupt != nil {
+		interrupt = s.buildInterruptEvent(run.pendingInterrupt, sessionID)
+	}
+	return
+}
+
+// buildInterruptEvent converts a PendingInterrupt into an InterruptEvent.
+// Caller must hold s.mu.
+func (s *ChatService) buildInterruptEvent(pi *PendingInterrupt, sessionID string) *InterruptEvent {
+	evt := &InterruptEvent{
+		InterruptID:  pi.InterruptID,
+		CheckpointID: pi.CheckpointID,
+		SessionID:    sessionID,
+	}
+	switch info := pi.Info.(type) {
+	case *tools.FollowUpInfo:
+		evt.Type = "followup"
+		evt.Questions = info.Questions
+	case *tools.ChoiceInfo:
+		evt.Type = "choice"
+		evt.Question = info.Question
+		for _, opt := range info.Options {
+			evt.Options = append(evt.Options, InterruptOption{
+				Label:       opt.Label,
+				Description: opt.Description,
+			})
+		}
+	default:
+		evt.Type = "followup"
+		evt.Questions = []string{fmt.Sprintf("%v", pi.Info)}
+	}
+	return evt
+}
+
+// ---------------------------------------------------------------------------
+// Runner building
+// ---------------------------------------------------------------------------
 
 // BuildRunners builds the deep agent and both runners using the current config.
 func (s *ChatService) BuildRunners() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.buildRunnersLocked()
+}
 
+// buildRunnersLocked builds the deep agent and both runners (caller must hold s.mu).
+func (s *ChatService) buildRunnersLocked() error {
 	if s.sandbox == nil || !s.sandbox.IsConnected() {
 		return fmt.Errorf("sandbox is not connected")
 	}
@@ -829,6 +1270,10 @@ func (s *ChatService) BuildRunners() error {
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
 // formatToolCall formats a tool call for display purposes.
 func formatToolCall(tc schema.ToolCall) string {
 	detail := fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments)
@@ -875,9 +1320,10 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 	}
 
 	// Set up OnToolEvent to emit sub-agent tool calls as timeline events.
-	// This makes sub-agent internal activity visible to the frontend.
-	ac.OnToolEvent = func(agentName, eventType, toolName, toolArgs, toolID, result string) {
-		s.emitTimeline(TimelineEvent{
+	// The context carries session identity for proper event routing.
+	ac.OnToolEvent = func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string) {
+		sessionID := SessionIDFromContext(ctx)
+		s.emitTimelineForSession(TimelineEvent{
 			ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 			Type:      eventType,
 			Agent:     agentName,
@@ -886,7 +1332,7 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 			ToolID:    toolID,
 			Content:   result,
 			Timestamp: time.Now().UnixMilli(),
-		})
+		}, sessionID)
 	}
 
 	return ac
@@ -900,9 +1346,10 @@ func (s *ChatService) getWorkspacePath() string {
 	return "/workspace"
 }
 
-// drainStream iterates a MessageStream, batching stream_chunk timeline events
-// with a 50ms window to reduce IPC frequency, and returns the final concatenated message.
-func (s *ChatService) drainStream(stream adk.MessageStream, agentName string) (*schema.Message, error) {
+// drainStreamForRun iterates a MessageStream for a specific session run,
+// batching stream_chunk timeline events with a 50ms window to reduce IPC frequency,
+// and returns the final concatenated message.
+func (s *ChatService) drainStreamForRun(stream adk.MessageStream, agentName string, run *SessionRun) (*schema.Message, error) {
 	defer stream.Close()
 
 	var chunks []*schema.Message
@@ -920,13 +1367,13 @@ func (s *ChatService) drainStream(stream adk.MessageStream, agentName string) (*
 		}
 		merged := pendingText.String()
 		pendingText.Reset()
-		s.emitTimeline(TimelineEvent{
+		s.emitTimelineForRun(TimelineEvent{
 			ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 			Type:      "stream_chunk",
 			Agent:     agentName,
 			Content:   merged,
 			Timestamp: time.Now().UnixMilli(),
-		})
+		}, run)
 	}
 
 	done := false
@@ -934,13 +1381,11 @@ func (s *ChatService) drainStream(stream adk.MessageStream, agentName string) (*
 		select {
 		case <-ticker.C:
 			flushChunks()
-			// Update streaming state for mid-stream saves
-			s.mu.Lock()
-			s.streamingState = &model.StreamingState{
+			// Update session's streaming state for mid-stream saves
+			run.streamingState = &model.StreamingState{
 				PartialContent: streamingContent.String(),
 				AgentName:      agentName,
 			}
-			s.mu.Unlock()
 		default:
 			chunk, err := stream.Recv()
 			if err != nil {
@@ -963,18 +1408,16 @@ func (s *ChatService) drainStream(stream adk.MessageStream, agentName string) (*
 	// Flush remaining
 	flushChunks()
 
-	// Clear streaming state
-	s.mu.Lock()
-	s.streamingState = nil
-	s.mu.Unlock()
+	// Clear session's streaming state
+	run.streamingState = nil
 
 	// Signal stream end
-	s.emitTimeline(TimelineEvent{
+	s.emitTimelineForRun(TimelineEvent{
 		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 		Type:      "stream_end",
 		Agent:     agentName,
 		Timestamp: time.Now().UnixMilli(),
-	})
+	}, run)
 
 	if len(chunks) == 0 {
 		return nil, nil

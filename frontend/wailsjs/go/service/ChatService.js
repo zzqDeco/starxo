@@ -10,12 +10,40 @@ export function ClearHistory() {
   return window['go']['service']['ChatService']['ClearHistory']();
 }
 
+export function CtxEngine() {
+  return window['go']['service']['ChatService']['CtxEngine']();
+}
+
+export function GetActiveSessionID() {
+  return window['go']['service']['ChatService']['GetActiveSessionID']();
+}
+
 export function GetMode() {
   return window['go']['service']['ChatService']['GetMode']();
 }
 
+export function GetOrCreateRun(arg1) {
+  return window['go']['service']['ChatService']['GetOrCreateRun'](arg1);
+}
+
+export function GetSessionRunSnapshot(arg1) {
+  return window['go']['service']['ChatService']['GetSessionRunSnapshot'](arg1);
+}
+
 export function InvalidateRunner() {
   return window['go']['service']['ChatService']['InvalidateRunner']();
+}
+
+export function IsRunning() {
+  return window['go']['service']['ChatService']['IsRunning']();
+}
+
+export function IsSessionRunning(arg1) {
+  return window['go']['service']['ChatService']['IsSessionRunning'](arg1);
+}
+
+export function RemoveSession(arg1) {
+  return window['go']['service']['ChatService']['RemoveSession'](arg1);
 }
 
 export function ResumeWithAnswer(arg1) {
@@ -28,6 +56,22 @@ export function ResumeWithChoice(arg1) {
 
 export function SendMessage(arg1) {
   return window['go']['service']['ChatService']['SendMessage'](arg1);
+}
+
+export function SessionCtxEngine(arg1) {
+  return window['go']['service']['ChatService']['SessionCtxEngine'](arg1);
+}
+
+export function SessionStreamingState(arg1) {
+  return window['go']['service']['ChatService']['SessionStreamingState'](arg1);
+}
+
+export function SessionTimeline(arg1) {
+  return window['go']['service']['ChatService']['SessionTimeline'](arg1);
+}
+
+export function SetActiveSessionID(arg1) {
+  return window['go']['service']['ChatService']['SetActiveSessionID'](arg1);
 }
 
 export function SetContext(arg1) {
@@ -54,6 +98,10 @@ export function StopGeneration() {
   return window['go']['service']['ChatService']['StopGeneration']();
 }
 
+export function StopSessionGeneration(arg1) {
+  return window['go']['service']['ChatService']['StopSessionGeneration'](arg1);
+}
+
 export function StreamingState() {
   return window['go']['service']['ChatService']['StreamingState']();
 }
@@ -64,4 +112,8 @@ export function Timeline() {
 
 export function UpdateSandbox(arg1) {
   return window['go']['service']['ChatService']['UpdateSandbox'](arg1);
+}
+
+export function WaitForSessionDone(arg1, arg2) {
+  return window['go']['service']['ChatService']['WaitForSessionDone'](arg1, arg2);
 }

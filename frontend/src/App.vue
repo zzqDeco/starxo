@@ -66,6 +66,12 @@ const themeOverrides: GlobalThemeOverrides = {
   }
 }
 
+/** Check if an event belongs to the currently active session */
+function isActiveSession(data: any): boolean {
+  const sid = data?.sessionId
+  return !sid || sid === sessionStore.activeSessionId
+}
+
 /** Restore messages from persisted data into chatStore */
 async function restoreActiveMessages() {
   // Always clear first — prevents stale messages when switching to empty sessions
@@ -143,14 +149,40 @@ onMounted(async () => {
   // Restore messages for the active session
   await restoreActiveMessages()
 
-  // Session switched event — SSH stays connected, only container state changes
-  EventsOn('session:switched', async (data: { session: Session; containerID?: string }) => {
+  // Session switched event — full state restore from backend snapshot
+  EventsOn('session:switched', async (data: {
+    session: Session;
+    containerID?: string;
+    agentRunning?: boolean;
+    currentAgent?: string;
+    mode?: string;
+    hasInterrupt?: boolean;
+    interrupt?: InterruptEvent;
+  }) => {
     if (data?.session) {
       sessionStore.setActiveSession(data.session as Session)
+
+      // 1. Restore message history
       await restoreActiveMessages()
+
+      // 2. Sync running state → input box enabled/disabled
+      chatStore.setGenerating(data.agentRunning || false, data.currentAgent || '')
+
+      // 3. Sync agent mode
+      if (data.mode) {
+        chatStore.setMode(data.mode as 'default' | 'plan')
+      }
+
+      // 4. Sync interrupt dialog
+      if (data.hasInterrupt && data.interrupt) {
+        chatStore.setInterrupt(data.interrupt)
+      } else {
+        chatStore.clearInterrupt()
+      }
+
+      // 5. Container & session list
       sessionStore.loadSessions()
       containerStore.loadContainers()
-      // Update active container (SSH remains connected)
       if (data.containerID) {
         containerStore.setActiveContainer(data.containerID)
       } else {
@@ -206,48 +238,48 @@ onMounted(async () => {
     containerStore.clearActiveContainer()
   })
 
-  // Timeline events (unified event stream — the only message source)
+  // Timeline events (unified event stream — filtered by sessionId)
   EventsOn('agent:timeline', (data: TurnEvent) => {
-    if (data) {
-      chatStore.addTimelineEvent(data)
-      if (!chatStore.agentDone && data.agent) {
-        chatStore.setGenerating(true, data.agent)
-      }
+    if (!data || !isActiveSession(data)) return
+    chatStore.addTimelineEvent(data)
+    if (!chatStore.agentDone && data.agent) {
+      chatStore.setGenerating(true, data.agent)
     }
   })
 
-  // Agent done
-  EventsOn('agent:done', () => {
+  // Agent done (now receives object with sessionId)
+  EventsOn('agent:done', (data: any) => {
+    if (!isActiveSession(data)) return
     chatStore.setGenerating(false)
     sessionStore.loadSessions()
   })
 
-  // Agent error
-  EventsOn('agent:error', (data: string) => {
+  // Agent error (now receives object with sessionId + error)
+  EventsOn('agent:error', (data: any) => {
+    if (!isActiveSession(data)) return
     chatStore.setGenerating(false)
-    if (data) {
+    const errMsg = typeof data === 'string' ? data : data?.error
+    if (errMsg) {
       chatStore.addMessage({
         id: crypto.randomUUID(),
         role: 'system',
-        content: `Error: ${data}`,
+        content: `Error: ${errMsg}`,
         timestamp: Date.now(),
         events: []
       })
     }
   })
 
-  // Interrupt event — agent needs user input
+  // Interrupt event — agent needs user input (filtered by sessionId)
   EventsOn('agent:interrupt', (data: InterruptEvent) => {
-    if (data) {
-      chatStore.setInterrupt(data)
-    }
+    if (!data || !isActiveSession(data)) return
+    chatStore.setInterrupt(data)
   })
 
-  // Mode changed event
+  // Mode changed event (filtered by sessionId)
   EventsOn('agent:mode_changed', (data: ModeChangedEvent) => {
-    if (data?.mode) {
-      chatStore.setMode(data.mode)
-    }
+    if (!data?.mode || !isActiveSession(data)) return
+    chatStore.setMode(data.mode)
   })
 })
 </script>

@@ -70,10 +70,6 @@ export function SetContext(arg1) {
   return window['go']['service']['SessionService']['SetContext'](arg1);
 }
 
-export function SetCtxEngine(arg1) {
-  return window['go']['service']['SessionService']['SetCtxEngine'](arg1);
-}
-
 export function SetOnDestroyContainer(arg1) {
   return window['go']['service']['SessionService']['SetOnDestroyContainer'](arg1);
 }
