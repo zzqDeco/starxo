@@ -22,3 +22,5 @@
 | 008 | [audit-log](008-audit-log.md) | 操作审计日志，记录关键操作 | 1 天 | 待实施 |
 | 009 | [event-batching](009-event-batching.md) | 事件流批处理，减少渲染压力 | 1 天 | 待实施 |
 | 010 | [conversation-limits](010-conversation-limits.md) | 对话硬限制，防止内存泄漏 | 0.5 天 | 待实施 |
+| 011 | [session-container-hierarchy](011-session-container-hierarchy.md) | 会话与容器父子关系重构 | 1-2 天 | 已完成 |
+| 012 | [agent-mode-and-tool-error-recovery](012-agent-mode-and-tool-error-recovery.md) | Plan 模式编排约束与工具错误可恢复执行 | 1-2 天 | 已完成 |

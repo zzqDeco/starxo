@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
-import { NIcon, NCollapse, NCollapseItem, NButton } from 'naive-ui'
+import { NIcon, NButton } from 'naive-ui'
 import {
   Build, CheckmarkCircle, Reload, InformationCircle, AlertCircle,
-  DocumentText, Terminal, CodeSlash, People, FolderOpen
+  DocumentText, Terminal, CodeSlash, People, ChevronForward
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
@@ -21,10 +21,11 @@ const props = defineProps<{
 const { renderMarkdown } = useMarkdown()
 const renderedContent = computed(() => renderMarkdown(props.event.content))
 
-// Tool call: auto-expand if no result yet (active), collapse if done
-const isExpanded = ref<string[]>(
-  (!props.event.toolResult && props.event.type === 'tool_call') ? [props.event.toolId || props.event.id] : []
-)
+const expanded = ref(false)
+function toggleExpanded() {
+  if (!hasDetails.value) return
+  expanded.value = !expanded.value
+}
 
 // Result truncation
 const resultTruncateLimit = 500
@@ -46,8 +47,9 @@ type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'o
 interface ToolDisplayInfo {
   category: ToolCategory
   color: string
-  label: string
-  detail?: string
+  action: string
+  primary: string
+  secondary?: string
 }
 
 function tryParseArgs(args?: string): any {
@@ -59,40 +61,187 @@ function truncStr(s: string, max: number): string {
   return s.length <= max ? s : s.substring(0, max) + '...'
 }
 
+function firstLine(s: string): string {
+  return s.split('\n')[0] || ''
+}
+
+function parseExitCode(result: string): number | null {
+  const m = result.match(/(?:exit(?:\s+code)?|code)\s*[:=]\s*(-?\d+)/i)
+  if (!m) return null
+  const n = Number.parseInt(m[1], 10)
+  return Number.isNaN(n) ? null : n
+}
+
+function countLines(s: string): number {
+  if (!s) return 0
+  return s.split('\n').length
+}
+
+function jsonInline(v: unknown): string {
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return ''
+  }
+}
+
+function todoStats(todos: TodoItem[]): string {
+  const total = todos.length
+  if (total === 0) return ''
+  let done = 0
+  let doing = 0
+  let todo = 0
+  for (const item of todos) {
+    if (item.status === 'done') done++
+    else if (item.status === 'in_progress') doing++
+    else todo++
+  }
+  return `${done}/${doing}/${todo}`
+}
+
+// ---------- Parsed todos for write_todos / update_todo tools ----------
+const parsedTodos = computed<TodoItem[]>(() => {
+  if (props.event.toolName === 'write_todos') {
+    const args = tryParseArgs(props.event.toolArgs)
+    if (args?.todos && Array.isArray(args.todos)) {
+      return args.todos as TodoItem[]
+    }
+    return []
+  }
+  if (props.event.toolName === 'update_todo' && props.event.toolResult) {
+    const parts = props.event.toolResult.split('---\n')
+    if (parts.length >= 2) {
+      try {
+        const todos = JSON.parse(parts[parts.length - 1])
+        if (Array.isArray(todos)) return todos as TodoItem[]
+      } catch {
+        // ignore parse failure
+      }
+    }
+  }
+  return []
+})
+
 const toolInfo = computed<ToolDisplayInfo>(() => {
   const name = props.event.toolName || ''
   const args = tryParseArgs(props.event.toolArgs)
+  const result = props.event.toolResult || ''
+  const exitCode = parseExitCode(result)
 
-  if (name === 'read_file')
-    return { category: 'file', color: '#34d399', label: 'read_file', detail: args?.path }
-  if (name === 'write_file')
-    return { category: 'file', color: '#34d399', label: 'write_file', detail: args?.path }
-  if (name === 'list_files')
-    return { category: 'file', color: '#34d399', label: 'list_files', detail: args?.path || '/workspace' }
+  if (name === 'read_file') {
+    return {
+      category: 'file',
+      color: '#34d399',
+      action: t('message.tool.read'),
+      primary: args?.path || '-',
+      secondary: result ? `${result.length} ${t('message.tool.chars')}` : undefined,
+    }
+  }
+
+  if (name === 'write_file') {
+    return {
+      category: 'file',
+      color: '#34d399',
+      action: t('message.tool.write'),
+      primary: args?.path || '-',
+      secondary: result ? t('message.tool.saved') : undefined,
+    }
+  }
+
+  if (name === 'list_files') {
+    return {
+      category: 'file',
+      color: '#34d399',
+      action: t('message.tool.list'),
+      primary: args?.path || '/workspace',
+      secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
+    }
+  }
+
   if (name === 'str_replace_editor') {
     const cmd = args?.command || 'edit'
-    return { category: 'edit', color: '#38bdf8', label: cmd, detail: args?.path }
+    return {
+      category: 'edit',
+      color: '#38bdf8',
+      action: t('message.tool.edit'),
+      primary: args?.path || '-',
+      secondary: cmd,
+    }
   }
-  if (name === 'shell_execute')
-    return { category: 'shell', color: '#a78bfa', label: 'shell', detail: truncStr(args?.command || '', 80) }
-  if (name === 'python_execute')
-    return { category: 'shell', color: '#a78bfa', label: 'python', detail: truncStr(args?.code?.split('\n')[0] || '', 80) }
-  if (name === 'task')
-    return { category: 'agent', color: '#22d3ee', label: args?.subagent_type || 'sub-agent', detail: truncStr(args?.description || '', 120) }
+
+  if (name === 'shell_execute') {
+    return {
+      category: 'shell',
+      color: '#a78bfa',
+      action: t('message.tool.shell'),
+      primary: truncStr(firstLine(args?.command || '') || '-', 80),
+      secondary: exitCode !== null ? `exit ${exitCode}` : result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
+    }
+  }
+
+  if (name === 'python_execute') {
+    return {
+      category: 'shell',
+      color: '#a78bfa',
+      action: t('message.tool.python'),
+      primary: truncStr(firstLine(args?.code || '') || '-', 80),
+      secondary: exitCode !== null ? `exit ${exitCode}` : result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
+    }
+  }
+
+  if (name === 'task') {
+    return {
+      category: 'agent',
+      color: '#22d3ee',
+      action: t('message.tool.delegate'),
+      primary: args?.subagent_type || 'sub-agent',
+      secondary: truncStr(args?.description || '', 60) || undefined,
+    }
+  }
+
   if (name === 'notify_user') {
-    const msg = args?.message || ''
-    return { category: 'notify', color: '#22d3ee', label: 'notify_user', detail: truncStr(msg, 120) }
+    const msgFromResult = result.replace(/^\[Status\]\s*/, '')
+    const msg = msgFromResult || args?.message || ''
+    return {
+      category: 'notify',
+      color: '#22d3ee',
+      action: t('message.tool.notify'),
+      primary: truncStr(msg || '-', 80),
+      secondary: result ? t('status.done') : undefined,
+    }
   }
+
   if (name === 'update_todo') {
-    const detail = args ? `${args.id} → ${args.status}` : ''
-    return { category: 'todo', color: '#f59e0b', label: 'update_todo', detail }
+    const detail = args ? `${args.id} -> ${args.status}` : '-'
+    return {
+      category: 'todo',
+      color: '#f59e0b',
+      action: t('message.tool.todoUpdate'),
+      primary: detail,
+      secondary: parsedTodos.value.length > 0 ? todoStats(parsedTodos.value) : undefined,
+    }
   }
-  if (name === 'write_todos')
-    return { category: 'todo', color: '#f59e0b', label: 'write_todos' }
-  return { category: 'other', color: '#f59e0b', label: name }
+
+  if (name === 'write_todos') {
+    return {
+      category: 'todo',
+      color: '#f59e0b',
+      action: t('message.tool.todos'),
+      primary: parsedTodos.value.length > 0
+        ? `${parsedTodos.value.length} ${t('message.tool.items')}`
+        : '-',
+      secondary: parsedTodos.value.length > 0 ? todoStats(parsedTodos.value) : undefined,
+    }
+  }
+
+  return {
+    category: 'other',
+    color: '#f59e0b',
+    action: name || t('message.tool.tool'),
+    primary: truncStr(jsonInline(args) || '-', 80),
+  }
 })
 
-// ---------- Agent helpers ----------
 function agentColor(name: string): string {
   if (!name) return '#8b8da3'
   if (name.includes('orchestrator')) return '#22d3ee'
@@ -119,41 +268,9 @@ function formatArgs(args: string): string {
 }
 
 const hasResult = computed(() => !!props.event.toolResult)
-
-// ---------- Parsed todos for write_todos / update_todo tools ----------
-const parsedTodos = computed<TodoItem[]>(() => {
-  // write_todos: todos are in args
-  if (props.event.toolName === 'write_todos') {
-    const args = tryParseArgs(props.event.toolArgs)
-    if (args?.todos && Array.isArray(args.todos)) {
-      return args.todos as TodoItem[]
-    }
-    return []
-  }
-  // update_todo: updated full list is in the result after "---\n"
-  if (props.event.toolName === 'update_todo' && props.event.toolResult) {
-    const parts = props.event.toolResult.split('---\n')
-    if (parts.length >= 2) {
-      try {
-        const todos = JSON.parse(parts[parts.length - 1])
-        if (Array.isArray(todos)) return todos as TodoItem[]
-      } catch { /* ignore */ }
-    }
-  }
-  return []
-})
-
-// ---------- Notify message extraction ----------
-const notifyMessage = computed(() => {
-  if (props.event.toolName !== 'notify_user') return ''
-  // Try result first (contains "[Status] message")
-  if (props.event.toolResult) {
-    return props.event.toolResult.replace(/^\[Status\]\s*/, '')
-  }
-  // Fallback to args
-  const args = tryParseArgs(props.event.toolArgs)
-  return args?.message || ''
-})
+const hasDetails = computed(() =>
+  !!props.event.toolArgs || !!props.event.toolResult || parsedTodos.value.length > 0
+)
 </script>
 
 <template>
@@ -173,82 +290,59 @@ const notifyMessage = computed(() => {
 
     <!-- Tool call event -->
     <template v-else-if="event.type === 'tool_call'">
-      <!-- Special: notify_user renders as inline status banner -->
-      <div v-if="toolInfo.category === 'notify'" class="event-notify">
-        <NIcon size="13"><InformationCircle /></NIcon>
-        <span v-if="showAgentBadge !== false" class="notify-agent" :style="{ color: agentColor(event.agent) }">{{ agentLabel(event.agent) }}</span>
-        <span class="notify-text">{{ notifyMessage || toolInfo.detail }}</span>
-      </div>
-
-      <!-- Special: sub-agent delegation card -->
-      <div v-else-if="toolInfo.category === 'agent'" class="event-task-card">
-        <div class="task-card-header">
-          <NIcon size="14" class="task-card-icon"><People /></NIcon>
-          <span class="task-card-agent">{{ toolInfo.label }}</span>
+      <div class="event-tool-call">
+        <button
+          type="button"
+          class="tool-strip"
+          :class="[`tool-strip-${toolInfo.category}`, { expandable: hasDetails }]"
+          :aria-expanded="expanded"
+          @click="toggleExpanded"
+        >
+          <NIcon size="13" :style="{ color: toolInfo.color }">
+            <DocumentText v-if="toolInfo.category === 'file'" />
+            <CodeSlash v-else-if="toolInfo.category === 'edit'" />
+            <Terminal v-else-if="toolInfo.category === 'shell'" />
+            <People v-else-if="toolInfo.category === 'agent'" />
+            <InformationCircle v-else-if="toolInfo.category === 'notify'" />
+            <Build v-else />
+          </NIcon>
+          <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
+          <span class="tool-strip-primary" :title="toolInfo.primary">{{ toolInfo.primary }}</span>
+          <span v-if="toolInfo.secondary" class="tool-strip-secondary">{{ toolInfo.secondary }}</span>
           <NIcon v-if="hasResult" size="12" class="tool-status-icon done"><CheckmarkCircle /></NIcon>
           <NIcon v-else size="12" class="tool-status-icon running"><Reload /></NIcon>
-        </div>
-        <div v-if="toolInfo.detail" class="task-card-desc">{{ toolInfo.detail }}</div>
-      </div>
+          <span v-if="hasDetails" class="tool-strip-chevron" :class="{ expanded }">
+            <NIcon size="11"><ChevronForward /></NIcon>
+          </span>
+        </button>
 
-      <!-- Special: write_todos renders as TodoBoard -->
-      <div v-else-if="toolInfo.category === 'todo' && parsedTodos.length > 0" class="event-todo">
-        <TodoBoard :todos="parsedTodos" />
-      </div>
-
-      <!-- Standard tool call with category styling -->
-      <div v-else class="event-tool-call">
-        <NCollapse v-model:expanded-names="isExpanded" arrow-placement="left">
-          <NCollapseItem :name="event.toolId || event.id">
-            <template #header>
-              <div class="tool-call-header">
-                <!-- Category icon -->
-                <NIcon size="13" :style="{ color: toolInfo.color }">
-                  <DocumentText v-if="toolInfo.category === 'file'" />
-                  <CodeSlash v-else-if="toolInfo.category === 'edit'" />
-                  <Terminal v-else-if="toolInfo.category === 'shell'" />
-                  <Build v-else />
-                </NIcon>
-                <!-- Tool name -->
-                <span class="tool-name" :style="{ color: toolInfo.color }">{{ toolInfo.label }}</span>
-                <!-- Path or command detail -->
-                <span v-if="toolInfo.detail" class="tool-detail" :class="`tool-detail-${toolInfo.category}`">{{ toolInfo.detail }}</span>
-                <!-- Status -->
-                <NIcon v-if="hasResult" size="12" class="tool-status-icon done"><CheckmarkCircle /></NIcon>
-                <NIcon v-else size="12" class="tool-status-icon running"><Reload /></NIcon>
-              </div>
-            </template>
-            <div class="tool-call-body">
-              <!-- Shell: show command in terminal style -->
-              <div v-if="toolInfo.category === 'shell' && event.toolArgs" class="tool-section">
-                <div class="tool-section-label">{{ t('message.arguments') }}</div>
-                <pre class="tool-code tool-code-shell">{{ formatArgs(event.toolArgs) }}</pre>
-              </div>
-              <!-- File/Edit: show args -->
-              <div v-else-if="event.toolArgs" class="tool-section">
-                <div class="tool-section-label">{{ t('message.arguments') }}</div>
-                <pre class="tool-code">{{ formatArgs(event.toolArgs) }}</pre>
-              </div>
-              <!-- Result -->
-              <div v-if="event.toolResult" class="tool-section">
-                <div class="tool-section-label">{{ t('message.result') }}</div>
-                <pre class="tool-code tool-result-code">{{ truncatedResult }}</pre>
-                <NButton
-                  v-if="isResultTruncated"
-                  quaternary
-                  size="tiny"
-                  class="expand-btn"
-                  @click="showFullResult = true"
-                >
-                  {{ t('message.showFull') }}
-                </NButton>
-              </div>
-              <div v-if="!event.toolArgs && !event.toolResult" class="tool-section">
-                <span class="tool-executing">{{ t('message.executing') }}</span>
-              </div>
+        <transition name="expand">
+          <div v-if="expanded && hasDetails" class="tool-call-body">
+            <div v-if="toolInfo.category === 'todo' && parsedTodos.length > 0" class="tool-section">
+              <TodoBoard :todos="parsedTodos" />
             </div>
-          </NCollapseItem>
-        </NCollapse>
+            <div v-if="event.toolArgs" class="tool-section">
+              <div class="tool-section-label">{{ t('message.arguments') }}</div>
+              <pre class="tool-code" :class="{ 'tool-code-shell': toolInfo.category === 'shell' }">{{ formatArgs(event.toolArgs) }}</pre>
+            </div>
+            <div v-if="event.toolResult" class="tool-section">
+              <div class="tool-section-label">{{ t('message.result') }}</div>
+              <pre class="tool-code tool-result-code">{{ truncatedResult }}</pre>
+              <NButton
+                v-if="isResultTruncated"
+                quaternary
+                size="tiny"
+                class="expand-btn"
+                @click.stop="showFullResult = true"
+              >
+                {{ t('message.showFull') }}
+              </NButton>
+            </div>
+            <div v-if="!event.toolArgs && !event.toolResult && parsedTodos.length === 0" class="tool-section">
+              <span class="tool-executing">{{ t('message.executing') }}</span>
+            </div>
+          </div>
+        </transition>
       </div>
     </template>
 
@@ -356,81 +450,98 @@ const notifyMessage = computed(() => {
   50% { opacity: 0; }
 }
 
-/* Task delegation card */
-.event-task-card {
-  background: rgba(34, 211, 238, 0.06);
-  border: 1px solid rgba(34, 211, 238, 0.2);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  margin: 4px 0;
-}
-
-.task-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.task-card-icon {
-  color: var(--accent-cyan);
-}
-
-.task-card-agent {
-  font-size: 12px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--accent-cyan);
-  letter-spacing: 0.3px;
-}
-
-.task-card-desc {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  overflow-wrap: break-word;
-}
-
-/* Tool Call */
+/* Tool call compact strip */
 .event-tool-call {
   margin: 2px 0;
 }
 
-.tool-call-header {
+.tool-strip {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  appearance: none;
+  text-align: left;
 }
 
-.tool-name {
-  font-size: 12px;
+.tool-strip.expandable {
+  cursor: pointer;
+}
+
+.tool-strip.expandable:hover {
+  border-color: color-mix(in srgb, var(--accent-cyan) 30%, var(--border-subtle));
+  background: var(--bg-hover);
+}
+
+.tool-strip-file {
+  border-left: 3px solid #34d399;
+}
+
+.tool-strip-edit {
+  border-left: 3px solid #38bdf8;
+}
+
+.tool-strip-shell {
+  border-left: 3px solid #a78bfa;
+}
+
+.tool-strip-agent {
+  border-left: 3px solid #22d3ee;
+}
+
+.tool-strip-todo {
+  border-left: 3px solid #f59e0b;
+}
+
+.tool-strip-notify {
+  border-left: 3px solid #22d3ee;
+}
+
+.tool-strip-other {
+  border-left: 3px solid #8b8da3;
+}
+
+.tool-strip-action {
+  font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
   flex-shrink: 0;
 }
 
-.tool-detail {
-  font-size: 11px;
-  color: var(--text-muted);
+.tool-strip-primary {
+  font-size: 11.5px;
   font-family: var(--font-mono);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  flex: 1;
 }
 
-.tool-detail-file,
-.tool-detail-edit {
-  color: var(--text-secondary);
-  background: rgba(255,255,255,0.04);
-  padding: 1px 6px;
-  border-radius: 3px;
+.tool-strip-secondary {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.tool-detail-shell {
-  color: #c4b5fd;
-  opacity: 0.8;
+.tool-strip-chevron {
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  transition: transform 180ms ease;
+  margin-left: 2px;
+}
+
+.tool-strip-chevron.expanded {
+  transform: rotate(90deg);
 }
 
 .tool-status-icon.done {
@@ -455,6 +566,7 @@ const notifyMessage = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 8px 4px 2px 4px;
 }
 
 .tool-section-label {
@@ -550,47 +662,6 @@ const notifyMessage = computed(() => {
   padding: 2px 0;
 }
 
-/* Todo board wrapper */
-.event-todo {
-  margin: 4px 0;
-}
-
-/* Notify banner */
-.event-notify {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--accent-cyan);
-  padding: 6px 12px;
-  background: rgba(34, 211, 238, 0.06);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(34, 211, 238, 0.15);
-  margin: 2px 0;
-}
-
-.notify-agent {
-  font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  flex-shrink: 0;
-}
-
-.notify-text {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-/* Collapse overrides */
-.event-tool-call :deep(.n-collapse-item__header) {
-  padding: 6px 0 !important;
-}
-
-.event-tool-call :deep(.n-collapse-item__content-inner) {
-  padding-top: 4px !important;
-}
-
 /* Reasoning: agent intent explanation */
 .event-reasoning {
   display: flex;
@@ -678,5 +749,17 @@ const notifyMessage = computed(() => {
   font-size: 11px;
   color: var(--text-muted);
   margin-left: 4px;
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 180ms ease;
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  max-height: 0;
 }
 </style>

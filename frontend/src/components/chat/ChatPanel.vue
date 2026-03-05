@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
-import { NIcon } from 'naive-ui'
+import { NIcon, NButton, NButtonGroup, NTooltip } from 'naive-ui'
 import { ArrowDown } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chatStore'
 import { useConnectionStore } from '@/stores/connectionStore'
@@ -11,7 +11,7 @@ import InterruptDialog from './InterruptDialog.vue'
 import PlanPanel from './PlanPanel.vue'
 import TodoBoard from './TodoBoard.vue'
 import AgentStatus from '@/components/status/AgentStatus.vue'
-import { SendMessage, StopGeneration } from '../../../wailsjs/go/service/ChatService'
+import { SendMessage, SetMode, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -27,6 +27,7 @@ const hasMessages = computed(() => chatStore.visibleMessages.length > 0)
 
 // Show scroll-to-bottom button when not near bottom
 const showScrollBtn = computed(() => hasMessages.value && !isNearBottom.value)
+const currentMode = computed(() => chatStore.agentMode)
 
 // Flash animation for new messages
 const hasNewMessages = ref(false)
@@ -99,6 +100,25 @@ function handleStop() {
   chatStore.setGenerating(false)
 }
 
+async function handleModeSwitch(mode: 'default' | 'plan') {
+  if (mode === chatStore.agentMode || chatStore.isStreaming) {
+    return
+  }
+  try {
+    await SetMode(mode)
+    chatStore.setMode(mode)
+  } catch (e) {
+    console.error('Failed to switch mode:', e)
+    chatStore.addMessage({
+      id: crypto.randomUUID(),
+      role: 'system',
+      content: `Failed to switch mode: ${e}`,
+      timestamp: Date.now(),
+      events: []
+    })
+  }
+}
+
 // Track bottom area height for scroll button positioning
 let bottomObserver: ResizeObserver | null = null
 onMounted(() => {
@@ -118,6 +138,36 @@ onUnmounted(() => {
 
 <template>
   <div class="chat-panel">
+    <div class="mode-toolbar">
+      <span class="mode-label">{{ t('chat.modeLabel') }}</span>
+      <NButtonGroup size="tiny">
+        <NTooltip trigger="hover" placement="bottom">
+          <template #trigger>
+            <NButton
+              :type="currentMode === 'default' ? 'primary' : 'default'"
+              :disabled="chatStore.isStreaming"
+              @click="handleModeSwitch('default')"
+            >
+              {{ t('chat.modeDefault') }}
+            </NButton>
+          </template>
+          {{ t('chat.modeDefaultHint') }}
+        </NTooltip>
+        <NTooltip trigger="hover" placement="bottom">
+          <template #trigger>
+            <NButton
+              :type="currentMode === 'plan' ? 'primary' : 'default'"
+              :disabled="chatStore.isStreaming"
+              @click="handleModeSwitch('plan')"
+            >
+              {{ t('chat.modePlan') }}
+            </NButton>
+          </template>
+          {{ t('chat.modePlanHint') }}
+        </NTooltip>
+      </NButtonGroup>
+    </div>
+
     <!-- Messages Area -->
     <div
       ref="scrollContainer"
@@ -207,6 +257,23 @@ onUnmounted(() => {
   height: 100%;
   background: var(--bg-base);
   position: relative;
+}
+
+.mode-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 24px 0;
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.mode-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  letter-spacing: 0.2px;
 }
 
 .messages-area {

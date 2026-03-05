@@ -30,7 +30,10 @@ type contextKey string
 const sessionIDCtxKey contextKey = "sessionID"
 
 func contextWithSessionID(ctx context.Context, sessionID string) context.Context {
-	return context.WithValue(ctx, sessionIDCtxKey, sessionID)
+	ctx = context.WithValue(ctx, sessionIDCtxKey, sessionID)
+	// Also store a plain-string key so lower-level internal packages can read
+	// session scope without importing service package types (avoids import cycles).
+	return context.WithValue(ctx, "sessionID", sessionID)
 }
 
 // SessionIDFromContext extracts the session ID from a context.
@@ -335,6 +338,21 @@ func (s *ChatService) SendMessage(userMessage string) error {
 			})
 			return fmt.Errorf("failed to build runners: %w", err)
 		}
+	}
+
+	// Auto-escalate to plan mode for complex tasks when currently in default mode.
+	// This keeps default mode flexible while enforcing strict orchestration once
+	// plan mode is entered.
+	if run.mode == "default" && shouldAutoPlanMode(userMessage) {
+		run.mode = "plan"
+		logger.Info("[CHAT] Auto-switched to plan mode",
+			"session", s.activeSessionID,
+			"reason", "complexity_trigger",
+		)
+		wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
+			Mode:      "plan",
+			SessionID: s.activeSessionID,
+		})
 	}
 
 	// Select runner based on session's mode
@@ -1245,24 +1263,30 @@ func (s *ChatService) buildRunnersLocked() error {
 	// Build agent context
 	ac := s.buildAgentContext()
 
-	// Build the core deep agent
-	deepAgent, err := agent.BuildDeepAgent(ctx, mdl, op, extraTools, ac)
+	// Build the core deep agents with mode-specific permission boundaries.
+	deepAgentDefault, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault)
 	if err != nil {
-		logger.Error("[RUNNER] Failed to build deep agent", err)
-		return fmt.Errorf("failed to build deep agent: %w", err)
+		logger.Error("[RUNNER] Failed to build default deep agent", err)
+		return fmt.Errorf("failed to build default deep agent: %w", err)
+	}
+
+	deepAgentPlan, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan)
+	if err != nil {
+		logger.Error("[RUNNER] Failed to build plan deep agent", err)
+		return fmt.Errorf("failed to build plan deep agent: %w", err)
 	}
 
 	// Build default runner
-	defaultRunner := agent.BuildDefaultRunner(ctx, deepAgent, s.checkpointStore)
+	defaultRunner := agent.BuildDefaultRunner(ctx, deepAgentDefault, s.checkpointStore)
 
 	// Build plan runner
-	planRunner, err := agent.BuildPlanRunner(ctx, mdl, deepAgent, ac, s.checkpointStore)
+	planRunner, err := agent.BuildPlanRunner(ctx, mdl, deepAgentPlan, ac, s.checkpointStore)
 	if err != nil {
 		logger.Error("[RUNNER] Failed to build plan runner", err)
 		return fmt.Errorf("failed to build plan runner: %w", err)
 	}
 
-	s.deepAgent = deepAgent
+	s.deepAgent = deepAgentDefault
 	s.defaultRunner = defaultRunner
 	s.planRunner = planRunner
 
@@ -1289,6 +1313,54 @@ func truncateResult(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "... (truncated)"
+}
+
+// shouldAutoPlanMode applies a deterministic heuristic to decide whether a
+// user request is complex enough to auto-enter plan mode.
+func shouldAutoPlanMode(userMessage string) bool {
+	msg := strings.ToLower(strings.TrimSpace(userMessage))
+	if msg == "" {
+		return false
+	}
+
+	// Explicit intent to plan.
+	explicitPlanSignals := []string{
+		"plan mode", "planning mode", "plan-mode",
+		"计划模式", "规划模式", "进入计划", "进入规划",
+	}
+	for _, k := range explicitPlanSignals {
+		if strings.Contains(msg, k) {
+			return true
+		}
+	}
+
+	stepSignals := []string{
+		"and then", "then ", "after that", "step by step",
+		"先", "然后", "再", "并且", "同时", "步骤",
+	}
+	workSignals := []string{
+		"write", "edit", "refactor", "implement", "fix", "debug",
+		"run", "test", "verify", "validate", "build",
+		"写", "改", "重构", "实现", "修复", "调试",
+		"运行", "测试", "验证", "构建", "编译",
+	}
+
+	stepCount := 0
+	for _, k := range stepSignals {
+		if strings.Contains(msg, k) {
+			stepCount++
+		}
+	}
+
+	workCount := 0
+	for _, k := range workSignals {
+		if strings.Contains(msg, k) {
+			workCount++
+		}
+	}
+
+	// Complex multi-action intent: contains sequencing and multiple work signals.
+	return stepCount > 0 && workCount >= 2
 }
 
 // buildAgentContext constructs an AgentContext from the current session and sandbox state.

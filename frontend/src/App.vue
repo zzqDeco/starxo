@@ -7,6 +7,7 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useContainerStore } from '@/stores/containerStore'
+import { GetMode } from '../wailsjs/go/service/ChatService'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
 import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent } from '@/types/message'
@@ -145,6 +146,16 @@ onMounted(async () => {
 
   // Load sessions (enriched with container info)
   await sessionStore.loadSessions()
+
+  // Sync mode from backend for the active session at startup.
+  try {
+    const mode = await GetMode()
+    if (mode === 'default' || mode === 'plan') {
+      chatStore.setMode(mode)
+    }
+  } catch (e) {
+    console.warn('Failed to get agent mode:', e)
+  }
 
   // Restore messages for the active session
   await restoreActiveMessages()

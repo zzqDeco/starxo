@@ -34,13 +34,20 @@ const timeStr = computed(() => {
 // ---------- Agent classification ----------
 const mainAgents = new Set(['coding_agent', 'orchestrator', ''])
 
+type SegmentType = 'main' | 'subagent' | 'transfer'
+
 interface EventSegment {
+  id: string
+  type: SegmentType
   agent: string
   events: TurnEvent[]
-  isTransfer: boolean
-  isSubAgent: boolean
+  fromAgent?: string
+  description?: string
   taskDescription?: string
-  isCompleted: boolean
+  isRunning: boolean
+  toolCalls: number
+  messages: number
+  lastAction?: string
 }
 
 function tryParseArgs(args?: string): any {
@@ -52,91 +59,183 @@ function truncStr(s: string, max: number): string {
   return s.length <= max ? s : s.substring(0, max) + '...'
 }
 
-function buildSegment(agent: string, events: TurnEvent[]): EventSegment {
-  const isSubAgent = !mainAgents.has(agent)
-  const isCompleted = events.every(evt => {
-    if (evt.type === 'tool_call') return !!evt.toolResult
-    if (evt.type === 'message' && evt.isStreaming) return false
-    return true
-  })
-  return { agent, events, isTransfer: false, isSubAgent, isCompleted }
+function summarizeToolCall(evt: TurnEvent): string {
+  const name = evt.toolName || 'tool'
+  const args = tryParseArgs(evt.toolArgs)
+
+  if (name === 'read_file') return `Read ${args?.path || '-'}`
+  if (name === 'write_file') return `Write ${args?.path || '-'}`
+  if (name === 'list_files') return `List ${args?.path || '/workspace'}`
+  if (name === 'str_replace_editor') return `Edit ${args?.path || '-'}`
+  if (name === 'shell_execute') return `Shell ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
+  if (name === 'python_execute') return `Python ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
+  if (name === 'task') return `Delegate ${args?.subagent_type || 'sub-agent'}`
+  if (name === 'write_todos') return 'Write todos'
+  if (name === 'update_todo') return `Todo ${args?.id || '-'} -> ${args?.status || '-'}`
+  if (name === 'notify_user') return `Notify ${truncStr(args?.message || '-', 50)}`
+
+  return truncStr(name, 70)
+}
+
+function summarizeEvent(evt: TurnEvent): string {
+  if (evt.type === 'tool_call') return summarizeToolCall(evt)
+  if (evt.type === 'message') return truncStr(evt.content || '', 100)
+  if (evt.type === 'reasoning') return truncStr(evt.content || '', 100)
+  if (evt.type === 'thinking') return t('message.thinking')
+  if (evt.type === 'interrupt') return t('interrupt.agentNeedsInfo')
+  if (evt.type === 'info') return truncStr(evt.content || '', 100)
+  return ''
+}
+
+function finalizeSegment(seg: EventSegment): EventSegment {
+  const toolCalls = seg.events.filter(e => e.type === 'tool_call').length
+  const messages = seg.events.filter(e => e.type === 'message').length
+  const hasPendingTool = seg.events.some(e => e.type === 'tool_call' && !e.toolResult)
+  const hasStreaming = seg.events.some(e => e.type === 'message' && e.isStreaming)
+  const hasThinking = seg.events.length > 0 && seg.events[seg.events.length - 1].type === 'thinking'
+  const isRunning = hasPendingTool || hasStreaming || hasThinking
+
+  let lastAction = ''
+  for (let i = seg.events.length - 1; i >= 0; i--) {
+    const s = summarizeEvent(seg.events[i])
+    if (s) {
+      lastAction = s
+      break
+    }
+  }
+
+  return {
+    ...seg,
+    toolCalls,
+    messages,
+    isRunning,
+    lastAction,
+  }
+}
+
+function createMainSegment(agent: string, seedId: string): EventSegment {
+  return {
+    id: `main-${seedId}`,
+    type: 'main',
+    agent,
+    events: [],
+    isRunning: false,
+    toolCalls: 0,
+    messages: 0,
+  }
+}
+
+function createSubSegment(agent: string, seedId: string, taskDescription?: string): EventSegment {
+  return {
+    id: `sub-${seedId}`,
+    type: 'subagent',
+    agent,
+    events: [],
+    taskDescription,
+    isRunning: false,
+    toolCalls: 0,
+    messages: 0,
+  }
 }
 
 const segments = computed<EventSegment[]>(() => {
   if (!props.message.events || props.message.events.length === 0) return []
 
   const segs: EventSegment[] = []
-  let currentAgent = ''
-  let currentEvents: TurnEvent[] = []
+  let current: EventSegment | null = null
+  let pendingTaskDescription = ''
+
+  const flushCurrent = () => {
+    if (!current) return
+
+    if (current.type === 'subagent' && current.events.length === 0 && !current.taskDescription) {
+      current = null
+      return
+    }
+
+    if (current.type === 'main' || current.type === 'subagent') {
+      segs.push(finalizeSegment(current))
+    } else {
+      segs.push(current)
+    }
+    current = null
+  }
 
   for (const evt of props.message.events) {
+    if (evt.type === 'tool_call' && evt.toolName === 'task') {
+      const args = tryParseArgs(evt.toolArgs)
+      if (args?.description) {
+        pendingTaskDescription = args.description
+      }
+    }
+
     if (evt.type === 'transfer') {
-      if (currentEvents.length > 0) {
-        segs.push(buildSegment(currentAgent, [...currentEvents]))
-        currentEvents = []
-      }
-      segs.push({ agent: evt.agent, events: [evt], isTransfer: true, isSubAgent: false, isCompleted: true })
-      currentAgent = evt.content
-    } else {
-      const evtAgent = evt.agent || ''
-      if (evtAgent !== currentAgent && currentEvents.length > 0) {
-        segs.push(buildSegment(currentAgent, [...currentEvents]))
-        currentEvents = []
-      }
-      currentAgent = evtAgent
-      currentEvents.push(evt)
+      flushCurrent()
+
+      const fromAgent = evt.agent || ''
+      const toAgent = evt.content || ''
+
+      segs.push({
+        id: `transfer-${evt.id}`,
+        type: 'transfer',
+        agent: toAgent,
+        fromAgent,
+        description: evt.toolArgs,
+        events: [evt],
+        isRunning: false,
+        toolCalls: 0,
+        messages: 0,
+      })
+
+      current = createSubSegment(toAgent, evt.id, pendingTaskDescription || undefined)
+      pendingTaskDescription = ''
+      continue
     }
-  }
-  if (currentEvents.length > 0) {
-    segs.push(buildSegment(currentAgent, currentEvents))
+
+    const evtAgent = evt.agent || ''
+    const segType: SegmentType = mainAgents.has(evtAgent) ? 'main' : 'subagent'
+
+    if (!current) {
+      current = segType === 'main'
+        ? createMainSegment(evtAgent || 'coding_agent', evt.id)
+        : createSubSegment(evtAgent, evt.id)
+    } else if (current.type !== segType || current.agent !== evtAgent) {
+      flushCurrent()
+      current = segType === 'main'
+        ? createMainSegment(evtAgent || 'coding_agent', evt.id)
+        : createSubSegment(evtAgent, evt.id)
+    }
+
+    current.events.push(evt)
   }
 
-  // Post-process: extract task descriptions for sub-agent segments
-  for (let i = 0; i < segs.length; i++) {
-    if (segs[i].isSubAgent) {
-      for (let j = i - 1; j >= 0; j--) {
-        if (segs[j].isTransfer) continue
-        for (let k = segs[j].events.length - 1; k >= 0; k--) {
-          const ev = segs[j].events[k]
-          if (ev.type === 'tool_call' && ev.toolName === 'task') {
-            const args = tryParseArgs(ev.toolArgs)
-            if (args?.description) {
-              segs[i].taskDescription = args.description
-            }
-            break
-          }
-        }
-        break
-      }
-    }
-  }
-
+  flushCurrent()
   return segs
 })
 
 // ---------- Sub-agent expand/collapse ----------
-const subAgentToggled = ref<Record<number, boolean>>({})
+const subAgentToggled = ref<Record<string, boolean>>({})
 
-function isSubAgentExpanded(index: number): boolean {
-  if (index in subAgentToggled.value) {
-    return subAgentToggled.value[index]
-  }
-  // Default: expanded if active, collapsed if completed
-  const seg = segments.value[index]
-  return seg ? !seg.isCompleted : false
+function isSubAgentExpanded(seg: EventSegment): boolean {
+  return !!subAgentToggled.value[seg.id]
 }
 
-function toggleSubAgent(index: number) {
-  subAgentToggled.value = { ...subAgentToggled.value, [index]: !isSubAgentExpanded(index) }
+function toggleSubAgent(seg: EventSegment) {
+  subAgentToggled.value = {
+    ...subAgentToggled.value,
+    [seg.id]: !isSubAgentExpanded(seg),
+  }
 }
 
 function segmentStats(seg: EventSegment): string {
-  const toolCalls = seg.events.filter(e => e.type === 'tool_call').length
-  const messages = seg.events.filter(e => e.type === 'message').length
   const parts: string[] = []
-  if (toolCalls > 0) parts.push(`${toolCalls} tools`)
-  if (messages > 0) parts.push(`${messages} msgs`)
-  return parts.join(' · ') || `${seg.events.length} events`
+  if (seg.toolCalls > 0) parts.push(`${seg.toolCalls} ${t('message.subagent.tools')}`)
+  if (seg.messages > 0) parts.push(`${seg.messages} ${t('message.subagent.msgs')}`)
+  return parts.join(' · ') || t('message.subagent.noActions')
+}
+
+function segmentStatusLabel(seg: EventSegment): string {
+  return seg.isRunning ? t('message.subagent.running') : t('message.subagent.done')
 }
 
 // ---------- Agent helpers ----------
@@ -220,21 +319,21 @@ function copyContent() {
 
       <!-- Segmented timeline events -->
       <div v-if="hasEvents" class="timeline-container">
-        <template v-for="(seg, si) in segments" :key="si">
+        <template v-for="seg in segments" :key="seg.id">
           <!-- Transfer separator -->
-          <div v-if="seg.isTransfer" class="transfer-divider">
+          <div v-if="seg.type === 'transfer'" class="transfer-divider">
             <span class="transfer-line"></span>
             <span class="transfer-label">
-              <span :style="{ color: agentColor(seg.events[0].agent) }">{{ agentLabel(seg.events[0].agent) }}</span>
+              <span :style="{ color: agentColor(seg.fromAgent || '') }">{{ agentLabel(seg.fromAgent || '') }}</span>
               <span class="transfer-arrow">&rarr;</span>
-              <span :style="{ color: agentColor(seg.events[0].content) }">{{ agentLabel(seg.events[0].content) }}</span>
+              <span :style="{ color: agentColor(seg.agent) }">{{ agentLabel(seg.agent) }}</span>
             </span>
             <span class="transfer-line"></span>
           </div>
 
           <!-- Sub-agent collapsible segment -->
-          <div v-else-if="seg.isSubAgent" class="subagent-segment" :style="{ '--agent-color': agentColor(seg.agent) }">
-            <div class="subagent-header" @click="toggleSubAgent(si)">
+          <div v-else-if="seg.type === 'subagent'" class="subagent-segment" :style="{ '--agent-color': agentColor(seg.agent) }">
+            <div class="subagent-header" @click="toggleSubAgent(seg)">
               <div class="subagent-icon">
                 <NIcon size="13">
                   <CodeSlash v-if="agentIconType(seg.agent) === 'code'" />
@@ -244,19 +343,27 @@ function copyContent() {
                 </NIcon>
               </div>
               <span class="subagent-name">{{ agentLabel(seg.agent) }}</span>
+              <span class="subagent-state-pill" :class="{ running: seg.isRunning, done: !seg.isRunning }">
+                {{ segmentStatusLabel(seg) }}
+              </span>
               <span class="subagent-stats">{{ segmentStats(seg) }}</span>
-              <NIcon v-if="seg.isCompleted" size="12" class="subagent-status done"><CheckmarkCircle /></NIcon>
+              <NIcon v-if="!seg.isRunning" size="12" class="subagent-status done"><CheckmarkCircle /></NIcon>
               <NIcon v-else size="12" class="subagent-status running"><Reload /></NIcon>
-              <span class="subagent-chevron" :class="{ expanded: isSubAgentExpanded(si) }">
+              <span class="subagent-chevron" :class="{ expanded: isSubAgentExpanded(seg) }">
                 <NIcon size="11"><ChevronForward /></NIcon>
               </span>
             </div>
+
             <div v-if="seg.taskDescription" class="subagent-task-desc">
               {{ truncStr(seg.taskDescription, 120) }}
             </div>
+            <div class="subagent-last-action" :class="{ muted: !seg.lastAction }">
+              {{ seg.lastAction || t('message.subagent.noActions') }}
+            </div>
+
             <!-- Collapsible body -->
             <transition name="expand">
-              <div v-show="isSubAgentExpanded(si)" class="subagent-body">
+              <div v-show="isSubAgentExpanded(seg)" class="subagent-body">
                 <div class="segment-events">
                   <TimelineEventItem
                     v-for="evt in seg.events"
@@ -531,24 +638,44 @@ function copyContent() {
   flex-shrink: 0;
 }
 
+.subagent-state-pill {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+
+.subagent-state-pill.running {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.35);
+  background: rgba(167, 139, 250, 0.1);
+}
+
+.subagent-state-pill.done {
+  color: var(--accent-emerald);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+}
+
 .subagent-stats {
   font-size: 10px;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  margin-left: 4px;
+  margin-left: auto;
 }
 
 .subagent-status.done {
   color: var(--accent-emerald);
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 .subagent-status.running {
   color: var(--text-faint);
   animation: spin 1.5s linear infinite;
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 @keyframes spin {
@@ -569,11 +696,23 @@ function copyContent() {
 }
 
 .subagent-task-desc {
-  padding: 0 12px 8px 42px;
+  padding: 0 12px 6px 42px;
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-secondary);
   overflow-wrap: break-word;
+}
+
+.subagent-last-action {
+  padding: 0 12px 8px 42px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.subagent-last-action.muted {
+  color: var(--text-faint);
 }
 
 .subagent-body {
