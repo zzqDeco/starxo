@@ -27,7 +27,7 @@
 |----|------|-----------|
 | `(root)` | `main.go` | 程序入口，嵌入前端资源，配置 Wails 窗口参数 |
 | `(root)` | `app.go` | App 结构体，持有所有 Service，管理 startup/shutdown 生命周期；不再持有 ctxEngine |
-| `agent` | `deep_agent.go` | 构建 Deep Agent (coding_agent)，注册子智能体和直接工具 |
+| `agent` | `deep_agent.go` | 构建 Deep Agent (coding_agent)，支持 default/plan 模式化工具权限与提示词约束 |
 | `agent` | `codewriter.go` | Code Writer 子智能体定义，专注代码编写 |
 | `agent` | `codeexecutor.go` | Code Executor 子智能体定义，专注代码执行 |
 | `agent` | `filemanager.go` | File Manager 子智能体定义，专注文件操作 |
@@ -36,7 +36,7 @@
 | `agent` | `plan_wrapper.go` | 计划步骤包装，将 plan 状态转换为前端事件 |
 | `agent` | `prompts.go` | 所有智能体的系统提示词定义 |
 | `agent` | `context.go` | AgentContext 结构体，传递运行时上下文给智能体；OnToolEvent 回调新增 ctx 参数用于 session 身份传播 |
-| `agent` | `tool_wrapper.go` | 工具包装器，为子智能体的工具调用注入事件发射回调；通过 ctx 传播 sessionID |
+| `agent` | `tool_wrapper.go` | 工具包装器，为子智能体工具调用注入事件发射；支持可恢复错误回传与重复失败升级 |
 | `service` | `chat.go` | ChatService，per-session 消息处理、Agent 运行管理、中断恢复、SessionRun 状态管理 |
 | `service` | `sandbox_svc.go` | SandboxService，沙箱连接/断开/重连/健康监控；使用 RWMutex 并发安全 |
 | `service` | `session_svc.go` | SessionService，会话 CRUD、切换、持久化；通过 ChatService 访问 per-session 状态 |
@@ -58,6 +58,7 @@
 | `tools` | `registry.go` | ToolRegistry，工具注册表管理 |
 | `tools` | `mcp.go` | MCP 服务器连接和工具加载 |
 | `tools` | `custom.go` | 自定义工具扩展点 |
+| `tools` | `error_policy.go` | 工具错误分类策略（recoverable/fatal）与标准化错误消息生成 |
 | `config` | `config.go` | 配置结构体定义 (AppConfig, SSHConfig, DockerConfig 等) |
 | `config` | `store.go` | 配置文件读写 (~/.starxo/config.json) |
 | `context` | `engine.go` | Engine，消息历史管理 (Add/Prepare/Clear/Import/Export) |

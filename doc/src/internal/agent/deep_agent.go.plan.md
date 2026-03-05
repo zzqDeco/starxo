@@ -8,7 +8,8 @@
 - 所属模块: agent
 
 ## 2. 核心职责
-- 该文件负责构建核心深度代理（deep agent），这是整个 AI 编码代理的中枢。它组装三个专用子代理（code_writer、code_executor、file_manager）和一组直接工具（FollowUp、Choice、WriteTodos、UpdateTodo、NotifyUser 及额外 MCP 工具），使用 CloudWeGo Eino ADK 的 `deep.New()` 创建一个具备任务委派能力的自主代理。该代理在默认模式下作为 runner 的直接代理使用，在 plan 模式下作为 planexecute 的执行器使用。
+- 该文件负责构建核心深度代理（deep agent），这是整个 AI 编码代理的中枢。它组装三个专用子代理（code_writer、code_executor、file_manager）和一组直接工具，使用 CloudWeGo Eino ADK 的 `deep.New()` 创建具备任务委派能力的自主代理。该代理在默认模式下作为 runner 的直接代理使用，在 plan 模式下作为 planexecute 的执行器使用。
+- 新增模式化构建能力：根据 `DeepAgentMode`（`default` / `plan`）对顶层代理的直连工具权限与系统提示词进行差异化约束。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -16,9 +17,15 @@
 - 输出结果: 返回 `adk.Agent` 接口实例（deep agent），可被 runner 或 planexecute 直接使用；出错时返回 error
 
 ## 4. 关键实现细节
-- 结构体/接口定义: 无自定义结构体，依赖 `adk.Agent` 接口
+- 结构体/接口定义:
+  - `DeepAgentMode`：控制顶层代理的工具权限和提示词约束
+  - 常量：`DeepAgentModeDefault`、`DeepAgentModePlan`
 - 导出函数/方法:
-  - `BuildDeepAgent(ctx, mdl, op, extraTools, ac) (adk.Agent, error)`: 构建核心深度代理，内部创建三个子代理并组装直接工具列表，配置最大迭代次数为 50
+  - `BuildDeepAgent(ctx, mdl, op, extraTools, ac) (adk.Agent, error)`: 默认模式构建入口（内部委托 `BuildDeepAgentForMode(..., DeepAgentModeDefault)`）
+  - `BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, mode) (adk.Agent, error)`: 模式化构建入口
+- 模式行为:
+  - `default`：主代理保留 `write_todos`、`update_todo`，并附加 `extraTools`（如 MCP）
+  - `plan`：主代理保留编排工具与 todo 工具，不附加 `extraTools`，使用 `DeepAgentPlanPrompt`
 - Wails 绑定方法: 无（由 service 层间接调用）
 - 事件发射: 无直接事件发射，子代理工具通过 `AgentContext.OnToolEvent` 回调间接发射事件
 
@@ -40,6 +47,7 @@
 ## 6. 变更影响面
 - 修改子代理列表会影响代理的任务委派能力
 - 修改直接工具列表会影响代理与用户的交互方式（中断、进度跟踪等）
+- `BuildDeepAgentForMode` 的策略会直接影响 plan/default 两种模式下主代理是否可直接调用 MCP 等额外工具
 - `MaxIteration` 变更影响代理执行复杂任务的能力上限
 - 影响 `runner.go` 中 `BuildDefaultRunner` 和 `BuildPlanRunner` 的行为
 - 影响 `internal/service/chat.go` 中 `BuildRunners` 方法

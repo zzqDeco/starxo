@@ -10,6 +10,7 @@
 ## 2. 核心职责
 - 消息气泡组件，负责渲染 user/assistant/system 三种角色的消息。
 - 对 assistant 消息实现分段时间线视图：将事件按 Agent 分组为 segments，支持 transfer 分隔、子代理折叠展开。
+- 为子代理段提供运行态摘要（状态、工具数、消息数、最后动作），未展开时也可快速理解执行进展。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -25,9 +26,10 @@
   - 子代理段 (isSubAgent=true): 不在 mainAgents Set ('coding_agent', 'orchestrator', '') 中的 agent
   - 后处理：为子代理段向前查找 task tool_call 的 description 作为任务描述
 - **子代理折叠/展开**:
-  - 默认：已完成的段折叠，活跃的段展开
+  - 默认：统一折叠，用户手动展开
   - 用户可手动切换 (`subAgentToggled`)
   - 显示统计信息: tool calls 数 + messages 数
+  - 显示最后动作摘要（`lastAction`），用于折叠态快速浏览
 - **Agent 颜色/标签系统**: agentColor() / agentLabel() / agentIconType() 按 agent 名称映射颜色、显示名和图标类型
 - **模板结构**:
   - System: 红色提示条

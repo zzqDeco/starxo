@@ -20,6 +20,9 @@
 
 ## 4. 关键实现细节
 - **`isActiveSession(data)` 过滤函数**: 检查事件数据中的 `sessionId` 字段，若存在则与 `sessionStore.activeSessionId` 比对；若不存在 sessionId 则视为属于活跃会话（向后兼容）
+- **启动时模式同步**:
+  - 在加载会话后调用 `ChatService.GetMode()`
+  - 若返回 `default`/`plan`，立即写入 `chatStore.setMode()`，保证刷新后模式状态一致
 - **Wails 事件监听**（SSH/容器事件已从 `sandbox:*` 迁移到分离的命名空间）:
   - `session:switched` -> 完整的 per-session 状态恢复:
     1. 切换活跃会话，恢复消息历史
@@ -49,13 +52,14 @@
 ## 5. 依赖关系
 - 内部依赖: MainLayout.vue、settingsStore、connectionStore、chatStore、sessionStore、containerStore、types (Session, Message, TurnEvent, InterruptEvent, ModeChangedEvent)
 - 外部依赖: naive-ui、vue、wailsjs/runtime
-- Wails 绑定: `wailsjs/go/service/SessionService` (LoadSessionData)
+- Wails 绑定: `wailsjs/go/service/SessionService` (LoadSessionData), `wailsjs/go/service/ChatService` (GetMode)
 
 ## 6. 变更影响面
 - `isActiveSession()` 过滤逻辑确保后台会话事件不影响前端显示，是 per-session 并发安全的前端核心保障
 - `session:switched` 事件处理器现在接收包含完整状态快照的事件（`agentRunning`、`currentAgent`、`mode`、`hasInterrupt`、`interrupt`），实现无缝的会话切换体验
 - `agent:done` 和 `agent:error` 事件载荷从 `nil`/`string` 变为对象（含 `sessionId`），需对应处理
 - `restoreActiveMessages` 从统一后端 `session_data.json` 恢复 display 数据，不再依赖前端 `saveChatDisplay`
+- 启动时 `GetMode` 同步避免刷新后默认回落导致的模式错位
 - `agent:done` 处理器不再调用 `saveChatDisplay`，前端变为纯读取消费者
 
 ## 7. 维护建议

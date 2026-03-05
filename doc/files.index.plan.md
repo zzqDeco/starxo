@@ -74,6 +74,7 @@
 | `internal/tools/registry.go` | `doc/src/internal/tools/registry.plan.md` | Go | tools |
 | `internal/tools/mcp.go` | `doc/src/internal/tools/mcp.plan.md` | Go | tools |
 | `internal/tools/custom.go` | `doc/src/internal/tools/custom.plan.md` | Go | tools |
+| `internal/tools/error_policy.go` | `doc/src/internal/tools/error_policy.go.plan.md` | Go | tools |
 
 ### internal/config/ — 配置模块
 
@@ -242,7 +243,7 @@
 | internal/agent/ | 10 |
 | internal/service/ | 7 |
 | internal/sandbox/ | 6 |
-| internal/tools/ | 8 |
+| internal/tools/ | 9 |
 | internal/config/ | 2 |
 | internal/context/ | 5 |
 | internal/llm/ | 1 |
@@ -263,4 +264,4 @@
 | frontend/src/composables/ | 2 |
 | frontend/src/locales/ | 3 |
 | 配置文件 | 3 |
-| **总计** | **90** |
+| **总计** | **91** |

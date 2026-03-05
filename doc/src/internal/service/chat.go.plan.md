@@ -10,6 +10,7 @@
 ## 2. 核心职责
 - 该文件实现了 `ChatService`，是前端与 AI 代理之间的核心桥梁。它管理聊天交互的完整生命周期：构建代理和 runner、发送用户消息、流式处理代理事件、处理中断（follow-up 问题和选择题）、恢复执行、停止生成、清除历史。支持 "default" 和 "plan" 两种运行模式。所有代理事件通过统一的 `agent:timeline` 通道转发到前端。内置 `TimelineCollector` 在后端收集所有时间线事件，使后端成为唯一的持久化生产者。流式输出使用 50ms 批量窗口合并 IPC 调用，降低通信频率。
 - **核心架构变更**: 采用 per-session agent 执行模型。引入 `SessionRun` 结构体，每个会话拥有独立的 ctxEngine、timeline、运行生命周期和中断状态。`ChatService` 通过 `sessions map[string]*SessionRun` 管理多个会话的并发执行，支持后台会话独立运行。通过 `context.Context` 传播 sessionID，确保事件路由到正确的会话。
+- **模式控制增强**: 支持手动模式切换（`SetMode/GetMode`）与复杂任务自动升级到 plan 模式（`shouldAutoPlanMode`），并发射 `agent:mode_changed`。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -68,7 +69,8 @@
   - `processEventsForRun(events, checkpointID, run)`: per-session 事件消费，发射前端事件、检测中断
   - `handleInterruptForRun(interruptCtx, checkpointID, run)`: per-session 中断处理
   - `drainStreamForRun(stream, agentName, run)`: per-session 流式输出消费，50ms 批量窗口
-  - `buildRunnersLocked()`: 在锁内构建 deep agent 和两种 runner
+  - `buildRunnersLocked()`: 在锁内构建 mode-aware deep agent（default/plan 各一份）和两种 runner
+  - `shouldAutoPlanMode(userMessage string) bool`: 基于关键词启发式判断复杂任务并自动切换到 plan 模式
   - `buildAgentContext()`: 构建 AgentContext，OnToolEvent 回调通过 context 传播 sessionID
   - `buildInterruptEvent(pi, sessionID) *InterruptEvent`: 将 PendingInterrupt 转换为 InterruptEvent
 - Wails 绑定方法: `SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`StopGeneration`、`ClearHistory`、`SetMode`、`GetMode`、`BuildRunners`
@@ -114,6 +116,9 @@
 - `GetSessionRunSnapshot` 被 `SessionService.SwitchSession` 调用，构建富状态的 `SessionSwitchedEvent`
 - `buildRunnersLocked` 在锁内执行，消除了之前 `BuildRunners` 解锁后到赋值之间的竞态间隙
 - `contextWithSessionID` / `SessionIDFromContext` 实现 context-based sessionID 传播，使 OnToolEvent 回调能正确路由事件
+- `contextWithSessionID` 额外写入 plain key `\"sessionID\"`，供底层包读取会话作用域（避免 import cycle）
+- `SendMessage` 中自动 plan 切换逻辑会改变后续 runner 选择与主代理工具权限边界
+- `buildRunnersLocked` 现在分别构建 default/plan 两套 deep agent，plan 模式下主代理不直接持有 `extraTools`
 - 是整个后端最核心的服务文件，变更需格外谨慎
 
 ## 7. 维护建议

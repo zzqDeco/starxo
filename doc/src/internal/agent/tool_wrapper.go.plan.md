@@ -9,6 +9,7 @@
 
 ## 2. 核心职责
 - 该文件实现了工具事件发射包装器，使子代理（code_writer、code_executor、file_manager）的工具调用对前端可见。它通过 `eventEmittingTool` 结构体装饰 `tool.BaseTool`，在工具调用前后分别发射 `tool_call` 和 `tool_result` 事件。`WrapToolsWithEvents` 函数批量包装一组工具，为每个工具注入代理名称和事件回调。
+- 新增可恢复错误处理链路：对工具参数类错误可回传给 Agent 继续自修复，避免直接 NodeRunError 中断；同签名重复失败达到阈值后再升级为 fatal。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -25,11 +26,22 @@
     - `agentName string`: 所属代理名称
     - `toolName string`: 工具名称
     - `onEvent func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string)`: 事件回调。**类型变更**: 新增 `ctx context.Context` 作为首参数，用于传播 session 身份
+    - `recoverableErrCount map[string]int`: 按会话和错误签名统计连续可恢复错误次数
+- 常量:
+  - `recoverableErrorEscalationThreshold = 3`
 - 导出函数/方法:
   - `WrapToolsWithEvents(agentName string, tools []tool.BaseTool, ac AgentContext) []tool.BaseTool`: 批量包装工具，如果 `ac.OnToolEvent` 为 nil 则直接返回原工具列表
 - 内部方法:
   - `(*eventEmittingTool) Info(ctx) (*schema.ToolInfo, error)`: 委托给内部工具
-  - `(*eventEmittingTool) InvokableRun(ctx, argumentsInJSON, opts...) (string, error)`: 生成唯一 callID（基于纳秒时间戳），**传递 ctx 到 onEvent**（使事件能路由到正确的 session），发射 tool_call 事件，执行内部工具，发射 tool_result 事件（错误时结果为 "Error: ..."）
+  - `(*eventEmittingTool) sessionScope(ctx) string`: 读取会话作用域（`sessionID`）
+  - `(*eventEmittingTool) incrementRecoverableError(...)` / `clearRecoverableError(...)` / `clearRecoverableErrorsForSession(...)`: 计数与清理
+  - `(*eventEmittingTool) InvokableRun(ctx, argumentsInJSON, opts...) (string, error)`:
+    - 始终先发射 `tool_call`
+    - 调用 `tools.ClassifyToolError` 分类错误
+    - recoverable: 返回 `normalized error text + nil`，让 Agent 继续下一步
+    - 连续同签名 recoverable 错误达到阈值: 升级为 fatal，返回非空 error
+    - fatal: 保持原有失败路径
+    - 成功调用后清空当前会话的 recoverable 计数
 - Wails 绑定方法: 无
 - 事件发射: 通过 `onEvent` 回调发射 `tool_call`（含 toolArgs）和 `tool_result`（含 result 或 error）事件
 
@@ -45,6 +57,8 @@
 ## 6. 变更影响面
 - `onEvent` 回调类型变更（新增 `ctx context.Context` 首参数）与 `AgentContext.OnToolEvent` 签名一致
 - `InvokableRun` 中的 `ctx` 参数现在被传递到 `onEvent` 回调，使 `chat.go` 中的 `emitTimelineForSession` 能通过 `SessionIDFromContext(ctx)` 提取 sessionID
+- `InvokableRun` 的错误返回语义变更会影响 ADK 对节点失败的判定：recoverable 错误不再立即中断整轮 run
+- 新增重复错误阈值会影响错误升级时机（第 3 次同签名可恢复错误升级）
 - 事件格式变更影响前端时间线渲染（`internal/service/chat.go` 中的 `buildAgentContext` 生成事件回调）
 - callID 生成策略变更可能影响前端的工具调用-结果配对
 - 被 `codewriter.go`、`codeexecutor.go`、`filemanager.go` 三个子代理文件调用

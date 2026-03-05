@@ -9,7 +9,7 @@
 | 优先级 | 定义 | 规则数 |
 |--------|------|--------|
 | **P0** | 系统不可用/数据丢失风险，必须满足 | 3 |
-| **P1** | 核心功能正确性，应当满足 | 5 |
+| **P1** | 核心功能正确性，应当满足 | 7 |
 | **P2** | 辅助功能/运维，建议满足 | 2 |
 
 ---
@@ -92,6 +92,24 @@
 - **影响范围**: 所有 Service 公开方法
 - **实现位置**: `internal/service/chat.go` (mu sync.Mutex), 其他 Service 文件
 - **验证方式**: 使用 `go run -race` 检测数据竞争
+
+### BR-011: Plan 模式下主代理仅负责编排与验收
+
+- **优先级**: P1
+- **描述**: 进入 plan 模式后，主代理（`coding_agent`）必须执行“规划 -> 委派 -> 验收 -> 更新任务状态”的链路，不得直接承担具体实现执行。具体工作由 `code_writer`、`code_executor`、`file_manager` 子代理执行。
+- **原因**: 保证 plan 模式行为与 subagent 范式一致，避免主代理越权执行导致流程不可观测。
+- **影响范围**: plan 模式代理行为与任务看板更新
+- **实现位置**: `internal/agent/deep_agent.go`（mode-aware tools）、`internal/agent/prompts.go`（`DeepAgentPlanPrompt`）
+- **验证方式**: 在 plan 模式执行多步骤任务，时间线应出现 transfer/subagent 执行链，主代理主要产出计划与验收反馈
+
+### BR-012: 可恢复工具错误优先回传给 Agent 自修复
+
+- **优先级**: P1
+- **描述**: 对参数类或路径类可恢复错误（如 `str_replace_editor` 参数越界、`read_file` 文件不存在），系统应将错误作为 `tool_result` 回传给 Agent，并允许继续执行；同签名错误连续达到阈值（3 次）后再升级为 fatal 中断。
+- **原因**: 减少一次性参数错误导致整轮中断，提高 agent 自修复能力，同时通过阈值防止死循环。
+- **影响范围**: 子代理工具调用稳定性、NodeRunError 触发时机
+- **实现位置**: `internal/tools/error_policy.go`、`internal/agent/tool_wrapper.go`
+- **验证方式**: 构造可恢复错误场景应不中断；连续重复同错误第 3 次应升级失败
 
 ---
 
