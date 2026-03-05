@@ -19,6 +19,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
 - **File Transfer** — Upload/download support; small files via base64 + docker exec, large files via SFTP + docker cp
+- **Refined Workbench UI** — Maximized window by default; long workspace drawer from top-right trigger; persistent container dock; floating task rail above input
 
 ## Tech Stack
 
@@ -113,12 +114,13 @@ starxo/
 │       ├── App.vue                  # Root component: dark theme, Wails event listeners
 │       ├── style.css                # Global styles
 │       ├── components/
-│       │   ├── chat/                #   Chat panel, message bubbles, interrupt dialog, plan panel, todo board
-│       │   ├── layout/              #   3-column layout, header, sidebar
+│       │   ├── chat/                #   Chat panel, message bubbles, interrupt dialog, floating task rail, input area
+│       │   ├── layout/              #   Main layout, header, sidebar, task rail components
 │       │   ├── settings/            #   Settings panel (SSH/Docker/LLM/MCP)
-│       │   ├── files/               #   File explorer, file transfer
+│       │   ├── files/               #   Workspace drawer, file tree, code preview, file transfer
+│       │   ├── containers/          #   Container panel + persistent dock
 │       │   ├── status/              #   Agent status, connection status
-│       │   └── terminal/            #   xterm.js terminal
+│       │   └── terminal/            #   Terminal component (not a default main-view entry)
 │       ├── stores/                  #   Pinia state management
 │       ├── types/                   #   TypeScript type definitions
 │       ├── composables/             #   Vue composables

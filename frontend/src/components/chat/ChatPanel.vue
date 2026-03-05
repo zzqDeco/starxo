@@ -8,9 +8,8 @@ import { useAutoScroll } from '@/composables/useHelpers'
 import MessageBubble from './MessageBubble.vue'
 import InputArea from './InputArea.vue'
 import InterruptDialog from './InterruptDialog.vue'
-import PlanPanel from './PlanPanel.vue'
-import TodoBoard from './TodoBoard.vue'
 import AgentStatus from '@/components/status/AgentStatus.vue'
+import TaskRailFloating from '@/components/layout/TaskRailFloating.vue'
 import { SendMessage, SetMode, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
 
@@ -39,7 +38,6 @@ watch(
     if (isAutoScroll.value) {
       nextTick(() => scrollToBottom())
     } else {
-      // Trigger flash on scroll button
       hasNewMessages.value = true
       if (flashTimer) clearTimeout(flashTimer)
       flashTimer = setTimeout(() => { hasNewMessages.value = false }, 2000)
@@ -47,7 +45,6 @@ watch(
   }
 )
 
-// Watch for new timeline events to trigger auto-scroll
 watch(
   () => {
     const last = chatStore.messages[chatStore.messages.length - 1]
@@ -85,7 +82,6 @@ async function handleSend(content: string) {
   }
 }
 
-/** Click hint card to send as message */
 function handleHintClick(hintKey: string) {
   const text = t(hintKey).replace(/^"|"$/g, '')
   handleSend(text)
@@ -119,7 +115,6 @@ async function handleModeSwitch(mode: 'default' | 'plan') {
   }
 }
 
-// Track bottom area height for scroll button positioning
 let bottomObserver: ResizeObserver | null = null
 onMounted(() => {
   if (bottomAreaRef.value) {
@@ -168,13 +163,11 @@ onUnmounted(() => {
       </NButtonGroup>
     </div>
 
-    <!-- Messages Area -->
     <div
       ref="scrollContainer"
       class="messages-area"
       @scroll="onScroll"
     >
-      <!-- Empty State -->
       <div v-if="!hasMessages" class="empty-state">
         <div class="empty-icon-wrap">
           <svg class="empty-icon-svg" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -197,7 +190,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Messages -->
       <div v-else class="messages-list">
         <MessageBubble
           v-for="msg in chatStore.visibleMessages"
@@ -206,17 +198,12 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- Plan Panel (shown in plan mode) -->
-      <PlanPanel />
-
-      <!-- Agent Status -->
       <AgentStatus
         v-if="chatStore.isStreaming"
         :agent="chatStore.currentAgent"
       />
     </div>
 
-    <!-- Scroll to bottom button -->
     <Transition name="scroll-btn">
       <button
         v-if="showScrollBtn"
@@ -228,24 +215,18 @@ onUnmounted(() => {
       </button>
     </Transition>
 
-    <!-- Bottom area wrapper for scroll button positioning -->
     <div ref="bottomAreaRef" class="bottom-area">
-      <!-- Interrupt Dialog (overlays above input) -->
       <InterruptDialog />
 
-      <!-- Persistent Todo Panel -->
-      <Transition name="todo-panel">
-        <div v-if="chatStore.latestTodos.length > 0" class="persistent-todo">
-          <TodoBoard :todos="chatStore.latestTodos" compact />
-        </div>
-      </Transition>
+      <div class="bottom-stack">
+        <TaskRailFloating />
 
-      <!-- Input Area -->
-      <InputArea
-        :is-streaming="chatStore.isStreaming"
-        @send="handleSend"
-        @stop="handleStop"
-      />
+        <InputArea
+          :is-streaming="chatStore.isStreaming"
+          @send="handleSend"
+          @stop="handleStop"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -257,14 +238,16 @@ onUnmounted(() => {
   height: 100%;
   background: var(--bg-base);
   position: relative;
+  --chat-content-max-width: 920px;
+  --chat-content-padding: 24px;
 }
 
 .mode-toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 24px 0;
-  max-width: 800px;
+  padding: 8px var(--chat-content-padding) 0;
+  max-width: var(--chat-content-max-width);
   width: 100%;
   margin: 0 auto;
 }
@@ -284,15 +267,14 @@ onUnmounted(() => {
 }
 
 .messages-list {
-  max-width: 800px;
+  max-width: var(--chat-content-max-width);
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 var(--chat-content-padding);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* Empty State */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -360,7 +342,6 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(34, 211, 238, 0.1);
 }
 
-/* Scroll to bottom button */
 .scroll-to-bottom {
   position: absolute;
   right: 24px;
@@ -406,31 +387,19 @@ onUnmounted(() => {
   transform: translateY(8px);
 }
 
-/* Persistent todo panel */
-.persistent-todo {
-  flex-shrink: 0;
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 0 24px 4px;
-  max-width: 800px;
-  margin: 0 auto;
-  width: 100%;
-  transition: max-height 250ms ease-out;
-}
-
-/* Bottom area wrapper */
 .bottom-area {
   flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, rgba(15, 17, 34, 0.78) 0%, rgba(15, 17, 34, 0.96) 100%);
 }
 
-.todo-panel-enter-active,
-.todo-panel-leave-active {
-  transition: all 200ms ease;
-}
-
-.todo-panel-enter-from,
-.todo-panel-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
+.bottom-stack {
+  max-width: var(--chat-content-max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 10px var(--chat-content-padding) 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 </style>

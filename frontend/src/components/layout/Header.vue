@@ -1,18 +1,18 @@
 <script lang="ts" setup>
 import { NButton, NTooltip } from 'naive-ui'
-import { Settings, Terminal, ChevronForward, ChevronBack } from '@vicons/ionicons5'
+import { Settings, FolderOpen } from '@vicons/ionicons5'
 import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 
 defineProps<{
-  rightPanelVisible: boolean
+  workspaceDrawerVisible: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle-settings'): void
-  (e: 'toggle-right-panel'): void
+  (e: 'toggle-workspace-drawer'): void
 }>()
 
 function toggleLocale() {
@@ -42,14 +42,14 @@ function toggleLocale() {
             circle
             size="small"
             class="header-btn"
-            @click="emit('toggle-right-panel')"
+            @click="emit('toggle-workspace-drawer')"
           >
             <template #icon>
-              <component :is="rightPanelVisible ? ChevronForward : ChevronBack" />
+              <FolderOpen />
             </template>
           </NButton>
         </template>
-        {{ rightPanelVisible ? t('header.hidePanel') : t('header.showPanel') }}
+        {{ workspaceDrawerVisible ? t('header.workspaceClose') : t('header.workspaceOpen') }}
       </NTooltip>
 
       <NTooltip trigger="hover" placement="bottom">

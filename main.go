@@ -20,6 +20,7 @@ func main() {
 		Height:   900,
 		MinWidth: 1000,
 		MinHeight: 600,
+		WindowStartState: options.Maximised,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

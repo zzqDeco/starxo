@@ -62,20 +62,18 @@ const attachedFileName = computed(() => {
 
 <template>
   <div class="input-area">
-    <!-- Attached file indicator -->
     <div v-if="attachedFile" class="attached-file">
       <span class="attached-name">{{ attachedFileName }}</span>
       <button class="attached-remove" @click="removeAttachment">&times;</button>
     </div>
 
-    <div class="input-row">
-      <!-- Attach button -->
+    <div class="input-shell">
       <NTooltip trigger="hover" placement="top">
         <template #trigger>
           <NButton
             quaternary
             circle
-            size="small"
+            size="tiny"
             class="attach-btn"
             @click="handleAttach"
             :disabled="isStreaming"
@@ -88,25 +86,23 @@ const attachedFileName = computed(() => {
         {{ t('input.attachFile') }}
       </NTooltip>
 
-      <!-- Text input -->
       <NInput
         v-model:value="inputText"
         type="textarea"
         :placeholder="t('input.placeholder')"
-        :autosize="{ minRows: 1, maxRows: 6 }"
+        :autosize="{ minRows: 1, maxRows: 4 }"
         class="chat-input"
         @keydown="handleKeydown"
         :disabled="isStreaming"
       />
 
-      <!-- Send / Stop button -->
       <NTooltip trigger="hover" placement="top">
         <template #trigger>
           <NButton
             v-if="!isStreaming"
             type="primary"
             circle
-            size="small"
+            size="tiny"
             class="send-btn"
             :disabled="!canSend"
             @click="handleSend"
@@ -119,7 +115,7 @@ const attachedFileName = computed(() => {
             v-else
             type="error"
             circle
-            size="small"
+            size="tiny"
             class="stop-btn"
             @click="emit('stop')"
           >
@@ -131,21 +127,11 @@ const attachedFileName = computed(() => {
         {{ isStreaming ? t('input.stopGeneration') : t('input.sendMessage') }}
       </NTooltip>
     </div>
-
-    <div class="input-hint">
-      <span>{{ t('input.shiftEnter') }}</span>
-    </div>
   </div>
 </template>
 
 <style scoped>
 .input-area {
-  flex-shrink: 0;
-  padding: 12px 24px 16px;
-  background: var(--bg-base);
-  border-top: 1px solid var(--border-subtle);
-  max-width: 800px;
-  margin: 0 auto;
   width: 100%;
 }
 
@@ -154,10 +140,10 @@ const attachedFileName = computed(() => {
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
-  padding: 4px 10px;
-  background: var(--bg-surface);
+  padding: 4px 8px;
+  background: var(--bg-deepest);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   width: fit-content;
 }
 
@@ -181,31 +167,36 @@ const attachedFileName = computed(() => {
   color: var(--accent-rose);
 }
 
-.input-row {
+.input-shell {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
 }
 
 .chat-input {
   flex: 1;
 }
 
-.chat-input :deep(textarea) {
-  font-family: var(--font-sans) !important;
-  font-size: 13.5px !important;
-  line-height: 1.5 !important;
-  padding: 10px 14px !important;
-  background: var(--bg-surface) !important;
-  border-color: var(--border-subtle) !important;
-  border-radius: var(--radius-lg) !important;
-  resize: none !important;
-  transition: border-color var(--transition-fast) !important;
+.chat-input :deep(.n-input-wrapper) {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
-.chat-input :deep(textarea:focus) {
-  border-color: var(--accent-cyan-dim) !important;
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.1) !important;
+.chat-input :deep(textarea) {
+  font-family: var(--font-sans) !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  padding: 8px 0 !important;
+  background: transparent !important;
+  border: none !important;
+  resize: none !important;
 }
 
 .attach-btn {
@@ -219,21 +210,10 @@ const attachedFileName = computed(() => {
 
 .send-btn {
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(34, 211, 238, 0.3);
+  box-shadow: 0 2px 10px rgba(34, 211, 238, 0.24);
 }
 
 .stop-btn {
   flex-shrink: 0;
-}
-
-.input-hint {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
-}
-
-.input-hint span {
-  font-size: 10px;
-  color: var(--text-faint);
 }
 </style>

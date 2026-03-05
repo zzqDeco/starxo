@@ -7,8 +7,6 @@ import {
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
-import TodoBoard from './TodoBoard.vue'
-import type { TodoItem } from './TodoBoard.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -97,6 +95,13 @@ function todoStats(todos: TodoItem[]): string {
     else todo++
   }
   return `${done}/${doing}/${todo}`
+}
+
+interface TodoItem {
+  id: string
+  title: string
+  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'blocked'
+  depends_on?: string[]
 }
 
 // ---------- Parsed todos for write_todos / update_todo tools ----------
@@ -269,7 +274,7 @@ function formatArgs(args: string): string {
 
 const hasResult = computed(() => !!props.event.toolResult)
 const hasDetails = computed(() =>
-  !!props.event.toolArgs || !!props.event.toolResult || parsedTodos.value.length > 0
+  toolInfo.value.category !== 'todo' && (!!props.event.toolArgs || !!props.event.toolResult)
 )
 </script>
 
@@ -318,9 +323,6 @@ const hasDetails = computed(() =>
 
         <transition name="expand">
           <div v-if="expanded && hasDetails" class="tool-call-body">
-            <div v-if="toolInfo.category === 'todo' && parsedTodos.length > 0" class="tool-section">
-              <TodoBoard :todos="parsedTodos" />
-            </div>
             <div v-if="event.toolArgs" class="tool-section">
               <div class="tool-section-label">{{ t('message.arguments') }}</div>
               <pre class="tool-code" :class="{ 'tool-code-shell': toolInfo.category === 'shell' }">{{ formatArgs(event.toolArgs) }}</pre>
@@ -338,7 +340,7 @@ const hasDetails = computed(() =>
                 {{ t('message.showFull') }}
               </NButton>
             </div>
-            <div v-if="!event.toolArgs && !event.toolResult && parsedTodos.length === 0" class="tool-section">
+            <div v-if="!event.toolArgs && !event.toolResult" class="tool-section">
               <span class="tool-executing">{{ t('message.executing') }}</span>
             </div>
           </div>

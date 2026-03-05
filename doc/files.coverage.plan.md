@@ -8,9 +8,9 @@
 
 | 指标 | 值 |
 |------|------|
-| 源文件总数 | 81 |
+| 源文件总数 | 87 |
 | 已覆盖 (项目级文档) | 10/10 |
-| 已覆盖 (文件级文档) | 81/81 |
+| 已覆盖 (文件级文档) | 87/87 |
 | 缺失 | 0 |
 | 项目级覆盖率 | 100% |
 | 文件级覆盖率 | 100% |
@@ -37,9 +37,10 @@
 | frontend/src/stores/ | 4 | 4/4 | 已完成 |
 | frontend/src/types/ | 3 | 3/3 | 已完成 |
 | frontend/src/components/chat/ | 7 | 7/7 | 已完成 |
-| frontend/src/components/layout/ | 3 | 3/3 | 已完成 |
+| frontend/src/components/layout/ | 5 | 5/5 | 已完成 |
 | frontend/src/components/settings/ | 1 | 1/1 | 已完成 |
-| frontend/src/components/files/ | 2 | 2/2 | 已完成 |
+| frontend/src/components/files/ | 5 | 5/5 | 已完成 |
+| frontend/src/components/containers/ | 2 | 2/2 | 已完成 |
 | frontend/src/components/status/ | 2 | 2/2 | 已完成 |
 | frontend/src/components/terminal/ | 1 | 1/1 | 已完成 |
 | frontend/src/composables/ | 2 | 2/2 | 已完成 |
@@ -53,11 +54,11 @@
 | 文件类型 | 后缀 | 文件数 | 说明 |
 |----------|------|--------|------|
 | Go | `.go` | 49 | 后端源代码 |
-| Vue 单文件组件 | `.vue` | 22 | 前端组件 |
+| Vue 单文件组件 | `.vue` | 28 | 前端组件 |
 | TypeScript | `.ts` | 7 | 前端逻辑 (stores, types, composables, config) |
 | CSS | `.css` | 1 | 全局样式 |
 | JSON | `.json` | 2 | 构建配置 (wails.json, tsconfig.json) |
-| **总计** | - | **81** | - |
+| **总计** | - | **87** | - |
 
 ---
 
@@ -86,4 +87,4 @@
 | 项目级文档创建 | 2026-03-01 |
 | 文件级文档创建 | 2026-03-01 |
 | 覆盖率达成 100% | 2026-03-01 |
-| 上次更新 | 2026-03-05 |
+| 上次更新 | 2026-03-05（新增 Workspace/TaskRail/Dock 相关文档） |

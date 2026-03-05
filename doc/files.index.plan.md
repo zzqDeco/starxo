@@ -173,6 +173,8 @@
 | `frontend/src/components/layout/Header.vue` | `doc/src/frontend/src/components/layout/Header.plan.md` | Vue | layout |
 | `frontend/src/components/layout/MainLayout.vue` | `doc/src/frontend/src/components/layout/MainLayout.plan.md` | Vue | layout |
 | `frontend/src/components/layout/Sidebar.vue` | `doc/src/frontend/src/components/layout/Sidebar.plan.md` | Vue | layout |
+| `frontend/src/components/layout/TaskRail.vue` | `doc/src/frontend/src/components/layout/TaskRail.plan.md` | Vue | layout |
+| `frontend/src/components/layout/TaskRailFloating.vue` | `doc/src/frontend/src/components/layout/TaskRailFloating.plan.md` | Vue | layout |
 
 ### frontend/src/components/settings/ — 设置组件
 
@@ -190,12 +192,16 @@
 |--------|----------|----------|----------|
 | `frontend/src/components/files/FileExplorer.vue` | `doc/src/frontend/src/components/files/FileExplorer.plan.md` | Vue | files |
 | `frontend/src/components/files/FileTransfer.vue` | `doc/src/frontend/src/components/files/FileTransfer.plan.md` | Vue | files |
+| `frontend/src/components/files/WorkspacePanel.vue` | `doc/src/frontend/src/components/files/WorkspacePanel.plan.md` | Vue | files |
+| `frontend/src/components/files/CodePreview.vue` | `doc/src/frontend/src/components/files/CodePreview.plan.md` | Vue | files |
+| `frontend/src/components/files/WorkspaceDrawer.vue` | `doc/src/frontend/src/components/files/WorkspaceDrawer.plan.md` | Vue | files |
 
 ### frontend/src/components/containers/ — 容器组件
 
 | 源文件 | 文档文件 | 文件类型 | 所属模块 |
 |--------|----------|----------|----------|
 | `frontend/src/components/containers/ContainerPanel.vue` | `doc/src/frontend/src/components/containers/ContainerPanel.plan.md` | Vue | containers |
+| `frontend/src/components/containers/ContainerDock.vue` | `doc/src/frontend/src/components/containers/ContainerDock.plan.md` | Vue | containers |
 
 ### frontend/src/components/status/ — 状态组件
 
@@ -255,13 +261,13 @@
 | frontend/src/stores/ | 5 |
 | frontend/src/types/ | 3 |
 | frontend/src/components/chat/ | 7 |
-| frontend/src/components/layout/ | 3 |
+| frontend/src/components/layout/ | 5 |
 | frontend/src/components/settings/ | 5 |
-| frontend/src/components/files/ | 2 |
-| frontend/src/components/containers/ | 1 |
+| frontend/src/components/files/ | 5 |
+| frontend/src/components/containers/ | 2 |
 | frontend/src/components/status/ | 2 |
 | frontend/src/components/terminal/ | 1 |
 | frontend/src/composables/ | 2 |
 | frontend/src/locales/ | 3 |
 | 配置文件 | 3 |
-| **总计** | **91** |
+| **总计** | **97** |

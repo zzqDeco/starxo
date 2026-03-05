@@ -5,20 +5,16 @@ import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import SplitHandle from './SplitHandle.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
-import TerminalPanel from '@/components/terminal/TerminalPanel.vue'
-import FileExplorer from '@/components/files/FileExplorer.vue'
-import ContainerPanel from '@/components/containers/ContainerPanel.vue'
+import WorkspaceDrawer from '@/components/files/WorkspaceDrawer.vue'
+import ContainerDock from '@/components/containers/ContainerDock.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
-import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
 const showSettings = ref(false)
-const rightPanelTab = ref<'terminal' | 'files' | 'containers'>('terminal')
-const showRightPanel = ref(true)
+const showWorkspaceDrawer = ref(false)
 
 // Resizable panel widths
 const leftWidth = ref(240)
-const rightWidth = ref(380)
+const containerDockWidth = ref(360)
 
 // Window auto-adapt
 const { width: windowWidth } = useWindowSize()
@@ -28,21 +24,20 @@ const effectiveLeftWidth = computed(() => {
   }
   return leftWidth.value
 })
+const effectiveDockWidth = computed(() => {
+  if (windowWidth.value < 1280) {
+    return Math.min(containerDockWidth.value, 320)
+  }
+  return containerDockWidth.value
+})
 
 function toggleSettings() {
   showSettings.value = !showSettings.value
 }
 
-function toggleRightPanel() {
-  showRightPanel.value = !showRightPanel.value
+function toggleWorkspaceDrawer() {
+  showWorkspaceDrawer.value = !showWorkspaceDrawer.value
 }
-
-// Tab indicator positioning
-const tabIndex = computed(() => {
-  if (rightPanelTab.value === 'terminal') return 0
-  if (rightPanelTab.value === 'files') return 1
-  return 2
-})
 </script>
 
 <template>
@@ -64,77 +59,37 @@ const tabIndex = computed(() => {
 
     <!-- Center Section -->
     <div class="center-section">
-      <!-- Header Bar -->
       <Header
         @toggle-settings="toggleSettings"
-        @toggle-right-panel="toggleRightPanel"
-        :right-panel-visible="showRightPanel"
+        @toggle-workspace-drawer="toggleWorkspaceDrawer"
+        :workspace-drawer-visible="showWorkspaceDrawer"
       />
 
-      <!-- Main Content Area -->
       <div class="content-area">
-        <!-- Chat Area -->
-        <div class="chat-area">
-          <ChatPanel />
+        <div class="chat-shell">
+          <div class="chat-area">
+            <ChatPanel />
+          </div>
+          <WorkspaceDrawer v-model:show="showWorkspaceDrawer" />
         </div>
 
-        <!-- Right Splitter -->
         <SplitHandle
-          v-if="showRightPanel"
           direction="horizontal"
-          :default-size="380"
-          :min-size="280"
-          :max-size="600"
+          :default-size="360"
+          :min-size="300"
+          :max-size="500"
           :reverse="true"
-          storage-key="starxo-right-panel-width"
-          @update:size="(v: number) => rightWidth = v"
+          storage-key="starxo-container-dock-width"
+          @update:size="(v: number) => containerDockWidth = v"
         />
 
-        <!-- Right Panel -->
-        <div
-          v-if="showRightPanel"
-          class="right-panel"
-          :style="{ width: rightWidth + 'px' }"
-        >
-          <div class="right-panel-tabs">
-            <button
-              :class="['tab-btn', { active: rightPanelTab === 'terminal' }]"
-              @click="rightPanelTab = 'terminal'"
-            >
-              {{ t('layout.terminal') }}
-            </button>
-            <button
-              :class="['tab-btn', { active: rightPanelTab === 'files' }]"
-              @click="rightPanelTab = 'files'"
-            >
-              {{ t('layout.files') }}
-            </button>
-            <button
-              :class="['tab-btn', { active: rightPanelTab === 'containers' }]"
-              @click="rightPanelTab = 'containers'"
-            >
-              {{ t('layout.containers') }}
-            </button>
-            <!-- Sliding indicator -->
-            <div
-              class="tab-indicator"
-              :style="{
-                transform: `translateX(${tabIndex * 100}%)`,
-                width: 'calc(100% / 3)'
-              }"
-            />
-          </div>
-          <div class="right-panel-content">
-            <TerminalPanel v-show="rightPanelTab === 'terminal'" />
-            <FileExplorer v-show="rightPanelTab === 'files'" />
-            <ContainerPanel v-show="rightPanelTab === 'containers'" />
-          </div>
+        <div class="container-dock" :style="{ width: effectiveDockWidth + 'px' }">
+          <ContainerDock />
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Settings Modal -->
   <SettingsPanel v-model:show="showSettings" />
 </template>
 
@@ -173,72 +128,24 @@ const tabIndex = computed(() => {
   overflow: hidden;
 }
 
-.chat-area {
+.chat-shell {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  position: relative;
   overflow: hidden;
 }
 
-.right-panel {
-  display: flex;
-  flex-direction: column;
+.chat-area {
+  height: 100%;
+  overflow: hidden;
+}
+
+.container-dock {
   height: 100%;
   background: var(--bg-surface);
   border-left: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  overflow: hidden;
-}
-
-.right-panel-tabs {
-  display: flex;
-  position: relative;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.tab-btn {
-  flex: 1;
-  padding: 10px 16px;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  position: relative;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  z-index: 1;
-}
-
-.tab-btn:hover {
-  color: var(--text-secondary);
-  background: var(--bg-hover);
-}
-
-.tab-btn.active {
-  color: var(--accent-cyan);
-  background: rgba(34, 211, 238, 0.06);
-}
-
-.tab-indicator {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  background: var(--accent-cyan);
-  border-radius: 1px 1px 0 0;
-  transition: transform 250ms ease-out;
-  pointer-events: none;
-}
-
-.right-panel-content {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
 }
 </style>

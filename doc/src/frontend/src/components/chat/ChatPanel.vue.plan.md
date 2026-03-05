@@ -5,58 +5,47 @@
 - 源文件: frontend/src/components/chat/ChatPanel.vue
 - 文档文件: doc/src/frontend/src/components/chat/ChatPanel.vue.plan.md
 - 文件类型: Vue 单文件组件
-- 所属模块: frontend/src/components/chat (聊天模块)
+- 所属模块: frontend/src/components/chat
 
 ## 2. 核心职责
-- 聊天面板主容器，组合消息列表、输入区域、中断对话框、计划面板和 Agent 状态指示器。
-- 处理消息发送、停止生成、自动滚动和空状态展示。
-- 提供 Agent 模式切换 UI（Default / Plan），并与后端 `SetMode` 同步。
-- 该文件的变更应与项目级规则文档和接口文档保持一致。
+- 聊天主容器，负责消息流渲染、发送/停止、模式切换、自动滚动和中断交互。
+- 在底部区域组合“任务浮层 + 输入框”，统一与消息区栅格对齐。
 
 ## 3. 输入与输出
-- 输入来源: chatStore 状态（visibleMessages, isStreaming, currentAgent, latestTodos）、connectionStore 状态（isReady）
-- 输出结果: 渲染完整聊天界面；通过 Wails 绑定调用 SendMessage/StopGeneration/SetMode
+- 输入来源: `chatStore`、`connectionStore`、Wails ChatService
+- 输出结果: 渲染聊天界面并发起 `SendMessage/SetMode/StopGeneration`
 
 ## 4. 关键实现细节
-- **Props/Emits**: 无（作为页面级容器组件）
-- **Pinia Store 交互**:
-  - chatStore: visibleMessages, isStreaming, currentAgent, latestTodos, addUserMessage, setGenerating, addMessage
-  - connectionStore: isReady
-- **Composable 使用**: `useAutoScroll` — 管理自动滚动和底部检测
-- **Wails 绑定调用**: `SendMessage(content)` 发送消息、`StopGeneration()` 停止生成
-- **模式切换逻辑**:
-  - `currentMode` 绑定 `chatStore.agentMode`
-  - `handleModeSwitch(mode)` 调用 `SetMode(mode)`，并更新本地 store
-  - 生成中（`chatStore.isStreaming`）禁用切换按钮，避免运行中模式突变
-- **关键模板结构**:
-  - `mode-toolbar`: 模式标签 + `NButtonGroup`（Default / Plan）+ tooltip 说明
-  - 空状态: 显示图标、标题、连接状态提示文案和 3 个提示卡片（可点击直接发送）
-  - 消息列表: v-for 渲染 MessageBubble，使用 visibleMessages（过滤空消息）
-  - PlanPanel: 始终渲染（内部根据 hasSteps 决定是否显示）
-  - AgentStatus: isStreaming 时显示
-  - 滚动到底部按钮: 非底部时显示，**动态定位** — bottom 值通过 ResizeObserver 监听底部区域高度计算
-  - 底部区域容器 (div.bottom-area, ref=bottomAreaRef): 包裹 InterruptDialog + TodoBoard + InputArea，通过 ResizeObserver 监听高度变化驱动 scroll button 定位
-  - InterruptDialog: 始终渲染（内部根据 interrupt 状态决定是否显示）
-  - TodoBoard (persistent): 当 `chatStore.latestTodos.length > 0` 时在输入区域上方常驻显示，使用 compact 模式，**max-height: 180px + overflow-y: auto** 防止挤压聊天区
-  - InputArea: 底部输入框，接收 send/stop 事件
-- **自动滚动逻辑**: 监听 messages.length 和最后消息的 events.length 变化，autoScroll 模式下自动滚动到底部
-- **提示卡片**: 点击 hint-card 会将国际化文本作为消息发送
-- **底部区域高度跟踪**: onMounted 时创建 ResizeObserver 监听 bottomAreaRef，高度变化时更新 scrollBtnBottom = height + 12
+- 模式切换:
+  - 通过 `SetMode('default'|'plan')` 与后端同步
+  - 流式生成中禁用切换
+- 消息区:
+  - `visibleMessages` 渲染 `MessageBubble`
+  - `AgentStatus` 在流式时显示
+  - 空状态提供快捷提示卡片（点击可直接发送）
+- 底部区:
+  - `InterruptDialog`
+  - `TaskRailFloating`（任务摘要浮层）
+  - `InputArea`
+- 自动滚动:
+  - 使用 `useAutoScroll`
+  - 通过 `ResizeObserver` 动态计算“回到底部”按钮偏移
+- 栅格对齐:
+  - `--chat-content-max-width` 与 `--chat-content-padding` 统一控制消息区/模式栏/底部区对齐
 
 ## 5. 依赖关系
-- 内部依赖: `@/stores/chatStore`、`@/stores/connectionStore`、`@/composables/useHelpers` (useAutoScroll)、`./MessageBubble.vue`、`./InputArea.vue`、`./InterruptDialog.vue`、`./PlanPanel.vue`、`./TodoBoard.vue`、`@/components/status/AgentStatus.vue`
-- 外部依赖: `vue` (ref, watch, nextTick, computed, onMounted, onUnmounted)、`naive-ui` (NIcon)、`@vicons/ionicons5` (ArrowDown)、`vue-i18n` (useI18n)
-- Wails 绑定: `wailsjs/go/service/ChatService` (SendMessage, StopGeneration, SetMode)
+- 内部依赖:
+  - `MessageBubble.vue`, `InputArea.vue`, `InterruptDialog.vue`
+  - `TaskRailFloating.vue`, `AgentStatus.vue`
+  - `chatStore`, `connectionStore`, `useAutoScroll`
+- 外部依赖:
+  - `vue`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
+  - Wails: `SendMessage`, `SetMode`, `StopGeneration`
 
 ## 6. 变更影响面
-- 修改消息发送流程影响整个聊天交互
-- 模式切换控件直接影响 default/plan 运行范式切换和用户可见行为
-- 修改空状态提示需同步国际化文件
-- 自动滚动逻辑修改影响用户阅读体验
-- TodoBoard max-height 限制防止大量任务时布局崩坏
+- 旧的 `PlanPanel` 与持久 `TodoBoard` 从聊天主流中移除。
+- 任务信息改为输入区上方浮层，减少消息区视觉干扰。
 
 ## 7. 维护建议
-- 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- 新增子组件时注意保持组合模式，ChatPanel 作为容器不应包含过多业务逻辑。
-- SendMessage 调用失败时需确保 UI 状态正确恢复。
-- bottomAreaRef 的 ResizeObserver 用于动态定位 scroll button，新增底部区域子组件时无需额外处理。
+- 保持 ChatPanel 作为编排层，不在此组件堆积复杂业务状态。
+- 调整底部结构时需回归验证滚动按钮定位逻辑。
