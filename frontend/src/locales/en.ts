@@ -195,6 +195,11 @@ export default {
       providerArk: 'Volcengine (Ark)',
       providerOllama: 'Ollama (Local)',
     },
+    motion: {
+      label: 'Motion Level',
+      normal: 'Normal',
+      reduced: 'Reduced',
+    },
     mcp: {
       tab: 'MCP Servers',
       noServers: 'No MCP servers configured',

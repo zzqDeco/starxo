@@ -184,9 +184,8 @@ onUnmounted(() => {
           }}
         </p>
         <div class="empty-hints">
-          <button class="hint-card" @click="handleHintClick('chat.hint1')">{{ t('chat.hint1') }}</button>
+          <button class="hint-card hint-card-primary" @click="handleHintClick('chat.hint1')">{{ t('chat.hint1') }}</button>
           <button class="hint-card" @click="handleHintClick('chat.hint2')">{{ t('chat.hint2') }}</button>
-          <button class="hint-card" @click="handleHintClick('chat.hint3')">{{ t('chat.hint3') }}</button>
         </div>
       </div>
 
@@ -283,7 +282,7 @@ onUnmounted(() => {
   height: 100%;
   padding: 48px 24px;
   text-align: center;
-  animation: fadeIn 600ms ease both;
+  animation: var(--motion-chat-enter);
 }
 
 .empty-icon-wrap {
@@ -292,7 +291,7 @@ onUnmounted(() => {
   margin-bottom: 16px;
   color: var(--accent-cyan);
   filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.3));
-  animation: pulse 3s ease-in-out infinite;
+  animation: var(--motion-empty-icon);
 }
 
 .empty-icon-svg {
@@ -335,11 +334,16 @@ onUnmounted(() => {
 }
 
 .hint-card:hover {
-  border-color: var(--accent-cyan-dim);
+  border-color: var(--border-strong);
   color: var(--text-primary);
   background: var(--bg-elevated);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.1);
+  box-shadow: var(--shadow-level-1);
+}
+
+.hint-card-primary {
+  border-color: var(--accent-cyan-dim);
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--text-primary);
 }
 
 .scroll-to-bottom {
@@ -356,7 +360,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   transition: all var(--transition-fast);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-level-2);
   z-index: 50;
 }
 
@@ -364,11 +368,11 @@ onUnmounted(() => {
   background: var(--bg-hover);
   color: var(--accent-cyan);
   border-color: var(--accent-cyan-dim);
-  box-shadow: 0 4px 16px rgba(34, 211, 238, 0.15);
+  box-shadow: var(--shadow-level-2);
 }
 
 .scroll-to-bottom.flash {
-  animation: scrollBtnFlash 1s ease-in-out infinite;
+  animation: var(--motion-scroll-flash);
 }
 
 @keyframes scrollBtnFlash {

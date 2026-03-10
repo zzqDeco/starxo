@@ -36,7 +36,10 @@ export interface AppSettings {
   docker: DockerConfig
   llm: LLMConfig
   mcp: { servers: MCPServerConfig[] }
-  agent: { maxIterations: number }
+  agent: {
+    maxIterations: number
+    motionLevel: 'normal' | 'reduced'
+  }
 }
 
 export interface FileInfo {

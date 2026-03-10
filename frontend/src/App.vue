@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
-import { onMounted } from 'vue'
+import { onMounted, watchEffect } from 'vue'
 import MainLayout from '@/components/layout/MainLayout.vue'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useConnectionStore } from '@/stores/connectionStore'
@@ -17,6 +17,11 @@ const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const containerStore = useContainerStore()
+
+watchEffect(() => {
+  const level = settingsStore.settings.agent.motionLevel || 'normal'
+  document.documentElement.setAttribute('data-motion-level', level)
+})
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {

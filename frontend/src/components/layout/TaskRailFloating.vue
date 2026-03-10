@@ -119,7 +119,7 @@ function statusClass(status: FloatingTask['status']) {
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   background: linear-gradient(180deg, rgba(23, 26, 45, 0.9) 0%, rgba(18, 21, 35, 0.95) 100%);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--shadow-level-2);
 }
 
 .task-head {
@@ -253,7 +253,7 @@ function statusClass(status: FloatingTask['status']) {
 
 .task-item-icon.is-running {
   color: var(--accent-cyan);
-  animation: spin 1.5s linear infinite;
+  animation: var(--motion-spin);
 }
 
 .task-item-icon.is-done {

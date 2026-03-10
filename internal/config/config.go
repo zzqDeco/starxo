@@ -49,6 +49,7 @@ type MCPServerConfig struct {
 
 type AgentConfig struct {
 	MaxIterations int `json:"maxIterations"`
+	MotionLevel   string `json:"motionLevel"`
 }
 
 func DefaultConfig() *AppConfig {
@@ -62,6 +63,6 @@ func DefaultConfig() *AppConfig {
 			Network:     true,
 		},
 		LLM:   LLMConfig{Type: "openai", Model: "gpt-4o"},
-		Agent: AgentConfig{MaxIterations: 30},
+		Agent: AgentConfig{MaxIterations: 30, MotionLevel: "normal"},
 	}
 }

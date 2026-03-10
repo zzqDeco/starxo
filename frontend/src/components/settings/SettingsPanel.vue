@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { NCard, NTabs, NTabPane, NButton, NIcon } from 'naive-ui'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { NCard, NTabs, NTabPane, NButton, NIcon, NFormItem, NSelect } from 'naive-ui'
 import { Close } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import SSHConfigForm from './SSHConfig.vue'
@@ -22,6 +22,11 @@ const emit = defineEmits<{
 const settingsStore = useSettingsStore()
 const activeTab = ref('ssh')
 const saving = ref(false)
+
+const motionLevelOptions = computed(() => [
+  { label: t('settings.motion.normal'), value: 'normal' },
+  { label: t('settings.motion.reduced'), value: 'reduced' }
+])
 
 async function handleSave() {
   saving.value = true
@@ -81,6 +86,17 @@ onBeforeUnmount(() => {
               </template>
             </NButton>
           </template>
+
+
+          <div class="settings-global">
+            <NFormItem :label="t('settings.motion.label')">
+              <NSelect
+                v-model:value="settingsStore.settings.agent.motionLevel"
+                :options="motionLevelOptions"
+                size="small"
+              />
+            </NFormItem>
+          </div>
 
           <NTabs v-model:value="activeTab" type="line" animated class="settings-tabs">
             <NTabPane name="ssh" :tab="t('settings.ssh.tab')">
@@ -143,6 +159,12 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-xl) !important;
   background: var(--bg-surface) !important;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+
+.settings-global {
+  margin-bottom: 8px;
+  padding: 0 2px;
 }
 
 .settings-tabs {

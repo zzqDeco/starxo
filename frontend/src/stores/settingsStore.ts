@@ -29,7 +29,8 @@ const defaultSettings: AppSettings = {
     servers: []
   },
   agent: {
-    maxIterations: 30
+    maxIterations: 30,
+    motionLevel: 'normal'
   }
 }
 
@@ -49,6 +50,9 @@ export const useSettingsStore = defineStore('settings', () => {
         if (src.docker) Object.assign(merged.docker, src.docker)
         if (src.llm) Object.assign(merged.llm, src.llm)
         if (src.agent) Object.assign(merged.agent, src.agent)
+        if (merged.agent.motionLevel !== 'normal' && merged.agent.motionLevel !== 'reduced') {
+          merged.agent.motionLevel = 'normal'
+        }
         if (src.mcp) {
           merged.mcp.servers = Array.isArray(src.mcp.servers) ? src.mcp.servers : []
         }

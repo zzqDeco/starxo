@@ -195,6 +195,11 @@ export default {
       providerArk: 'Volcengine (Ark)',
       providerOllama: 'Ollama (本地)',
     },
+    motion: {
+      label: '动效等级',
+      normal: '标准',
+      reduced: '降低动效',
+    },
     mcp: {
       tab: 'MCP 服务器',
       noServers: '未配置 MCP 服务器',

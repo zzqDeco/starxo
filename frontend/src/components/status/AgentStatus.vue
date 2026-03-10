@@ -47,7 +47,8 @@ const agentColor = computed(() => {
   background: var(--bg-surface);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
-  animation: fadeIn 200ms ease both;
+  animation: var(--motion-status-enter);
+  box-shadow: var(--shadow-level-1);
 }
 
 .thinking-animation {
@@ -60,7 +61,7 @@ const agentColor = computed(() => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  animation: pulse 1.4s ease-in-out infinite;
+  animation: var(--motion-pulse);
 }
 
 .think-dot:nth-child(2) {
