@@ -3,73 +3,34 @@ import { computed, ref } from 'vue'
 import { NIcon } from 'naive-ui'
 import { CheckmarkCircle, AlertCircle, Reload, EllipseOutline, ChevronForward } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chatStore'
+import type { UnifiedTaskStatus } from '@/stores/chatStore'
 import { useI18n } from 'vue-i18n'
-
-interface FloatingTask {
-  id: string
-  title: string
-  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped'
-  detail?: string
-}
 
 const chatStore = useChatStore()
 const { t } = useI18n()
 const expanded = ref(false)
 
-const todoTasks = computed<FloatingTask[]>(() => {
-  return chatStore.latestTodos.map((task) => ({
-    id: task.id,
-    title: task.title,
-    status: task.status === 'blocked' ? 'pending' : task.status,
-  }))
-})
-
-const planTasks = computed<FloatingTask[]>(() => {
-  return chatStore.planSteps.map((step) => ({
-    id: String(step.taskId),
-    title: step.desc,
-    status: step.status === 'doing' ? 'in_progress' : (step.status === 'todo' ? 'pending' : step.status),
-    detail: step.execResult,
-  }))
-})
-
-const tasks = computed<FloatingTask[]>(() => {
-  if (todoTasks.value.length > 0) return todoTasks.value
-  return planTasks.value
-})
-
-const currentTask = computed(() => {
-  return tasks.value.find((task) => task.status === 'in_progress')
-    || tasks.value.find((task) => task.status === 'pending')
-    || tasks.value.find((task) => task.status === 'failed')
-    || tasks.value[tasks.value.length - 1]
-})
+const tasks = computed(() => chatStore.unifiedTasks)
+const taskStats = computed(() => chatStore.unifiedTaskStats)
 
 const shownTasks = computed(() => tasks.value.slice(0, 8))
-const doneCount = computed(() => tasks.value.filter((t) => t.status === 'done' || t.status === 'skipped').length)
-const failedCount = computed(() => tasks.value.filter((t) => t.status === 'failed').length)
-const runningCount = computed(() => tasks.value.filter((t) => t.status === 'in_progress').length)
-const progressPercent = computed(() => {
-  if (tasks.value.length === 0) return 0
-  return Math.round((doneCount.value / tasks.value.length) * 100)
-})
 
 function toggleExpanded() {
   expanded.value = !expanded.value
 }
 
-function statusIcon(status: FloatingTask['status']) {
-  if (status === 'done' || status === 'skipped') return CheckmarkCircle
-  if (status === 'failed') return AlertCircle
-  if (status === 'in_progress') return Reload
+function statusIcon(status: UnifiedTaskStatus) {
+  if (status === 'done') return CheckmarkCircle
+  if (status === 'blocked') return AlertCircle
+  if (status === 'doing') return Reload
   return EllipseOutline
 }
 
-function statusClass(status: FloatingTask['status']) {
-  if (status === 'in_progress') return 'is-running'
-  if (status === 'done' || status === 'skipped') return 'is-done'
-  if (status === 'failed') return 'is-failed'
-  return 'is-pending'
+function statusClass(status: UnifiedTaskStatus) {
+  if (status === 'doing') return 'is-doing'
+  if (status === 'done') return 'is-done'
+  if (status === 'blocked') return 'is-blocked'
+  return 'is-todo'
 }
 </script>
 
@@ -77,13 +38,13 @@ function statusClass(status: FloatingTask['status']) {
   <section class="task-float" :class="{ expanded }">
     <button type="button" class="task-head" @click="toggleExpanded">
       <span class="task-title">{{ t('taskRail.title') }}</span>
-      <span class="task-summary">{{ doneCount }}/{{ tasks.length }}</span>
-      <span class="task-current" :title="currentTask?.title">
-        {{ currentTask?.title || t('taskRail.empty') }}
+      <span class="task-summary">{{ taskStats.done }}/{{ taskStats.total }}</span>
+      <span class="task-current" :title="taskStats.currentTask?.title">
+        {{ taskStats.currentTask?.title || t('taskRail.empty') }}
       </span>
       <span class="task-metrics">
-        <span class="metric running">{{ runningCount }}</span>
-        <span class="metric failed">{{ failedCount }}</span>
+        <span class="metric doing">{{ taskStats.counts.doing }}</span>
+        <span class="metric blocked">{{ taskStats.counts.blocked }}</span>
       </span>
       <span class="task-chevron" :class="{ expanded }">
         <NIcon size="12"><ChevronForward /></NIcon>
@@ -91,7 +52,7 @@ function statusClass(status: FloatingTask['status']) {
     </button>
 
     <div class="task-progress">
-      <div class="task-progress-fill" :style="{ width: progressPercent + '%' }"></div>
+      <div class="task-progress-fill" :style="{ width: taskStats.progressPercent + '%' }"></div>
     </div>
 
     <transition name="task-expand">
@@ -116,6 +77,18 @@ function statusClass(status: FloatingTask['status']) {
 
 <style scoped>
 .task-float {
+  --task-font-xs: 10px;
+  --task-font-sm: 11px;
+  --task-font-md: 12px;
+  --task-line-height: 1.4;
+  --task-space-1: 6px;
+  --task-space-2: 8px;
+  --task-space-3: 10px;
+  --task-status-todo: var(--text-faint);
+  --task-status-doing: var(--accent-cyan);
+  --task-status-done: var(--accent-emerald);
+  --task-status-blocked: var(--accent-rose);
+
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   background: linear-gradient(180deg, rgba(23, 26, 45, 0.9) 0%, rgba(18, 21, 35, 0.95) 100%);
@@ -126,18 +99,18 @@ function statusClass(status: FloatingTask['status']) {
   width: 100%;
   border: none;
   background: transparent;
-  padding: 8px 10px;
+  padding: var(--task-space-2) var(--task-space-3);
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--task-space-2);
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
 }
 
 .task-title {
-  font-size: 10px;
+  font-size: var(--task-font-xs);
   font-weight: 700;
   letter-spacing: 0.7px;
   text-transform: uppercase;
@@ -145,13 +118,14 @@ function statusClass(status: FloatingTask['status']) {
 }
 
 .task-summary {
-  font-size: 11px;
-  color: var(--accent-emerald);
+  font-size: var(--task-font-sm);
+  color: var(--task-status-done);
   font-family: var(--font-mono);
 }
 
 .task-current {
-  font-size: 12px;
+  font-size: var(--task-font-md);
+  line-height: var(--task-line-height);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -161,7 +135,7 @@ function statusClass(status: FloatingTask['status']) {
 
 .task-metrics {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--task-space-1);
 }
 
 .metric {
@@ -169,21 +143,21 @@ function statusClass(status: FloatingTask['status']) {
   height: 18px;
   padding: 0 4px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--task-font-xs);
   font-family: var(--font-mono);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-.metric.running {
-  color: var(--accent-cyan);
-  background: rgba(34, 211, 238, 0.12);
+.metric.doing {
+  color: var(--task-status-doing);
+  background: color-mix(in srgb, var(--task-status-doing) 12%, transparent);
 }
 
-.metric.failed {
-  color: var(--accent-rose);
-  background: rgba(244, 63, 94, 0.12);
+.metric.blocked {
+  color: var(--task-status-blocked);
+  background: color-mix(in srgb, var(--task-status-blocked) 12%, transparent);
 }
 
 .task-chevron {
@@ -197,7 +171,7 @@ function statusClass(status: FloatingTask['status']) {
 
 .task-progress {
   height: 3px;
-  margin: 0 10px 8px;
+  margin: 0 var(--task-space-3) var(--task-space-2);
   border-radius: 999px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.08);
@@ -205,31 +179,31 @@ function statusClass(status: FloatingTask['status']) {
 
 .task-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-emerald));
+  background: linear-gradient(90deg, var(--task-status-doing), var(--task-status-done));
   transition: width 220ms ease;
 }
 
 .task-list {
   max-height: 180px;
   overflow: auto;
-  padding: 0 8px 8px;
+  padding: 0 var(--task-space-2) var(--task-space-2);
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 
 .task-empty {
-  font-size: 11px;
+  font-size: var(--task-font-sm);
   color: var(--text-faint);
   text-align: center;
-  padding: 8px 0;
+  padding: var(--task-space-2) 0;
 }
 
 .task-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: var(--task-space-1);
+  padding: var(--task-space-1) var(--task-space-2);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid transparent;
@@ -238,7 +212,8 @@ function statusClass(status: FloatingTask['status']) {
 .task-item-title {
   min-width: 0;
   flex: 1;
-  font-size: 11px;
+  font-size: var(--task-font-sm);
+  line-height: var(--task-line-height);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -246,30 +221,30 @@ function statusClass(status: FloatingTask['status']) {
 }
 
 .task-item-id {
-  font-size: 10px;
+  font-size: var(--task-font-xs);
   color: var(--text-faint);
   font-family: var(--font-mono);
 }
 
-.task-item-icon.is-running {
-  color: var(--accent-cyan);
+.task-item-icon.is-doing {
+  color: var(--task-status-doing);
   animation: spin 1.5s linear infinite;
 }
 
 .task-item-icon.is-done {
-  color: var(--accent-emerald);
+  color: var(--task-status-done);
 }
 
-.task-item-icon.is-failed {
-  color: var(--accent-rose);
+.task-item-icon.is-blocked {
+  color: var(--task-status-blocked);
 }
 
-.task-item-icon.is-pending {
-  color: var(--text-faint);
+.task-item-icon.is-todo {
+  color: var(--task-status-todo);
 }
 
-.task-item.is-failed {
-  border-color: rgba(244, 63, 94, 0.3);
+.task-item.is-blocked {
+  border-color: color-mix(in srgb, var(--task-status-blocked) 35%, transparent);
 }
 
 .task-expand-enter-active,

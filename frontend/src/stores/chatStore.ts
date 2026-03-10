@@ -9,6 +9,23 @@ export interface TodoItem {
   depends_on?: string[]
 }
 
+export type UnifiedTaskStatus = 'todo' | 'doing' | 'done' | 'blocked'
+
+export interface UnifiedTaskItem {
+  id: string
+  title: string
+  status: UnifiedTaskStatus
+  detail?: string
+  source: 'todo' | 'plan'
+}
+
+function normalizeTaskStatus(status: string): UnifiedTaskStatus {
+  if (status === 'doing' || status === 'in_progress') return 'doing'
+  if (status === 'done' || status === 'skipped') return 'done'
+  if (status === 'failed' || status === 'blocked') return 'blocked'
+  return 'todo'
+}
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([])
   const isStreaming = ref(false)
@@ -25,6 +42,54 @@ export const useChatStore = defineStore('chat', () => {
 
   // Persistent todo state (latest snapshot)
   const latestTodos = ref<TodoItem[]>([])
+
+  const unifiedTasks = computed<UnifiedTaskItem[]>(() => {
+    if (latestTodos.value.length > 0) {
+      return latestTodos.value.map((todo) => ({
+        id: todo.id,
+        title: todo.title,
+        status: normalizeTaskStatus(todo.status),
+        source: 'todo'
+      }))
+    }
+
+    return planSteps.value.map((step) => ({
+      id: String(step.taskId),
+      title: step.desc,
+      status: normalizeTaskStatus(step.status),
+      detail: step.execResult,
+      source: 'plan'
+    }))
+  })
+
+  const unifiedTaskStats = computed(() => {
+    const counts: Record<UnifiedTaskStatus, number> = {
+      todo: 0,
+      doing: 0,
+      done: 0,
+      blocked: 0
+    }
+
+    for (const task of unifiedTasks.value) {
+      counts[task.status] += 1
+    }
+
+    const total = unifiedTasks.value.length
+    const done = counts.done
+    const progressPercent = total > 0 ? Math.round((done / total) * 100) : 0
+    const currentTask = unifiedTasks.value.find((task) => task.status === 'doing')
+      || unifiedTasks.value.find((task) => task.status === 'todo')
+      || unifiedTasks.value.find((task) => task.status === 'blocked')
+      || unifiedTasks.value[unifiedTasks.value.length - 1]
+
+    return {
+      counts,
+      total,
+      done,
+      progressPercent,
+      currentTask
+    }
+  })
 
   const lastMessage = computed(() =>
     messages.value.length > 0 ? messages.value[messages.value.length - 1] : null
@@ -256,6 +321,8 @@ export const useChatStore = defineStore('chat', () => {
     visibleMessages,
     hasInterrupt,
     latestTodos,
+    unifiedTasks,
+    unifiedTaskStats,
     addMessage,
     addUserMessage,
     addTimelineEvent,
