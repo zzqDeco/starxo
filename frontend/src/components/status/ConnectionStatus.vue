@@ -15,7 +15,7 @@ const connectionStore = useConnectionStore()
           <span
             :class="['dot', connectionStore.sshConnected ? 'dot-green' : 'dot-red']"
           ></span>
-          <span class="pill-label">SSH</span>
+          <span class="pill-label">{{ t('status.ssh') }}</span>
         </div>
       </template>
       {{ connectionStore.sshConnected ? t('status.sshConnected') : t('status.sshDisconnected') }}

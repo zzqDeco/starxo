@@ -7,7 +7,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
@@ -67,9 +67,9 @@ function formatTime(ts: number) {
   const d = new Date(ts)
   const now = new Date()
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   }
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return d.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
 }
 
 function containerStatusDot(status?: string) {
@@ -173,7 +173,7 @@ function containerStatusDot(status?: string) {
       <div class="conn-strip">
         <div class="conn-item">
           <span :class="['dot', connectionStore.sshConnected ? 'dot-green' : 'dot-red']"></span>
-          <span class="conn-label">SSH</span>
+          <span class="conn-label">{{ t('status.ssh') }}</span>
         </div>
       </div>
 

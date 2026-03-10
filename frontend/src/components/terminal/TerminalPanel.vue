@@ -7,7 +7,7 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useContainerStore } from '@/stores/containerStore'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const connectionStore = useConnectionStore()
 const containerStore = useContainerStore()
 
@@ -25,7 +25,7 @@ const activeContainer = computed(() => containerStore.activeContainerID || '')
 
 function formatTime(): string {
   const now = new Date()
-  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  return now.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 async function initXterm() {
@@ -75,9 +75,9 @@ async function initXterm() {
     fitAddon.fit()
     xtermLoaded = true
 
-    termInstance.writeln('\x1b[36m\x1b[1m  Starxo Terminal  \x1b[0m')
-    termInstance.writeln('\x1b[90m  AI Coding Agent v0.1.0\x1b[0m')
-    termInstance.writeln('\x1b[90m  Waiting for connection...\x1b[0m')
+    termInstance.writeln(`\x1b[36m\x1b[1m  ${t('terminal.banner.title')}  \x1b[0m`)
+    termInstance.writeln(`\x1b[90m  ${t('terminal.banner.subtitle')}\x1b[0m`)
+    termInstance.writeln(`\x1b[90m  ${t('terminal.banner.waitingForConnection')}\x1b[0m`)
     termInstance.writeln('')
     lineCount.value = 4
   } catch (e) {
@@ -121,13 +121,13 @@ useWailsEvent<{ stdout?: string; stderr?: string; exitCode?: number }>('terminal
   if (data.stdout) writeToTerminal(data.stdout)
   if (data.stderr) writeToTerminal(data.stderr, true)
   if (data.exitCode !== undefined && data.exitCode !== 0) {
-    writeToTerminal(`Process exited with code ${data.exitCode}`, true)
+    writeToTerminal(t('terminal.processExitedWithCode', { code: data.exitCode }), true)
   }
 })
 
 useWailsEvent('container:ready', () => {
   if (termInstance && xtermLoaded) {
-    termInstance.writeln(`\x1b[32m[${formatTime()}] Container connected and ready.\x1b[0m`)
+    termInstance.writeln(`\x1b[32m[${formatTime()}] ${t('terminal.containerReady')}\x1b[0m`)
     termInstance.writeln('')
     lineCount.value += 2
   }
@@ -203,7 +203,7 @@ onUnmounted(() => {
     <div class="terminal-status-bar">
       <div class="status-left">
         <span class="status-dot" :class="sshConnected ? 'connected' : 'disconnected'" />
-        <span class="status-label">{{ sshConnected ? 'SSH' : 'Disconnected' }}</span>
+        <span class="status-label">{{ sshConnected ? t('terminal.ssh') : t('terminal.disconnected') }}</span>
         <template v-if="activeContainer">
           <span class="status-sep">|</span>
           <NIcon size="11"><Cube /></NIcon>
@@ -211,7 +211,7 @@ onUnmounted(() => {
         </template>
       </div>
       <div class="status-right">
-        <span class="line-count">{{ lineCount }} lines</span>
+        <span class="line-count">{{ t('terminal.lines', { count: lineCount }) }}</span>
       </div>
     </div>
   </div>

@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
 import { NIcon } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import {
   CheckmarkCircle, EllipseOutline, Reload, CloseCircle,
   LockClosed, ArrowForward, ChevronDown, ChevronForward
@@ -17,6 +18,8 @@ const props = withDefaults(defineProps<{
   todos: TodoItem[]
   compact?: boolean
 }>(), { compact: false })
+
+const { t } = useI18n()
 
 const isExpanded = ref(false)
 
@@ -84,12 +87,12 @@ const layers = computed<TodoItem[][]>(() => {
   return result
 })
 
-const statusConfig: Record<string, { icon: any; color: string; label: string }> = {
-  pending:     { icon: EllipseOutline, color: '#5a5c72', label: 'Pending' },
-  in_progress: { icon: Reload,         color: '#22d3ee', label: 'Running' },
-  done:        { icon: CheckmarkCircle, color: '#34d399', label: 'Done' },
-  failed:      { icon: CloseCircle,     color: '#f43f5e', label: 'Failed' },
-  blocked:     { icon: LockClosed,      color: '#f59e0b', label: 'Blocked' },
+const statusConfig: Record<string, { icon: any; color: string; key: string }> = {
+  pending:     { icon: EllipseOutline, color: '#5a5c72', key: 'todo.status.pending' },
+  in_progress: { icon: Reload,         color: '#22d3ee', key: 'todo.status.in_progress' },
+  done:        { icon: CheckmarkCircle, color: '#34d399', key: 'todo.status.done' },
+  failed:      { icon: CloseCircle,     color: '#f43f5e', key: 'todo.status.failed' },
+  blocked:     { icon: LockClosed,      color: '#f59e0b', key: 'todo.status.blocked' },
 }
 
 function getStatusConfig(status: string) {
@@ -115,14 +118,14 @@ const progressPercent = computed(() => {
   <div class="todo-board" :class="{ compact }">
     <!-- Header with progress -->
     <div class="todo-header" :class="{ clickable: compact }" @click="compact && toggleExpand()">
-      <span class="todo-title">Task Progress</span>
+      <span class="todo-title">{{ t('todo.taskProgress') }}</span>
       <span class="todo-progress">{{ progressPercent }}%</span>
       <div class="todo-progress-bar">
         <div class="todo-progress-fill" :style="{ width: progressPercent + '%' }"></div>
       </div>
       <div class="todo-stats">
         <span v-for="(count, status) in stats" :key="status" class="todo-stat-badge" :style="{ color: getStatusConfig(status as string).color }">
-          {{ count }} {{ (status as string).replace('_', ' ') }}
+          {{ count }} {{ t(getStatusConfig(status as string).key) }}
         </span>
       </div>
       <NIcon v-if="compact" size="12" class="expand-toggle" :style="{ color: '#5a5c72' }">

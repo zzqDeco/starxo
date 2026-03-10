@@ -17,6 +17,14 @@ export default {
     workspaceOpen: '打开工作区抽屉',
     workspaceClose: '关闭工作区抽屉',
     settings: '设置',
+    switchLocale: {
+      zh: '切换到中文',
+      en: '切换到英文',
+    },
+    localeShort: {
+      zh: '中',
+      en: 'EN',
+    },
   },
   sidebar: {
     newChat: '新对话',
@@ -103,6 +111,13 @@ export default {
     taskProgress: '任务进度',
     collapse: '收起',
     expand: '展开',
+    status: {
+      pending: '待处理',
+      in_progress: '进行中',
+      done: '完成',
+      failed: '失败',
+      blocked: '阻塞',
+    },
   },
   plan: {
     title: '执行计划',
@@ -144,6 +159,7 @@ export default {
     dockerRunning: 'Docker：运行中',
     dockerStopped: 'Docker：已停止',
     container: '容器',
+    ssh: 'SSH',
   },
   settings: {
     title: '设置',
@@ -229,6 +245,16 @@ export default {
   terminal: {
     output: '输出',
     waitingForOutput: '等待输出...',
+    ssh: 'SSH',
+    disconnected: '未连接',
+    lines: '{count} 行',
+    processExitedWithCode: '进程退出，代码 {code}',
+    containerReady: '容器已连接并就绪。',
+    banner: {
+      title: 'Starxo 终端',
+      subtitle: 'AI 编程助手 v0.1.0',
+      waitingForConnection: '等待连接中...',
+    },
   },
   layout: {
     terminal: '终端',

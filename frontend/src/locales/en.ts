@@ -17,6 +17,14 @@ export default {
     workspaceOpen: 'Open workspace drawer',
     workspaceClose: 'Close workspace drawer',
     settings: 'Settings',
+    switchLocale: {
+      zh: 'Switch to Chinese',
+      en: 'Switch to English',
+    },
+    localeShort: {
+      zh: '中',
+      en: 'EN',
+    },
   },
   sidebar: {
     newChat: 'New Chat',
@@ -103,6 +111,13 @@ export default {
     taskProgress: 'Task Progress',
     collapse: 'Collapse',
     expand: 'Expand',
+    status: {
+      pending: 'Pending',
+      in_progress: 'Running',
+      done: 'Done',
+      failed: 'Failed',
+      blocked: 'Blocked',
+    },
   },
   plan: {
     title: 'Execution Plan',
@@ -144,6 +159,7 @@ export default {
     dockerRunning: 'Docker: Running',
     dockerStopped: 'Docker: Stopped',
     container: 'Container',
+    ssh: 'SSH',
   },
   settings: {
     title: 'Settings',
@@ -229,6 +245,16 @@ export default {
   terminal: {
     output: 'Output',
     waitingForOutput: 'Waiting for output...',
+    ssh: 'SSH',
+    disconnected: 'Disconnected',
+    lines: '{count} lines',
+    processExitedWithCode: 'Process exited with code {code}',
+    containerReady: 'Container connected and ready.',
+    banner: {
+      title: 'Starxo Terminal',
+      subtitle: 'AI Coding Agent v0.1.0',
+      waitingForConnection: 'Waiting for connection...',
+    },
   },
   layout: {
     terminal: 'Terminal',

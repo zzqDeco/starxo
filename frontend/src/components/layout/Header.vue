@@ -1,10 +1,14 @@
 <script lang="ts" setup>
+import { computed } from 'vue'
 import { NButton, NTooltip } from 'naive-ui'
 import { Settings, FolderOpen } from '@vicons/ionicons5'
 import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
+const nextLocale = computed(() => (locale.value === 'en' ? 'zh' : 'en'))
+const localeShortKey = computed(() => `header.localeShort.${nextLocale.value}`)
+const localeSwitchKey = computed(() => `header.switchLocale.${nextLocale.value}`)
 
 defineProps<{
   workspaceDrawerVisible: boolean
@@ -60,10 +64,10 @@ function toggleLocale() {
             class="header-btn lang-btn"
             @click="toggleLocale"
           >
-            {{ locale === 'en' ? '中' : 'EN' }}
+            {{ t(localeShortKey) }}
           </NButton>
         </template>
-        {{ locale === 'en' ? '切换到中文' : 'Switch to English' }}
+        {{ t(localeSwitchKey) }}
       </NTooltip>
 
       <NTooltip trigger="hover" placement="bottom">

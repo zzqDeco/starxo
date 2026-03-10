@@ -10,7 +10,7 @@ import type { Message, TurnEvent } from '@/types/message'
 import TimelineEventItem from './TimelineEventItem.vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const props = defineProps<{
   message: Message
@@ -28,7 +28,7 @@ const hasEvents = computed(() => props.message.events && props.message.events.le
 
 const timeStr = computed(() => {
   const d = new Date(props.message.timestamp)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 })
 
 // ---------- Agent classification ----------

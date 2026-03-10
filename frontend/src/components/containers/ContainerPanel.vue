@@ -8,7 +8,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useI18n } from 'vue-i18n'
 import type { ContainerInfo } from '@/types/session'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const containerStore = useContainerStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
@@ -44,9 +44,9 @@ function formatTime(ts: number): string {
   const d = new Date(ts)
   const now = new Date()
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   }
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleDateString(locale.value, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function sessionTitle(sessionID: string): string {
