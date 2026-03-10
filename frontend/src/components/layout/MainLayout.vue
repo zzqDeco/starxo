@@ -1,6 +1,9 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useWindowSize } from '@vueuse/core'
+import { NButton, NIcon, NTooltip } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+import { Albums, ChatboxEllipses } from '@vicons/ionicons5'
 import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import SplitHandle from './SplitHandle.vue'
@@ -9,8 +12,12 @@ import WorkspaceDrawer from '@/components/files/WorkspaceDrawer.vue'
 import ContainerDock from '@/components/containers/ContainerDock.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 
+const { t } = useI18n()
+
 const showSettings = ref(false)
 const showWorkspaceDrawer = ref(false)
+const showMobileSidebar = ref(false)
+const showResponsiveDock = ref(false)
 
 // Resizable panel widths
 const leftWidth = ref(240)
@@ -18,17 +25,55 @@ const containerDockWidth = ref(360)
 
 // Window auto-adapt
 const { width: windowWidth } = useWindowSize()
+
+const isBelow1200 = computed(() => windowWidth.value < 1200)
+const isBelow992 = computed(() => windowWidth.value < 992)
+const isBelow768 = computed(() => windowWidth.value < 768)
+
+const leftMinSize = computed(() => {
+  if (isBelow768.value) return 0
+  if (isBelow992.value) return 160
+  return 200
+})
+
+const leftMaxSize = computed(() => {
+  if (isBelow992.value) return 280
+  return 360
+})
+
+const dockMinSize = computed(() => {
+  if (isBelow992.value) return 240
+  if (isBelow1200.value) return 280
+  return 320
+})
+
 const effectiveLeftWidth = computed(() => {
-  if (windowWidth.value < 900) {
-    return Math.min(leftWidth.value, 180)
+  if (isBelow768.value) {
+    return 0
+  }
+  if (isBelow992.value) {
+    return Math.min(leftWidth.value, 220)
   }
   return leftWidth.value
 })
+
 const effectiveDockWidth = computed(() => {
-  if (windowWidth.value < 1280) {
+  if (isBelow1200.value) {
     return Math.min(containerDockWidth.value, 320)
   }
   return containerDockWidth.value
+})
+
+watch(isBelow1200, (below) => {
+  if (!below) {
+    showResponsiveDock.value = false
+  }
+})
+
+watch(isBelow768, (below) => {
+  if (!below) {
+    showMobileSidebar.value = false
+  }
 })
 
 function toggleSettings() {
@@ -38,26 +83,36 @@ function toggleSettings() {
 function toggleWorkspaceDrawer() {
   showWorkspaceDrawer.value = !showWorkspaceDrawer.value
 }
+
+function toggleMobileSidebar() {
+  showMobileSidebar.value = !showMobileSidebar.value
+}
+
+function toggleResponsiveDock() {
+  showResponsiveDock.value = !showResponsiveDock.value
+}
 </script>
 
 <template>
   <div class="main-layout">
-    <!-- Left Sidebar -->
-    <div class="left-panel" :style="{ width: effectiveLeftWidth + 'px' }">
+    <div
+      v-if="!isBelow768"
+      class="left-panel"
+      :style="{ width: effectiveLeftWidth + 'px' }"
+    >
       <Sidebar />
     </div>
 
-    <!-- Left Splitter -->
     <SplitHandle
+      v-if="!isBelow768"
       direction="horizontal"
       :default-size="240"
-      :min-size="180"
-      :max-size="360"
+      :min-size="leftMinSize"
+      :max-size="leftMaxSize"
       storage-key="starxo-left-panel-width"
       @update:size="(v: number) => leftWidth = v"
     />
 
-    <!-- Center Section -->
     <div class="center-section">
       <Header
         @toggle-settings="toggleSettings"
@@ -73,21 +128,69 @@ function toggleWorkspaceDrawer() {
           <WorkspaceDrawer v-model:show="showWorkspaceDrawer" />
         </div>
 
-        <SplitHandle
-          direction="horizontal"
-          :default-size="360"
-          :min-size="300"
-          :max-size="500"
-          :reverse="true"
-          storage-key="starxo-container-dock-width"
-          @update:size="(v: number) => containerDockWidth = v"
-        />
+        <template v-if="!isBelow1200">
+          <SplitHandle
+            direction="horizontal"
+            :default-size="360"
+            :min-size="dockMinSize"
+            :max-size="500"
+            :reverse="true"
+            storage-key="starxo-container-dock-width"
+            @update:size="(v: number) => containerDockWidth = v"
+          />
 
-        <div class="container-dock" :style="{ width: effectiveDockWidth + 'px' }">
-          <ContainerDock />
-        </div>
+          <div class="container-dock" :style="{ width: effectiveDockWidth + 'px' }">
+            <ContainerDock />
+          </div>
+        </template>
       </div>
     </div>
+
+    <div
+      v-if="isBelow1200"
+      class="responsive-dock"
+      :class="{ open: showResponsiveDock }"
+    >
+      <button type="button" class="dock-backdrop" @click="toggleResponsiveDock" />
+      <div class="dock-panel-wrap">
+        <aside class="dock-panel" :style="{ width: effectiveDockWidth + 'px' }">
+          <ContainerDock />
+        </aside>
+      </div>
+    </div>
+
+    <div
+      v-if="isBelow768"
+      class="mobile-sidebar"
+      :class="{ open: showMobileSidebar }"
+    >
+      <button type="button" class="mobile-backdrop" @click="toggleMobileSidebar" />
+      <aside class="mobile-sidebar-panel">
+        <Sidebar />
+      </aside>
+    </div>
+
+    <NTooltip v-if="isBelow1200" trigger="hover" placement="left">
+      <template #trigger>
+        <NButton class="dock-tab" circle size="small" @click="toggleResponsiveDock">
+          <template #icon>
+            <NIcon size="16"><Albums /></NIcon>
+          </template>
+        </NButton>
+      </template>
+      {{ showResponsiveDock ? t('header.hideContainers') : t('header.showContainers') }}
+    </NTooltip>
+
+    <NTooltip v-if="isBelow768" trigger="hover" placement="right">
+      <template #trigger>
+        <NButton class="sidebar-tab" circle size="small" @click="toggleMobileSidebar">
+          <template #icon>
+            <NIcon size="16"><ChatboxEllipses /></NIcon>
+          </template>
+        </NButton>
+      </template>
+      {{ showMobileSidebar ? t('header.hideSessions') : t('header.showSessions') }}
+    </NTooltip>
   </div>
 
   <SettingsPanel v-model:show="showSettings" />
@@ -100,6 +203,7 @@ function toggleWorkspaceDrawer() {
   width: 100vw;
   background: var(--bg-base);
   overflow: hidden;
+  position: relative;
 }
 
 .left-panel {
@@ -147,5 +251,85 @@ function toggleWorkspaceDrawer() {
   border-left: 1px solid var(--border-subtle);
   flex-shrink: 0;
   min-width: 0;
+}
+
+.responsive-dock,
+.mobile-sidebar {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 80;
+}
+
+.dock-backdrop,
+.mobile-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(5, 6, 16, 0.4);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.dock-panel-wrap {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  bottom: 0;
+  transform: translateX(100%);
+  transition: transform 220ms ease;
+}
+
+.dock-panel {
+  height: 100%;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  box-shadow: -20px 0 28px rgba(0, 0, 0, 0.25);
+}
+
+.mobile-sidebar-panel {
+  position: absolute;
+  top: 52px;
+  left: 0;
+  bottom: 0;
+  width: min(300px, 86vw);
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  transform: translateX(-100%);
+  transition: transform 220ms ease;
+  box-shadow: 20px 0 28px rgba(0, 0, 0, 0.25);
+}
+
+.responsive-dock.open,
+.mobile-sidebar.open {
+  pointer-events: auto;
+}
+
+.responsive-dock.open .dock-backdrop,
+.mobile-sidebar.open .mobile-backdrop {
+  opacity: 1;
+}
+
+.responsive-dock.open .dock-panel-wrap {
+  transform: translateX(0);
+}
+
+.mobile-sidebar.open .mobile-sidebar-panel {
+  transform: translateX(0);
+}
+
+.dock-tab,
+.sidebar-tab {
+  position: absolute;
+  z-index: 90;
+  top: 60px;
+}
+
+.dock-tab {
+  right: 10px;
+}
+
+.sidebar-tab {
+  left: 10px;
 }
 </style>
