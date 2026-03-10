@@ -19,7 +19,7 @@ const { t } = useI18n()
 const { width: windowWidth } = useWindowSize()
 const drawerWidth = ref(980)
 
-const minDrawerWidth = computed(() => 560)
+const minDrawerWidth = computed(() => Math.floor(Math.min(560, windowWidth.value * 0.9)))
 const maxDrawerWidth = computed(() => Math.max(900, Math.floor(windowWidth.value * 0.82)))
 const effectiveDrawerWidth = computed(() => {
   const clamped = Math.min(drawerWidth.value, maxDrawerWidth.value)

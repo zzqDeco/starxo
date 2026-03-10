@@ -17,6 +17,10 @@ export default {
     workspaceOpen: '打开工作区抽屉',
     workspaceClose: '关闭工作区抽屉',
     settings: '设置',
+    hideContainers: '隐藏容器面板',
+    showContainers: '显示容器面板',
+    hideSessions: '隐藏会话栏',
+    showSessions: '显示会话栏',
   },
   sidebar: {
     newChat: '新对话',

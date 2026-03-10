@@ -17,6 +17,10 @@ export default {
     workspaceOpen: 'Open workspace drawer',
     workspaceClose: 'Close workspace drawer',
     settings: 'Settings',
+    hideContainers: 'Hide containers',
+    showContainers: 'Show containers',
+    hideSessions: 'Hide sessions',
+    showSessions: 'Show sessions',
   },
   sidebar: {
     newChat: 'New Chat',
