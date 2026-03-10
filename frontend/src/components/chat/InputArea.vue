@@ -19,6 +19,7 @@ const inputText = ref('')
 const attachedFile = ref('')
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !props.isStreaming)
+const attachmentSupported = computed(() => typeof window.runtime?.OpenFileDialog === 'function')
 
 function handleSend() {
   const text = inputText.value.trim()
@@ -36,16 +37,21 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 async function handleAttach() {
+  const runtime = window.runtime
+  if (!runtime || !attachmentSupported.value) {
+    console.warn(t('input.attachUnavailable'))
+    return
+  }
+
   try {
-    // @ts-ignore - Wails runtime dialog
-    const result = await window.runtime?.OpenFileDialog({
+    const result = await runtime.OpenFileDialog({
       title: t('input.selectFile'),
     })
     if (result) {
       attachedFile.value = result
     }
   } catch (e) {
-    console.warn('File dialog not available:', e)
+    console.warn(`${t('input.attachFailed')}:`, e)
   }
 }
 
@@ -63,7 +69,7 @@ const attachedFileName = computed(() => {
 <template>
   <div class="input-area">
     <div v-if="attachedFile" class="attached-file">
-      <span class="attached-name">{{ attachedFileName }}</span>
+      <span class="attached-name">{{ t('input.attached') }}: {{ attachedFileName }}</span>
       <button class="attached-remove" @click="removeAttachment">&times;</button>
     </div>
 
@@ -83,7 +89,7 @@ const attachedFileName = computed(() => {
             </template>
           </NButton>
         </template>
-        {{ t('input.attachFile') }}
+        {{ attachmentSupported ? t('input.attachFile') : t('input.attachUnavailable') }}
       </NTooltip>
 
       <NInput

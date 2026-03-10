@@ -56,8 +56,12 @@ export default {
     attachFile: '附加文件',
     selectFile: '选择要附加的文件',
     stopGeneration: '停止生成',
+    sending: '发送中...',
     sendMessage: '发送消息 (Enter)',
     shiftEnter: 'Shift + Enter 换行',
+    attached: '已附加',
+    attachFailed: '附加文件失败',
+    attachUnavailable: '当前环境不支持附件',
   },
   message: {
     copy: '复制',

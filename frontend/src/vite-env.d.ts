@@ -10,7 +10,7 @@ interface Window {
   go?: {
     main?: {
       ChatService?: {
-        SendMessage(content: string, filePath: string): Promise<void>
+        SendMessage(content: string, filePath?: string): Promise<void>
         StopGeneration(): Promise<void>
       }
       SettingsService?: {

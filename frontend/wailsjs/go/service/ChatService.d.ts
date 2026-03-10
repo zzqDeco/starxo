@@ -33,7 +33,7 @@ export function ResumeWithAnswer(arg1:string):Promise<void>;
 
 export function ResumeWithChoice(arg1:number):Promise<void>;
 
-export function SendMessage(arg1:string):Promise<void>;
+export function SendMessage(arg1:string,arg2?:string):Promise<void>;
 
 export function SessionCtxEngine(arg1:string):Promise<agentctx.Engine>;
 

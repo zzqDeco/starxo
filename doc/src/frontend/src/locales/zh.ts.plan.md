@@ -23,6 +23,7 @@
   - `taskRail.*`
   - `workspace.*`（含 `drawerTitle`）
   - `codePreview.*`
+  - `input.sending`, `input.attached`, `input.attachFailed`, `input.attachUnavailable`
 
 ## 5. 依赖关系
 - 内部依赖: 被 `frontend/src/locales/index.ts` 引用

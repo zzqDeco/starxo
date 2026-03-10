@@ -43,4 +43,4 @@
 
 ## 7. 维护建议
 - 若后续引入多模态附件，优先扩展 `attachedFile` 结构为对象数组。
-- Wails runtime 类型建议后续补充声明，减少 `@ts-ignore` 依赖。
+- 保持 `send(content, filePath?)` 与 ChatPanel/ChatService 的签名一致。

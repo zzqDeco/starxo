@@ -15,7 +15,7 @@
 
 ## 3. 输入与输出
 - 输入来源:
-  - 前端 Wails 绑定调用: `SendMessage(userMessage)`、`ResumeWithAnswer(answer)`、`ResumeWithChoice(selectedIndex)`、`StopGeneration()`、`ClearHistory()`、`SetMode(mode)`、`GetMode()`、`BuildRunners()`
+  - 前端 Wails 绑定调用: `SendMessage(userMessage, filePath)`、`ResumeWithAnswer(answer)`、`ResumeWithChoice(selectedIndex)`、`StopGeneration()`、`ClearHistory()`、`SetMode(mode)`、`GetMode()`、`BuildRunners()`
   - 依赖注入: `config.Store`、`sandbox.SandboxManager`（ctxEngine 参数保留但忽略，向后兼容）、`SessionService`
 - 输出结果:
   - Wails 事件发射: `agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`（所有事件均携带 `sessionId` 字段）
@@ -44,7 +44,7 @@
   - `IsRunning() bool`: 活跃会话是否有运行中的代理
   - `IsSessionRunning(sessionID) bool`: 指定会话是否有运行中的代理
   - `WaitForSessionDone(sessionID, timeout) error`: 等待指定会话代理运行完成
-  - `SendMessage(userMessage) error`: 发送用户消息，per-session 运行守卫，在锁内构建 runners（无间隙），异步执行代理并流式处理事件
+  - `SendMessage(userMessage, filePath) error`: 发送用户消息，per-session 运行守卫，在锁内构建 runners（无间隙），异步执行代理并流式处理事件
   - `ResumeWithAnswer(answer) error`: 以文本回答恢复中断执行
   - `ResumeWithChoice(selectedIndex) error`: 以选择恢复中断执行
   - `StopGeneration() error`: 取消活跃会话当前代理执行
@@ -74,6 +74,10 @@
   - `buildAgentContext()`: 构建 AgentContext，OnToolEvent 回调通过 context 传播 sessionID
   - `buildInterruptEvent(pi, sessionID) *InterruptEvent`: 将 PendingInterrupt 转换为 InterruptEvent
 - Wails 绑定方法: `SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`StopGeneration`、`ClearHistory`、`SetMode`、`GetMode`、`BuildRunners`
+- 附件处理:
+  - `SendMessage` 新增 `filePath` 可选参数。
+  - 若 `filePath` 非空，后端读取文件内容并注入 `ctxEngine.FileContext().AddUploadedFile(...)`，使附件进入系统上下文。
+  - 同时发射 timeline `info` 事件 `已附加文件 xxx`，前端可直接在时间线看到附件确认。
 - 事件发射:
   - `agent:timeline`: 统一时间线事件（所有事件均含 `sessionId` 字段）
   - `agent:error`: 错误信息（含 `sessionId`）

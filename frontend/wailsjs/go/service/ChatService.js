@@ -54,8 +54,8 @@ export function ResumeWithChoice(arg1) {
   return window['go']['service']['ChatService']['ResumeWithChoice'](arg1);
 }
 
-export function SendMessage(arg1) {
-  return window['go']['service']['ChatService']['SendMessage'](arg1);
+export function SendMessage(arg1, arg2) {
+  return window['go']['service']['ChatService']['SendMessage'](arg1, arg2);
 }
 
 export function SessionCtxEngine(arg1) {

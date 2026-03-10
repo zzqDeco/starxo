@@ -13,7 +13,7 @@
 
 ## 3. 输入与输出
 - 输入来源: `chatStore`、`connectionStore`、Wails ChatService
-- 输出结果: 渲染聊天界面并发起 `SendMessage/SetMode/StopGeneration`
+- 输出结果: 渲染聊天界面并发起 `SendMessage(content, filePath?)/SetMode/StopGeneration`
 
 ## 4. 关键实现细节
 - 模式切换:
@@ -40,7 +40,7 @@
   - `chatStore`, `connectionStore`, `useAutoScroll`
 - 外部依赖:
   - `vue`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
-  - Wails: `SendMessage`, `SetMode`, `StopGeneration`
+  - Wails: `SendMessage(content, filePath?)`, `SetMode`, `StopGeneration`
 
 ## 6. 变更影响面
 - 旧的 `PlanPanel` 与持久 `TodoBoard` 从聊天主流中移除。

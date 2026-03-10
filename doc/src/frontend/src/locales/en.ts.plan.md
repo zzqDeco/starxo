@@ -22,7 +22,8 @@
   - `header.workspaceOpen`, `header.workspaceClose`
   - `taskRail.*`（任务轨文案）
   - `workspace.*`（工作区抽屉/面板文案）
-  - `codePreview.*`（代码预览文案）
+  - `codePreview.*`
+  - `input.sending`, `input.attached`, `input.attachFailed`, `input.attachUnavailable`（代码预览文案）
 
 ## 5. 依赖关系
 - 内部依赖: 被 `frontend/src/locales/index.ts` 引用

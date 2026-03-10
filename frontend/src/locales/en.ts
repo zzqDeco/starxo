@@ -56,8 +56,12 @@ export default {
     attachFile: 'Attach file',
     selectFile: 'Select file to attach',
     stopGeneration: 'Stop generation',
+    sending: 'Sending...',
     sendMessage: 'Send message (Enter)',
     shiftEnter: 'Shift + Enter for new line',
+    attached: 'Attached',
+    attachFailed: 'Failed to attach file',
+    attachUnavailable: 'Attachments are unavailable in this environment',
   },
   message: {
     copy: 'Copy',

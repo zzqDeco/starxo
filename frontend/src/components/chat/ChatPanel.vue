@@ -62,20 +62,20 @@ function handleScrollToBottom() {
   hasNewMessages.value = false
 }
 
-async function handleSend(content: string) {
+async function handleSend(content: string, filePath?: string) {
   chatStore.addUserMessage(content)
   chatStore.setGenerating(true)
   nextTick(() => scrollToBottom())
 
   try {
-    await SendMessage(content)
+    await SendMessage(content, filePath)
   } catch (e) {
     console.error('Failed to send message:', e)
     chatStore.setGenerating(false)
     chatStore.addMessage({
       id: crypto.randomUUID(),
       role: 'system',
-      content: `Failed to send message: ${e}`,
+      content: `${t('chat.failedToSend')}: ${e}`,
       timestamp: Date.now(),
       events: []
     })

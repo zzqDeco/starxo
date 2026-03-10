@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -295,7 +297,7 @@ func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration
 // ---------------------------------------------------------------------------
 
 // SendMessage processes a user message through the agent and streams results to the frontend.
-func (s *ChatService) SendMessage(userMessage string) error {
+func (s *ChatService) SendMessage(userMessage string, filePath string) error {
 	s.mu.Lock()
 
 	if s.activeSessionID == "" {
@@ -326,6 +328,23 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		userMessage,
 		time.Now().UnixMilli(),
 	)
+
+	var attachmentEvent *TimelineEvent
+	if strings.TrimSpace(filePath) != "" {
+		fileInfo, err := buildAttachmentContext(filePath)
+		if err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("failed to attach file %q: %w", filePath, err)
+		}
+		run.ctxEngine.FileContext().AddUploadedFile(fileInfo)
+		attachmentEvent = &TimelineEvent{
+			ID:        fmt.Sprintf("attach-%d", time.Now().UnixNano()),
+			Type:      "info",
+			Agent:     "system",
+			Content:   fmt.Sprintf("已附加文件 %s", fileInfo.Name),
+			Timestamp: time.Now().UnixMilli(),
+		}
+	}
 
 	// Build runners if not yet built (under lock — no gap)
 	if s.deepAgent == nil {
@@ -371,6 +390,10 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	done := make(chan struct{})
 	run.runDone = done
 	s.mu.Unlock()
+
+	if attachmentEvent != nil {
+		s.emitTimelineForSession(*attachmentEvent, sessionID)
+	}
 
 	// Prepare messages
 	messages := run.ctxEngine.PrepareMessages()
@@ -439,6 +462,40 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	}()
 
 	return nil
+}
+
+func buildAttachmentContext(filePath string) (agentctx.FileInfo, error) {
+	absolutePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return agentctx.FileInfo{}, err
+	}
+
+	stat, err := os.Stat(absolutePath)
+	if err != nil {
+		return agentctx.FileInfo{}, err
+	}
+	if stat.IsDir() {
+		return agentctx.FileInfo{}, fmt.Errorf("directories are not supported")
+	}
+
+	content, err := os.ReadFile(absolutePath)
+	if err != nil {
+		return agentctx.FileInfo{}, err
+	}
+
+	preview := string(content)
+	const maxPreviewBytes = 2048
+	if len(preview) > maxPreviewBytes {
+		preview = preview[:maxPreviewBytes] + "\n...(truncated)"
+	}
+
+	return agentctx.FileInfo{
+		Name:     filepath.Base(absolutePath),
+		Path:     absolutePath,
+		Size:     stat.Size(),
+		Modified: stat.ModTime(),
+		Preview:  preview,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
