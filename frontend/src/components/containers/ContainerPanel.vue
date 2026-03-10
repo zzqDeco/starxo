@@ -1,20 +1,23 @@
 <script lang="ts" setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NTag, NPopconfirm, NProgress } from 'naive-ui'
 import { Refresh, Play, Stop, Trash, Server, Add, RadioButtonOn, RadioButtonOff } from '@vicons/ionicons5'
 import { useContainerStore } from '@/stores/containerStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useI18n } from 'vue-i18n'
+import { useUiFeedback } from '@/composables/useUiFeedback'
 import type { ContainerInfo } from '@/types/session'
 
 const { t } = useI18n()
 const containerStore = useContainerStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
+const feedback = useUiFeedback()
+const panelBusy = computed(() => containerStore.loading || containerStore.creatingContainer)
 
 onMounted(() => {
-  containerStore.loadContainers()
+  containerStore.loadContainers().catch((e) => feedback.error(t('containers.title'), e))
 })
 
 function statusType(status: string): 'success' | 'warning' | 'error' | 'default' {
@@ -49,6 +52,78 @@ function formatTime(ts: number): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+
+
+async function createContainer() {
+  try {
+    await containerStore.createContainer()
+    feedback.success(t('feedback.containerCreated'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.createContainer'), e)
+  }
+}
+
+async function refreshContainers() {
+  try {
+    await containerStore.loadContainers()
+  } catch (e) {
+    feedback.error(t('containers.title'), e)
+  }
+}
+
+async function startContainer(id: string) {
+  try {
+    await containerStore.startContainer(id)
+    feedback.success(t('feedback.containerStarted'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.startContainer'), e)
+  }
+}
+
+async function stopContainer(id: string) {
+  try {
+    await containerStore.stopContainer(id)
+    feedback.success(t('feedback.containerStopped'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.stopContainer'), e)
+  }
+}
+
+async function destroyContainer(id: string) {
+  try {
+    await containerStore.destroyContainer(id)
+    feedback.success(t('feedback.containerDestroyed'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.destroyContainer'), e)
+  }
+}
+
+async function activateContainer(id: string) {
+  try {
+    await containerStore.activateContainer(id)
+    feedback.success(t('feedback.containerActivated'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.activateContainer'), e)
+  }
+}
+
+async function deactivateContainer() {
+  try {
+    await containerStore.deactivateContainer()
+    feedback.success(t('feedback.containerDeactivated'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.deactivateContainer'), e)
+  }
+}
+
+async function refreshStatus(id: string) {
+  try {
+    await containerStore.refreshStatus(id)
+  } catch (e) {
+    feedback.error(t('containers.title'), e)
+  }
+}
+
 function sessionTitle(sessionID: string): string {
   const sess = sessionStore.sessions.find(s => s.id === sessionID)
   return sess?.title || sessionID.substring(0, 8)
@@ -64,14 +139,14 @@ function sessionTitle(sessionID: string): string {
         <NButton
           size="tiny"
           type="primary"
-          :disabled="!connectionStore.sshConnected || containerStore.creatingContainer"
+          :disabled="!connectionStore.sshConnected || panelBusy"
           :loading="containerStore.creatingContainer"
-          @click="containerStore.createContainer()"
+          @click="createContainer"
         >
           <template #icon><NIcon size="14"><Add /></NIcon></template>
           {{ t('containers.createContainer') }}
         </NButton>
-        <NButton quaternary circle size="tiny" @click="containerStore.loadContainers()" :loading="containerStore.loading">
+        <NButton quaternary circle size="tiny" @click="refreshContainers" :loading="containerStore.loading" :disabled="panelBusy">
           <template #icon><NIcon size="14"><Refresh /></NIcon></template>
         </NButton>
       </div>
@@ -118,7 +193,7 @@ function sessionTitle(sessionID: string): string {
             <NButton
               v-if="!isActive(c) && c.status === 'running' && connectionStore.sshConnected"
               quaternary size="tiny" type="info"
-              @click="containerStore.activateContainer(c.id)"
+              @click="activateContainer(c.id)" :loading="containerStore.isActionPending(`activate:${c.id}`)" :disabled="panelBusy"
             >
               <template #icon><NIcon size="14"><RadioButtonOn /></NIcon></template>
               {{ t('containers.activate') }}
@@ -126,25 +201,25 @@ function sessionTitle(sessionID: string): string {
             <NButton
               v-if="isActive(c)"
               quaternary size="tiny"
-              @click="containerStore.deactivateContainer()"
+              @click="deactivateContainer()" :loading="containerStore.isActionPending('deactivate')" :disabled="panelBusy"
             >
               <template #icon><NIcon size="14"><RadioButtonOff /></NIcon></template>
               {{ t('containers.deactivate') }}
             </NButton>
-            <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="containerStore.startContainer(c.id)">
+            <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="startContainer(c.id)" :loading="containerStore.isActionPending(`start:${c.id}`)" :disabled="panelBusy">
               <template #icon><NIcon size="14"><Play /></NIcon></template>
               {{ t('containers.start') }}
             </NButton>
-            <NButton v-if="c.status === 'running' && !isActive(c)" quaternary size="tiny" type="warning" @click="containerStore.stopContainer(c.id)">
+            <NButton v-if="c.status === 'running' && !isActive(c)" quaternary size="tiny" type="warning" @click="stopContainer(c.id)" :loading="containerStore.isActionPending(`stop:${c.id}`)" :disabled="panelBusy">
               <template #icon><NIcon size="14"><Stop /></NIcon></template>
               {{ t('containers.stop') }}
             </NButton>
-            <NButton quaternary size="tiny" @click="containerStore.refreshStatus(c.id)">
+            <NButton quaternary size="tiny" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
               <template #icon><NIcon size="14"><Refresh /></NIcon></template>
             </NButton>
-            <NPopconfirm @positive-click="containerStore.destroyContainer(c.id)">
+            <NPopconfirm @positive-click="destroyContainer(c.id)">
               <template #trigger>
-                <NButton quaternary size="tiny" type="error">
+                <NButton quaternary size="tiny" type="error" :loading="containerStore.isActionPending(`destroy:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Trash /></NIcon></template>
                   {{ t('containers.destroy') }}
                 </NButton>
@@ -178,25 +253,25 @@ function sessionTitle(sessionID: string): string {
                 <NButton
                   v-if="c.status === 'running' && connectionStore.sshConnected"
                   quaternary size="tiny" type="info"
-                  @click="containerStore.activateContainer(c.id)"
+                  @click="activateContainer(c.id)" :loading="containerStore.isActionPending(`activate:${c.id}`)" :disabled="panelBusy"
                 >
                   <template #icon><NIcon size="14"><RadioButtonOn /></NIcon></template>
                   {{ t('containers.activate') }}
                 </NButton>
-                <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="containerStore.startContainer(c.id)">
+                <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="startContainer(c.id)" :loading="containerStore.isActionPending(`start:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Play /></NIcon></template>
                   {{ t('containers.start') }}
                 </NButton>
-                <NButton v-if="c.status === 'running'" quaternary size="tiny" type="warning" @click="containerStore.stopContainer(c.id)">
+                <NButton v-if="c.status === 'running'" quaternary size="tiny" type="warning" @click="stopContainer(c.id)" :loading="containerStore.isActionPending(`stop:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Stop /></NIcon></template>
                   {{ t('containers.stop') }}
                 </NButton>
-                <NButton quaternary size="tiny" @click="containerStore.refreshStatus(c.id)">
+                <NButton quaternary size="tiny" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Refresh /></NIcon></template>
                 </NButton>
-                <NPopconfirm @positive-click="containerStore.destroyContainer(c.id)">
+                <NPopconfirm @positive-click="destroyContainer(c.id)">
                   <template #trigger>
-                    <NButton quaternary size="tiny" type="error">
+                    <NButton quaternary size="tiny" type="error" :loading="containerStore.isActionPending(`destroy:${c.id}`)" :disabled="panelBusy">
                       <template #icon><NIcon size="14"><Trash /></NIcon></template>
                       {{ t('containers.destroy') }}
                     </NButton>

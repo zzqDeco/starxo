@@ -4,27 +4,40 @@ import { Add, ChatbubbleEllipses, EllipsisVertical } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chatStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useUiFeedback } from '@/composables/useUiFeedback'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
+const feedback = useUiFeedback()
+const newChatDisabled = computed(() => sessionStore.isBusy)
 
 // Renaming state
 const renamingId = ref<string | null>(null)
 const renameText = ref('')
 
-function handleNewChat() {
-  sessionStore.createSession().then(() => {
+async function handleNewChat() {
+  if (sessionStore.isBusy) return
+  try {
+    await sessionStore.createSession()
     chatStore.clearMessages()
-  })
+    feedback.success(t('feedback.sessionCreated'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.createSession'), e)
+  }
 }
 
-function handleSessionClick(sessionId: string) {
-  if (sessionId === sessionStore.activeSessionId) return
-  sessionStore.switchSession(sessionId)
+async function handleSessionClick(sessionId: string) {
+  if (sessionStore.switching || sessionId === sessionStore.activeSessionId) return
+  try {
+    await sessionStore.switchSession(sessionId)
+    feedback.info(t('feedback.sessionSwitched'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.switchSession'), e)
+  }
 }
 
 function startRename(sessionId: string, currentTitle: string) {
@@ -32,19 +45,38 @@ function startRename(sessionId: string, currentTitle: string) {
   renameText.value = currentTitle
 }
 
-function confirmRename(sessionId: string) {
-  if (renameText.value.trim()) {
-    sessionStore.renameSession(sessionId, renameText.value.trim())
+async function confirmRename(sessionId: string) {
+  const title = renameText.value.trim()
+  if (!title || sessionStore.isRenaming(sessionId)) {
+    renamingId.value = null
+    return
   }
-  renamingId.value = null
+
+  try {
+    await sessionStore.renameSession(sessionId, title)
+    feedback.success(t('feedback.sessionRenamed'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.renameSession'), e)
+  } finally {
+    renamingId.value = null
+  }
 }
 
 function cancelRename() {
   renamingId.value = null
 }
 
-function handleDelete(sessionId: string) {
-  sessionStore.deleteSession(sessionId)
+async function handleDelete(sessionId: string) {
+  if (sessionStore.isDeleting(sessionId)) return
+  const confirmed = await feedback.confirmDanger(t('sidebar.deleteSessionConfirm'))
+  if (!confirmed) return
+
+  try {
+    await sessionStore.deleteSession(sessionId)
+    feedback.success(t('feedback.sessionDeleted'))
+  } catch (e) {
+    feedback.error(t('feedback.actions.deleteSession'), e)
+  }
 }
 
 function getSessionDropdownOptions() {
@@ -90,6 +122,8 @@ function containerStatusDot(status?: string) {
         type="primary"
         block
         class="new-chat-btn"
+        :disabled="newChatDisabled"
+        :loading="sessionStore.creating"
         @click="handleNewChat"
       >
         <template #icon>
@@ -108,8 +142,8 @@ function containerStatusDot(status?: string) {
       <div
         v-for="sess in sessionStore.sessions"
         :key="sess.id"
-        :class="['session-item', { active: sess.id === sessionStore.activeSessionId }]"
-        tabindex="0"
+        :class="['session-item', { active: sess.id === sessionStore.activeSessionId, disabled: sessionStore.switching }]"
+        :tabindex="sessionStore.switching ? -1 : 0"
         role="button"
         @click="handleSessionClick(sess.id)"
         @keydown.enter="handleSessionClick(sess.id)"
@@ -160,6 +194,7 @@ function containerStatusDot(status?: string) {
             circle
             size="tiny"
             class="session-menu-btn"
+            :disabled="sessionStore.switching || sessionStore.isDeleting(sess.id) || sessionStore.isRenaming(sess.id)"
             @click.stop
           >
             <template #icon><NIcon size="14"><EllipsisVertical /></NIcon></template>
@@ -276,6 +311,11 @@ function containerStatusDot(status?: string) {
 
 .session-item:hover {
   background: var(--bg-hover);
+}
+
+.session-item.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .session-item.active {
