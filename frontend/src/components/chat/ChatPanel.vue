@@ -12,10 +12,13 @@ import AgentStatus from '@/components/status/AgentStatus.vue'
 import TaskRailFloating from '@/components/layout/TaskRailFloating.vue'
 import { SendMessage, SetMode, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
+import { useUiFeedback } from '@/composables/useUiFeedback'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
+const feedback = useUiFeedback()
+const modeSwitching = ref(false)
 
 const scrollContainer = ref<HTMLElement | null>(null)
 const bottomAreaRef = ref<HTMLElement | null>(null)
@@ -72,13 +75,7 @@ async function handleSend(content: string) {
   } catch (e) {
     console.error('Failed to send message:', e)
     chatStore.setGenerating(false)
-    chatStore.addMessage({
-      id: crypto.randomUUID(),
-      role: 'system',
-      content: `Failed to send message: ${e}`,
-      timestamp: Date.now(),
-      events: []
-    })
+    feedback.error(t('feedback.actions.sendMessage'), e)
   }
 }
 
@@ -97,21 +94,19 @@ function handleStop() {
 }
 
 async function handleModeSwitch(mode: 'default' | 'plan') {
-  if (mode === chatStore.agentMode || chatStore.isStreaming) {
+  if (mode === chatStore.agentMode || chatStore.isStreaming || modeSwitching.value) {
     return
   }
+  modeSwitching.value = true
   try {
     await SetMode(mode)
     chatStore.setMode(mode)
+    feedback.success(t('feedback.modeSwitched', { mode: mode === 'plan' ? t('chat.modePlan') : t('chat.modeDefault') }))
   } catch (e) {
     console.error('Failed to switch mode:', e)
-    chatStore.addMessage({
-      id: crypto.randomUUID(),
-      role: 'system',
-      content: `Failed to switch mode: ${e}`,
-      timestamp: Date.now(),
-      events: []
-    })
+    feedback.error(t('feedback.actions.switchMode'), e)
+  } finally {
+    modeSwitching.value = false
   }
 }
 
@@ -140,7 +135,8 @@ onUnmounted(() => {
           <template #trigger>
             <NButton
               :type="currentMode === 'default' ? 'primary' : 'default'"
-              :disabled="chatStore.isStreaming"
+              :disabled="chatStore.isStreaming || modeSwitching"
+              :loading="modeSwitching && currentMode !== 'default'"
               @click="handleModeSwitch('default')"
             >
               {{ t('chat.modeDefault') }}
@@ -152,7 +148,8 @@ onUnmounted(() => {
           <template #trigger>
             <NButton
               :type="currentMode === 'plan' ? 'primary' : 'default'"
-              :disabled="chatStore.isStreaming"
+              :disabled="chatStore.isStreaming || modeSwitching"
+              :loading="modeSwitching && currentMode !== 'plan'"
               @click="handleModeSwitch('plan')"
             >
               {{ t('chat.modePlan') }}

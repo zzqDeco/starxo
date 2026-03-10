@@ -145,7 +145,7 @@ onMounted(async () => {
   settingsStore.loadSettings()
 
   // Load sessions (enriched with container info)
-  await sessionStore.loadSessions()
+  await sessionStore.loadSessions().catch((e) => console.error('Failed to initialize sessions:', e))
 
   // Sync mode from backend for the active session at startup.
   try {
@@ -192,8 +192,8 @@ onMounted(async () => {
       }
 
       // 5. Container & session list
-      sessionStore.loadSessions()
-      containerStore.loadContainers()
+      sessionStore.loadSessions().catch((e) => console.error('Failed to refresh sessions:', e))
+      containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
       if (data.containerID) {
         containerStore.setActiveContainer(data.containerID)
       } else {
@@ -231,8 +231,8 @@ onMounted(async () => {
   EventsOn('container:ready', (data: { containerID: string }) => {
     if (data?.containerID) {
       containerStore.setActiveContainer(data.containerID)
-      containerStore.loadContainers()
-      sessionStore.loadSessions()
+      containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
+      sessionStore.loadSessions().catch((e) => console.error('Failed to refresh sessions:', e))
     }
   })
 
@@ -240,7 +240,7 @@ onMounted(async () => {
   EventsOn('container:activated', (data: { containerID: string }) => {
     if (data?.containerID) {
       containerStore.setActiveContainer(data.containerID)
-      containerStore.loadContainers()
+      containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
     }
   })
 
@@ -262,7 +262,7 @@ onMounted(async () => {
   EventsOn('agent:done', (data: any) => {
     if (!isActiveSession(data)) return
     chatStore.setGenerating(false)
-    sessionStore.loadSessions()
+    sessionStore.loadSessions().catch((e) => console.error('Failed to refresh sessions:', e))
   })
 
   // Agent error (now receives object with sessionId + error)
