@@ -376,12 +376,16 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 		}
 
 		if entry, ok := provider.LookupCatalogEntry(name); ok {
-			for _, loaded := range state.CurrentLoadedTools {
-				if loaded.CanonicalName == entry.CanonicalName {
-					return fmt.Sprintf("tool %s is already loaded; call it by its canonical name %s", name, entry.CanonicalName), nil
-				}
+			if state.IsCurrentlyLoaded(entry.CanonicalName) {
+				return fmt.Sprintf("tool %s is already loaded; call it by its canonical name %s", name, entry.CanonicalName), nil
 			}
-			return fmt.Sprintf("tool %s is available but not currently loaded; use tool_search first", entry.CanonicalName), nil
+			if state.IsCurrentlySearchable(entry.CanonicalName) {
+				return fmt.Sprintf("tool %s is available but not currently loaded; use tool_search first", entry.CanonicalName), nil
+			}
+			if decision, ok := state.SearchDecisions[entry.CanonicalName]; ok && decision.Reason != "" {
+				return fmt.Sprintf("tool %s is unavailable in the current mode or runtime: %s", entry.CanonicalName, decision.Reason), nil
+			}
+			return fmt.Sprintf("tool %s is unavailable in the current mode or runtime", entry.CanonicalName), nil
 		}
 
 		return fmt.Sprintf("unknown tool %s", name), nil

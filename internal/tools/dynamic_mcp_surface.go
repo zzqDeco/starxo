@@ -74,12 +74,16 @@ func (m *dynamicMCPSurfaceMiddleware) ensureToolCallable(ctx context.Context, to
 	if !ok {
 		return nil
 	}
-	for _, loaded := range state.CurrentLoadedTools {
-		if loaded.CanonicalName == entry.CanonicalName {
-			return nil
-		}
+	if state.IsCurrentlyLoaded(entry.CanonicalName) {
+		return nil
 	}
-	return fmt.Errorf("tool %s is not currently loaded; use tool_search first", entry.CanonicalName)
+	if state.IsCurrentlySearchable(entry.CanonicalName) {
+		return fmt.Errorf("tool %s is not currently loaded; use tool_search first", entry.CanonicalName)
+	}
+	if decision, ok := state.SearchDecisions[entry.CanonicalName]; ok && decision.Reason != "" {
+		return fmt.Errorf("tool %s is unavailable in the current mode or runtime: %s", entry.CanonicalName, decision.Reason)
+	}
+	return fmt.Errorf("tool %s is unavailable in the current mode or runtime", entry.CanonicalName)
 }
 
 type dynamicMCPModelWrapper struct {

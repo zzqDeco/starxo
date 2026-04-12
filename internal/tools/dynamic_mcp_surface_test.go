@@ -74,7 +74,8 @@ func TestDynamicMCPSurface_EnsureToolCallable(t *testing.T) {
 	catalog := NewToolCatalog()
 	loaded := stubCatalogEntry("mcp__fs__grep")
 	hidden := stubCatalogEntry("mcp__fs__find")
-	for _, entry := range []CatalogEntry{loaded, hidden} {
+	blocked := stubCatalogEntry("mcp__fs__write")
+	for _, entry := range []CatalogEntry{loaded, hidden, blocked} {
 		if err := catalog.Register(entry); err != nil {
 			t.Fatalf("register %s: %v", entry.CanonicalName, err)
 		}
@@ -85,6 +86,9 @@ func TestDynamicMCPSurface_EnsureToolCallable(t *testing.T) {
 		state: DeferredMCPState{
 			SearchablePoolForMode: []CatalogEntry{hidden},
 			CurrentLoadedTools:    []CatalogEntry{loaded},
+			SearchDecisions: map[string]PermissionDecision{
+				blocked.CanonicalName: {Allowed: false, Reason: "tool is not read-only in plan mode"},
+			},
 		},
 	}
 	mw := &dynamicMCPSurfaceMiddleware{
@@ -97,6 +101,9 @@ func TestDynamicMCPSurface_EnsureToolCallable(t *testing.T) {
 	}
 	if err := mw.ensureToolCallable(context.Background(), hidden.CanonicalName); err == nil || !strings.Contains(err.Error(), "use tool_search first") {
 		t.Fatalf("expected deferred tool rejection, got %v", err)
+	}
+	if err := mw.ensureToolCallable(context.Background(), blocked.CanonicalName); err == nil || !strings.Contains(err.Error(), "not read-only in plan mode") {
+		t.Fatalf("expected blocked tool rejection, got %v", err)
 	}
 
 	provider.state = DeferredMCPState{}

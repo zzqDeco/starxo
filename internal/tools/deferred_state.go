@@ -12,6 +12,8 @@ type DeferredMCPState struct {
 	EffectiveDiscovered   []CatalogEntry
 	CurrentLoadedTools    []CatalogEntry
 	PendingMCPServers     []string
+	SearchDecisions       map[string]PermissionDecision
+	LoadDecisions         map[string]PermissionDecision
 }
 
 func ComputeDeferredMCPState(
@@ -26,6 +28,8 @@ func ComputeDeferredMCPState(
 	allEntries := catalog.Entries()
 	searchable := make([]CatalogEntry, 0, len(allEntries))
 	loadable := make([]CatalogEntry, 0, len(allEntries))
+	searchDecisions := make(map[string]PermissionDecision, len(allEntries))
+	loadDecisions := make(map[string]PermissionDecision, len(allEntries))
 	pendingSet := make(map[string]struct{})
 	for serverName, server := range permCtx.Servers {
 		if server.State == MCPServerStatePending {
@@ -35,11 +39,13 @@ func ComputeDeferredMCPState(
 
 	for _, entry := range allEntries {
 		searchDecision := CanSearchCatalogEntry(entry, permCtx)
+		searchDecisions[entry.CanonicalName] = searchDecision
 		if searchDecision.Allowed {
 			searchable = append(searchable, entry)
 		}
 
 		loadDecision := CanLoadCatalogEntry(entry, permCtx)
+		loadDecisions[entry.CanonicalName] = loadDecision
 		if loadDecision.Allowed {
 			loadable = append(loadable, entry)
 		}
@@ -92,7 +98,27 @@ func ComputeDeferredMCPState(
 		EffectiveDiscovered:   effective,
 		CurrentLoadedTools:    currentLoaded,
 		PendingMCPServers:     pending,
+		SearchDecisions:       searchDecisions,
+		LoadDecisions:         loadDecisions,
 	}
+}
+
+func (s DeferredMCPState) IsCurrentlyLoaded(canonicalName string) bool {
+	for _, entry := range s.CurrentLoadedTools {
+		if entry.CanonicalName == canonicalName {
+			return true
+		}
+	}
+	return false
+}
+
+func (s DeferredMCPState) IsCurrentlySearchable(canonicalName string) bool {
+	for _, entry := range s.SearchablePoolForMode {
+		if entry.CanonicalName == canonicalName {
+			return true
+		}
+	}
+	return false
 }
 
 func sortEntriesByCanonical(entries []CatalogEntry) {
