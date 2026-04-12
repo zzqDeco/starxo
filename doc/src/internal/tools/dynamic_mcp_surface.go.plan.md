@@ -19,7 +19,9 @@
   - 只把 current loaded tools + non-catalog direct tools 暴露给模型
 - `WrapInvokableToolCall(...)` / `WrapStreamableToolCall(...)`：
   - `tool_search` 仅在 searchable pool 非空或 pending server 存在时可调用
-  - hidden deferred tool 被调用时返回“先用 tool_search”
+  - 未加载但当前可搜索的 deferred tool 被调用时返回“先用 tool_search”
+  - catalog 中存在但当前 mode / permission / runtime 下不可搜索的 tool 会直接返回 unavailable，不再误导去搜
+  - announcement、tool_search、visible tool list、execution gating 共用同一份 deferred state
 
 ## 5. 依赖关系
 - 内部依赖: `deferred_state.go`

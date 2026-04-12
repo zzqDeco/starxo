@@ -8,8 +8,15 @@
 - 范围固定为 cc 的 MCP deferred 子集，不覆盖 builtin `shouldDefer`
 - 唯一持久化状态源是 `SessionData.DiscoveredTools`
 - `effectiveDiscovered` 在每次模型调用前、按 `context.Context` 中的 `sessionID` 现算
-- shared runner 不保存 session discovery；runner generation 只固定 catalog / MCP handles
+- shared runner 不保存 session discovery；共享 runner 已收敛为带 generation 的 `RunnerBundle`
+- resume 绑定 `BundleGeneration + RunnerKind`，恢复时忽略当前 session mode，不 fallback 到当前 installed runner
+- save-time discovery 剪枝只删除结构性无效记录，不因当前 mode / permission / runtime 暂时收缩 discovered history
 - `tool_search`、announcement、visible tool list、execution gating 共用同一套 deferred helper
+- freshness check 采用 detached probe + singleflight + transactional swap：
+  - 锁内只判定和登记 task
+  - 网络 IO 全在锁外
+  - 只有 surface-relevant fingerprint 变化才 rebuild
+  - 旧 bundle 走 retire，等待运行中和 pending interrupt 引用消失后再回收
 - `default mode`:
   - `searchable = searchableDeferredPool`
   - `loadable = loadableDeferredPool`

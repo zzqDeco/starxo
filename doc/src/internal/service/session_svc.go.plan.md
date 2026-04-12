@@ -32,6 +32,10 @@
   - 只消费 `ChatService` 导出的单一一致性快照
   - 在落盘前调用 discovery 剪枝
   - 落盘成功后把剪枝结果写回 `ChatService`
+- save-time discovery 剪枝已经收敛为“结构性剪枝”：
+  - 只删除 canonical name 已不存在于当前 catalog 的记录
+  - 只删除已不再属于 deferred MCP 范围的记录
+  - 不因当前 mode、权限或 server 临时状态而丢失 discovered history
 - durability 目标是 best effort，不承诺硬崩溃零丢失。
 
 ## 5. 依赖关系
