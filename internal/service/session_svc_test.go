@@ -25,7 +25,7 @@ func (t *stubTool) InvokableRun(context.Context, string, ...einotool.Option) (st
 	return "ok", nil
 }
 
-func TestSessionServiceSaveSessionByIDPersistsPrunedDiscovery(t *testing.T) {
+func TestSessionServiceSaveSessionByIDPreservesDeferredDiscoveryAcrossModes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	sessionStore, err := storage.NewSessionStore()
@@ -103,7 +103,7 @@ func TestSessionServiceSaveSessionByIDPersistsPrunedDiscovery(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		saved, err = sessionStore.LoadSessionData(sess.ID)
-		if err == nil && saved != nil && len(saved.DiscoveredTools) == 1 {
+		if err == nil && saved != nil && len(saved.DiscoveredTools) == 2 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -114,15 +114,21 @@ func TestSessionServiceSaveSessionByIDPersistsPrunedDiscovery(t *testing.T) {
 	if saved == nil {
 		t.Fatal("expected saved session data")
 	}
-	if len(saved.DiscoveredTools) != 1 || saved.DiscoveredTools[0].CanonicalName != readonly.CanonicalName {
+	if len(saved.DiscoveredTools) != 2 {
 		t.Fatalf("unexpected saved discovery set: %#v", saved.DiscoveredTools)
+	}
+	if saved.DiscoveredTools[0].CanonicalName != readonly.CanonicalName || saved.DiscoveredTools[1].CanonicalName != readwrite.CanonicalName {
+		t.Fatalf("unexpected saved discovery ordering: %#v", saved.DiscoveredTools)
 	}
 
 	memory := run.discoveredToolsSnapshot()
-	if len(memory) != 1 {
-		t.Fatalf("expected pruned in-memory discovery set, got %#v", memory)
+	if len(memory) != 2 {
+		t.Fatalf("expected in-memory discovery set to be preserved, got %#v", memory)
 	}
 	if _, ok := memory[readonly.CanonicalName]; !ok {
 		t.Fatalf("expected readonly discovery to remain, got %#v", memory)
+	}
+	if _, ok := memory[readwrite.CanonicalName]; !ok {
+		t.Fatalf("expected readwrite discovery to remain, got %#v", memory)
 	}
 }

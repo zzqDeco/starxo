@@ -1556,44 +1556,33 @@ func (s *ChatService) ReplaceDiscoveredTools(sessionID string, records []model.D
 	run.replaceDiscoveredTools(records)
 }
 
-func (s *ChatService) PruneDiscoveredToolsForSave(sessionID string, records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
 	if len(records) == 0 {
 		return nil
 	}
 
 	s.mu.Lock()
-	run, ok := s.sessions[sessionID]
-	mode := "default"
-	if ok {
-		mode = run.mode
-	}
 	catalog := s.mcpCatalog
-	handles := append([]*tools.MCPServerHandle(nil), s.mcpHandles...)
 	s.mu.Unlock()
 
 	if catalog == nil {
 		return cloneAndSortDiscoveredTools(records)
 	}
 
-	discovered := make(map[string]model.DiscoveredToolRecord, len(records))
+	valid := make(map[string]struct{})
+	for _, entry := range catalog.Entries() {
+		if !entry.IsMcp || !entry.ShouldDefer {
+			continue
+		}
+		valid[entry.CanonicalName] = struct{}{}
+	}
+
+	pruned := make([]model.DiscoveredToolRecord, 0, len(records))
 	for _, record := range records {
 		if record.CanonicalName == "" {
 			continue
 		}
-		discovered[record.CanonicalName] = record
-	}
-
-	provider := &deferredMCPProvider{
-		chat:    s,
-		catalog: catalog,
-		handles: handles,
-	}
-	state := tools.ComputeDeferredMCPState(catalog, discovered, provider.permissionContext(sessionID, mode))
-
-	pruned := make([]model.DiscoveredToolRecord, 0, len(state.EffectiveDiscovered))
-	for _, entry := range state.EffectiveDiscovered {
-		record, ok := discovered[entry.CanonicalName]
-		if !ok {
+		if _, ok := valid[record.CanonicalName]; !ok {
 			continue
 		}
 		pruned = append(pruned, record)
