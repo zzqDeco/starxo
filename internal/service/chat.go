@@ -2,13 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -28,6 +33,8 @@ import (
 type contextKey string
 
 const sessionIDCtxKey contextKey = "sessionID"
+
+const defaultBundleFreshnessTTL = 30 * time.Second
 
 func contextWithSessionID(ctx context.Context, sessionID string) context.Context {
 	ctx = context.WithValue(ctx, sessionIDCtxKey, sessionID)
@@ -52,39 +59,414 @@ const (
 
 // PendingInterrupt holds the state needed to resume after an interrupt.
 type PendingInterrupt struct {
-	CheckpointID string
-	InterruptID  string
-	Info         any
+	CheckpointID     string
+	InterruptID      string
+	BundleGeneration uint64
+	RunnerKind       RunnerKind
+	Info             any
+}
+
+type RunnerKind string
+
+const (
+	RunnerKindDefault RunnerKind = "default"
+	RunnerKindPlan    RunnerKind = "plan"
+)
+
+type cachedMCPServerSurface struct {
+	HasToolMetadata   bool
+	SupportsResources bool
+	ActionEntries     []tools.CatalogEntry
+}
+
+type RunnerBundle struct {
+	Generation                    uint64
+	ConfigDigest                  string
+	DefaultRunner                 *adk.Runner
+	PlanRunner                    *adk.Runner
+	MCPCatalog                    *tools.ToolCatalog
+	MCPHandles                    []*tools.MCPServerHandle
+	LastFreshnessCheckAt          time.Time
+	SurfaceRelevantFingerprint    string
+	CachedSurfaceMetadataByServer map[string]cachedMCPServerSurface
+}
+
+type freshnessTask struct {
+	key  string
+	done chan struct{}
+}
+
+type runnerBundleSurface struct {
+	Handles                       []*tools.MCPServerHandle
+	ActionCatalog                 *tools.ToolCatalog
+	CachedSurfaceMetadataByServer map[string]cachedMCPServerSurface
+	SurfaceRelevantFingerprint    string
 }
 
 // SessionRun holds per-session agent execution state.
 // Each session gets its own context engine, timeline, and run lifecycle.
 type SessionRun struct {
-	sessionID string
-	ctxEngine *agentctx.Engine
-	timeline  *agentctx.TimelineCollector
+	sessionID       string
+	stateMu         sync.RWMutex
+	ctxEngine       *agentctx.Engine
+	timeline        *agentctx.TimelineCollector
+	discoveredTools map[string]model.DiscoveredToolRecord
 
 	// Run lifecycle
-	running          bool
-	cancelFn         context.CancelFunc
-	runDone          chan struct{}
-	pendingInterrupt *PendingInterrupt
-	streamingState   *model.StreamingState
-	mode             string // "default" or "plan"
-	currentAgent     string
+	running                bool
+	cancelFn               context.CancelFunc
+	runDone                chan struct{}
+	pendingInterrupt       *PendingInterrupt
+	streamingState         *model.StreamingState
+	mode                   string // "default" or "plan"
+	currentAgent           string
+	activeBundleGeneration uint64
+	activeRunnerKind       RunnerKind
+}
+
+type SessionSnapshot struct {
+	SessionData   *model.SessionData
+	MessageCount  int
+	HasSessionRun bool
+}
+
+func (r *SessionRun) addUserMessage(content string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddUserMessage(content)
+}
+
+func (r *SessionRun) addAssistantMessage(content string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddAssistantMessage(content)
+}
+
+func (r *SessionRun) addToolResult(toolCallID, content string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddToolResult(toolCallID, content)
+}
+
+func (r *SessionRun) addMessage(msg *schema.Message) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddMessage(msg)
+}
+
+func (r *SessionRun) addUserTurn(id, content string, timestamp int64) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.timeline.AddUserTurn(id, content, timestamp)
+}
+
+func (r *SessionRun) prepareMessages() []*schema.Message {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.ctxEngine.PrepareMessages()
+}
+
+func (r *SessionRun) clearSessionState() {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.ClearHistory()
+	r.timeline.Clear()
+	r.streamingState = nil
+	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+}
+
+func (r *SessionRun) setStreamingState(state *model.StreamingState) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.streamingState = state
+}
+
+func (r *SessionRun) streamingStateSnapshot() *model.StreamingState {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	if r.streamingState == nil {
+		return nil
+	}
+	ss := *r.streamingState
+	return &ss
+}
+
+func (r *SessionRun) importSessionData(data *model.SessionData) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if data != nil && data.Messages != nil {
+		r.ctxEngine.ImportMessages(data.Messages)
+	} else {
+		r.ctxEngine.ClearHistory()
+	}
+	if data != nil && data.Display != nil {
+		r.timeline.Import(data.Display)
+	} else {
+		r.timeline.Clear()
+	}
+	r.streamingState = data.Streaming
+	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	if data == nil {
+		return
+	}
+	for _, record := range data.DiscoveredTools {
+		if record.CanonicalName == "" {
+			continue
+		}
+		r.discoveredTools[record.CanonicalName] = record
+	}
+}
+
+func (r *SessionRun) snapshot() *SessionSnapshot {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+
+	discovered := make([]model.DiscoveredToolRecord, 0, len(r.discoveredTools))
+	for _, record := range r.discoveredTools {
+		discovered = append(discovered, record)
+	}
+	sort.Slice(discovered, func(i, j int) bool {
+		return discovered[i].CanonicalName < discovered[j].CanonicalName
+	})
+
+	return &SessionSnapshot{
+		HasSessionRun: true,
+		MessageCount:  r.ctxEngine.MessageCount(),
+		SessionData: &model.SessionData{
+			Version:         2,
+			Messages:        r.ctxEngine.ExportMessages(),
+			Display:         r.timeline.Export(),
+			Streaming:       cloneStreamingState(r.streamingState),
+			DiscoveredTools: discovered,
+		},
+	}
+}
+
+func (r *SessionRun) upsertDiscoveredTool(record model.DiscoveredToolRecord) bool {
+	if record.CanonicalName == "" {
+		return false
+	}
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if r.discoveredTools == nil {
+		r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	}
+	if _, exists := r.discoveredTools[record.CanonicalName]; exists {
+		return false
+	}
+	r.discoveredTools[record.CanonicalName] = record
+	return true
+}
+
+func (r *SessionRun) discoveredToolsSnapshot() map[string]model.DiscoveredToolRecord {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	out := make(map[string]model.DiscoveredToolRecord, len(r.discoveredTools))
+	for k, v := range r.discoveredTools {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *SessionRun) replaceDiscoveredTools(records []model.DiscoveredToolRecord) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.discoveredTools = make(map[string]model.DiscoveredToolRecord, len(records))
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		r.discoveredTools[record.CanonicalName] = record
+	}
+}
+
+func cloneStreamingState(in *model.StreamingState) *model.StreamingState {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
+}
+
+type deferredMCPProvider struct {
+	chat   *ChatService
+	bundle *RunnerBundle
+}
+
+func (p *deferredMCPProvider) MCPHandleSnapshot() []*tools.MCPServerHandle {
+	if p.bundle == nil || len(p.bundle.MCPHandles) == 0 {
+		return nil
+	}
+	out := make([]*tools.MCPServerHandle, len(p.bundle.MCPHandles))
+	copy(out, p.bundle.MCPHandles)
+	return out
+}
+
+func (p *deferredMCPProvider) LookupCatalogEntry(name string) (tools.CatalogEntry, bool) {
+	if p.bundle == nil || p.bundle.MCPCatalog == nil {
+		return tools.CatalogEntry{}, false
+	}
+	return p.bundle.MCPCatalog.LookupExact(name)
+}
+
+func (p *deferredMCPProvider) ToolPermissionContext(ctx context.Context) (tools.ToolPermissionContext, error) {
+	sessionID, mode, _, err := p.sessionState(ctx)
+	if err != nil {
+		return tools.ToolPermissionContext{}, err
+	}
+	return p.permissionContext(sessionID, mode), nil
+}
+
+func (p *deferredMCPProvider) DeferredMCPState(ctx context.Context) (tools.DeferredMCPState, error) {
+	sessionID, mode, discovered, err := p.sessionState(ctx)
+	if err != nil {
+		return tools.DeferredMCPState{}, err
+	}
+	if p.bundle == nil || p.bundle.MCPCatalog == nil {
+		return tools.DeferredMCPState{}, nil
+	}
+	return tools.ComputeDeferredMCPState(p.bundle.MCPCatalog, discovered, p.permissionContext(sessionID, mode)), nil
+}
+
+func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSearchState, error) {
+	state, err := p.DeferredMCPState(ctx)
+	if err != nil {
+		return tools.ToolSearchState{}, err
+	}
+	return tools.ToolSearchState{
+		SearchablePool:   state.SearchablePoolForMode,
+		CurrentLoaded:    state.CurrentLoadedTools,
+		PendingMCPServer: state.PendingMCPServers,
+	}, nil
+}
+
+func (p *deferredMCPProvider) AddDiscoveredTools(ctx context.Context, records []model.DiscoveredToolRecord) error {
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		return fmt.Errorf("sessionID missing from context")
+	}
+
+	changed := false
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		entry, ok := p.LookupCatalogEntry(record.CanonicalName)
+		if !ok || !entry.ShouldDefer || entry.AlwaysLoad {
+			continue
+		}
+		if p.chat.AddDiscoveredTool(sessionID, record) {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+
+	p.chat.mu.Lock()
+	ss := p.chat.sessionService
+	p.chat.mu.Unlock()
+	if ss == nil {
+		return nil
+	}
+	return ss.SaveSessionByID(sessionID)
+}
+
+func (p *deferredMCPProvider) sessionState(ctx context.Context) (string, string, map[string]model.DiscoveredToolRecord, error) {
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		return "", "", nil, fmt.Errorf("sessionID missing from context")
+	}
+
+	p.chat.mu.Lock()
+	run, ok := p.chat.sessions[sessionID]
+	if !ok {
+		p.chat.mu.Unlock()
+		return "", "", nil, fmt.Errorf("session %s not found", sessionID)
+	}
+	mode := run.mode
+	p.chat.mu.Unlock()
+
+	return sessionID, mode, run.discoveredToolsSnapshot(), nil
+}
+
+func (p *deferredMCPProvider) permissionContext(sessionID, mode string) tools.ToolPermissionContext {
+	servers := make(map[string]tools.MCPServerPermissionState)
+	if p.bundle != nil {
+		for serverName, cache := range p.bundle.CachedSurfaceMetadataByServer {
+			servers[serverName] = tools.MCPServerPermissionState{
+				State:                 tools.MCPServerStateFailed,
+				HasCachedToolMetadata: cache.HasToolMetadata,
+				SupportsResources:     cache.SupportsResources,
+			}
+		}
+		for _, handle := range p.bundle.MCPHandles {
+			if handle == nil || handle.Name == "" {
+				continue
+			}
+			cache := p.bundle.CachedSurfaceMetadataByServer[handle.Name]
+			servers[handle.Name] = tools.MCPServerPermissionState{
+				State:                 handle.State,
+				HasCachedToolMetadata: handle.ToolMetadataReady || len(handle.Tools) > 0 || cache.HasToolMetadata,
+				SupportsResources:     handle.SupportsResources() || cache.SupportsResources,
+			}
+		}
+	}
+	return tools.ToolPermissionContext{
+		SessionID: sessionID,
+		Mode:      mode,
+		Servers:   servers,
+	}
+}
+
+func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx context.Context, name, input string) (string, error) {
+	return func(ctx context.Context, name, input string) (string, error) {
+		state, err := provider.DeferredMCPState(ctx)
+		if err != nil {
+			return "", err
+		}
+
+		if name == "tool_search" {
+			if len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0 {
+				return "", nil
+			}
+			return "tool_search is unavailable because no deferred MCP tools are currently searchable", nil
+		}
+
+		if entry, ok := provider.LookupCatalogEntry(name); ok {
+			if state.IsCurrentlyLoaded(entry.CanonicalName) {
+				return fmt.Sprintf("tool %s is already loaded; call it by its canonical name %s", name, entry.CanonicalName), nil
+			}
+			if state.IsCurrentlySearchable(entry.CanonicalName) {
+				return fmt.Sprintf("tool %s is available but not currently loaded; use tool_search first", entry.CanonicalName), nil
+			}
+			if decision, ok := state.SearchDecisions[entry.CanonicalName]; ok && decision.Reason != "" {
+				return fmt.Sprintf("tool %s is unavailable in the current mode or runtime: %s", entry.CanonicalName, decision.Reason), nil
+			}
+			return fmt.Sprintf("tool %s is unavailable in the current mode or runtime", entry.CanonicalName), nil
+		}
+
+		return fmt.Sprintf("unknown tool %s", name), nil
+	}
 }
 
 // ChatService manages chat interactions between the frontend and the AI agent.
 type ChatService struct {
 	ctx context.Context
 
-	// Shared across all sessions (concurrent-safe, stateless)
-	deepAgent       adk.Agent
-	defaultRunner   *adk.Runner
-	planRunner      *adk.Runner
 	sandbox         *sandbox.SandboxManager
 	store           *config.Store
 	checkpointStore compose.CheckPointStore
+	now             func() time.Time
+	freshnessTTL    time.Duration
+
+	installedBundle            *RunnerBundle
+	retiredBundles             []*RunnerBundle
+	freshnessTask              *freshnessTask
+	nextGeneration             uint64
+	probeBundleSurfaceFn       func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error)
+	prepareRunnerBundleFn      func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error)
+	prepareBundleFromSurfaceFn func(context.Context, *config.AppConfig, string, *runnerBundleSurface) (*RunnerBundle, error)
 
 	// Per-session execution state
 	sessions        map[string]*SessionRun
@@ -103,6 +485,8 @@ func NewChatService(store *config.Store) *ChatService {
 		store:           store,
 		checkpointStore: checkpoint.NewInMemoryStore(),
 		sessions:        make(map[string]*SessionRun),
+		now:             time.Now,
+		freshnessTTL:    defaultBundleFreshnessTTL,
 	}
 }
 
@@ -136,9 +520,8 @@ func (s *ChatService) InvalidateRunner() {
 }
 
 func (s *ChatService) invalidateRunners() {
-	s.deepAgent = nil
-	s.defaultRunner = nil
-	s.planRunner = nil
+	s.retireBundleLocked(s.installedBundle)
+	s.installedBundle = nil
 }
 
 // SetOnAgentDone registers a callback that fires after the agent finishes processing.
@@ -167,13 +550,171 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		return run
 	}
 	run := &SessionRun{
-		sessionID: sessionID,
-		ctxEngine: agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
-		timeline:  agentctx.NewTimelineCollector(),
-		mode:      "default",
+		sessionID:       sessionID,
+		ctxEngine:       agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
+		timeline:        agentctx.NewTimelineCollector(),
+		discoveredTools: make(map[string]model.DiscoveredToolRecord),
+		mode:            "default",
 	}
 	s.sessions[sessionID] = run
 	return run
+}
+
+func (s *ChatService) anySessionRunningLocked() bool {
+	for _, run := range s.sessions {
+		if run.running {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *ChatService) nextBundleGenerationLocked() uint64 {
+	s.nextGeneration++
+	return s.nextGeneration
+}
+
+func (s *ChatService) retireBundleLocked(bundle *RunnerBundle) {
+	if bundle == nil {
+		return
+	}
+	if s.bundleGenerationReferencedLocked(bundle.Generation) {
+		s.retiredBundles = append(s.retiredBundles, bundle)
+		return
+	}
+	s.closeRunnerBundleLocked(bundle)
+}
+
+func (s *ChatService) closeMCPHandlesLocked(handles []*tools.MCPServerHandle) {
+	for _, handle := range handles {
+		if handle == nil {
+			continue
+		}
+		if err := handle.Close(); err != nil {
+			logger.Warn("[CHAT] Failed to close MCP handle", "server", handle.Name, "error", err)
+		}
+	}
+}
+
+func (s *ChatService) closeRunnerBundleLocked(bundle *RunnerBundle) {
+	if bundle == nil {
+		return
+	}
+	s.closeMCPHandlesLocked(bundle.MCPHandles)
+}
+
+func (s *ChatService) bundleGenerationReferencedLocked(generation uint64) bool {
+	if generation == 0 {
+		return false
+	}
+	for _, run := range s.sessions {
+		if run.activeBundleGeneration == generation {
+			return true
+		}
+		if run.pendingInterrupt != nil && run.pendingInterrupt.BundleGeneration == generation {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *ChatService) cleanupRetiredBundlesLocked() {
+	if len(s.retiredBundles) == 0 {
+		return
+	}
+	keep := s.retiredBundles[:0]
+	for _, bundle := range s.retiredBundles {
+		if bundle == nil {
+			continue
+		}
+		if s.bundleGenerationReferencedLocked(bundle.Generation) {
+			keep = append(keep, bundle)
+			continue
+		}
+		s.closeRunnerBundleLocked(bundle)
+	}
+	s.retiredBundles = keep
+}
+
+func (s *ChatService) installedBundleLocked() *RunnerBundle {
+	return s.installedBundle
+}
+
+func (s *ChatService) findBundleByGenerationLocked(generation uint64) *RunnerBundle {
+	if generation == 0 {
+		return nil
+	}
+	if s.installedBundle != nil && s.installedBundle.Generation == generation {
+		return s.installedBundle
+	}
+	for _, bundle := range s.retiredBundles {
+		if bundle != nil && bundle.Generation == generation {
+			return bundle
+		}
+	}
+	return nil
+}
+
+func runnerKindForMode(mode string) RunnerKind {
+	if mode == "plan" {
+		return RunnerKindPlan
+	}
+	return RunnerKindDefault
+}
+
+func runnerForKind(bundle *RunnerBundle, kind RunnerKind) *adk.Runner {
+	if bundle == nil {
+		return nil
+	}
+	if kind == RunnerKindPlan {
+		return bundle.PlanRunner
+	}
+	return bundle.DefaultRunner
+}
+
+func bundleKey(generation uint64, digest string) string {
+	return fmt.Sprintf("%d:%s", generation, digest)
+}
+
+func cloneCatalogEntries(entries []tools.CatalogEntry) []tools.CatalogEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]tools.CatalogEntry, len(entries))
+	copy(out, entries)
+	for i := range out {
+		if len(out[i].Aliases) > 0 {
+			out[i].Aliases = append([]string(nil), out[i].Aliases...)
+		}
+	}
+	return out
+}
+
+func cloneSurfaceCache(in map[string]cachedMCPServerSurface) map[string]cachedMCPServerSurface {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]cachedMCPServerSurface, len(in))
+	for server, cache := range in {
+		out[server] = cachedMCPServerSurface{
+			HasToolMetadata:   cache.HasToolMetadata,
+			SupportsResources: cache.SupportsResources,
+			ActionEntries:     cloneCatalogEntries(cache.ActionEntries),
+		}
+	}
+	return out
+}
+
+func configDigest(cfg *config.AppConfig) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("config is nil")
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // activeRun returns the SessionRun for the currently active session.
@@ -211,6 +752,7 @@ func (s *ChatService) RemoveSession(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+	s.cleanupRetiredBundlesLocked()
 }
 
 // ---------------------------------------------------------------------------
@@ -318,27 +860,14 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	)
 
 	// Add user message to session's context engine
-	run.ctxEngine.AddUserMessage(userMessage)
+	run.addUserMessage(userMessage)
 
 	// Record user turn in session's timeline collector
-	run.timeline.AddUserTurn(
+	run.addUserTurn(
 		fmt.Sprintf("usr-%d", time.Now().UnixNano()),
 		userMessage,
 		time.Now().UnixMilli(),
 	)
-
-	// Build runners if not yet built (under lock — no gap)
-	if s.deepAgent == nil {
-		if err := s.buildRunnersLocked(); err != nil {
-			s.mu.Unlock()
-			logger.Error("[CHAT] Failed to build runners", err)
-			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-				"sessionId": s.activeSessionID,
-				"error":     fmt.Sprintf("Failed to build runner: %v", err),
-			})
-			return fmt.Errorf("failed to build runners: %w", err)
-		}
-	}
 
 	// Auto-escalate to plan mode for complex tasks when currently in default mode.
 	// This keeps default mode flexible while enforcing strict orchestration once
@@ -355,25 +884,46 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		})
 	}
 
-	// Select runner based on session's mode
-	runner := s.defaultRunner
-	if run.mode == "plan" {
-		runner = s.planRunner
+	sessionID := run.sessionID
+	mode := run.mode
+	s.mu.Unlock()
+
+	bundle, err := s.ensureBundleReadyForNewRun(s.ctx)
+	if err != nil {
+		logger.Error("[CHAT] Failed to prepare runner bundle", err)
+		wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+			"sessionId": sessionID,
+			"error":     fmt.Sprintf("Failed to build runner: %v", err),
+		})
+		return fmt.Errorf("failed to build runners: %w", err)
 	}
 
-	sessionID := run.sessionID
+	runnerKind := runnerKindForMode(mode)
+	runner := runnerForKind(bundle, runnerKind)
+	if runner == nil {
+		return fmt.Errorf("runner %s unavailable for bundle generation %d", runnerKind, bundle.Generation)
+	}
 
 	// Create a cancellable context with session identity
 	runCtx, cancel := context.WithCancel(s.ctx)
 	runCtx = contextWithSessionID(runCtx, sessionID)
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		cancel()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
 	run.cancelFn = cancel
 	run.running = true
+	run.activeBundleGeneration = bundle.Generation
+	run.activeRunnerKind = runnerKind
 	done := make(chan struct{})
 	run.runDone = done
 	s.mu.Unlock()
 
 	// Prepare messages
-	messages := run.ctxEngine.PrepareMessages()
+	messages := run.prepareMessages()
 	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 
 	// Launch the agent run in a goroutine
@@ -383,6 +933,9 @@ func (s *ChatService) SendMessage(userMessage string) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			run.activeBundleGeneration = 0
+			run.activeRunnerKind = ""
+			s.cleanupRetiredBundlesLocked()
 			s.mu.Unlock()
 		}()
 		defer cancel()
@@ -400,7 +953,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 
 		logger.Info("[CHAT] Agent run started",
 			"message_count", len(messages),
-			"mode", run.mode,
+			"mode", mode,
 			"session", sessionID,
 		)
 		startTime := time.Now()
@@ -415,7 +968,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 
 		// Add final assistant response to session's context engine
 		if lastContent != "" {
-			run.ctxEngine.AddAssistantMessage(lastContent)
+			run.addAssistantMessage(lastContent)
 		}
 
 		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
@@ -450,6 +1003,8 @@ func (s *ChatService) SendMessage(userMessage string) error {
 func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 	evt.SessionID = run.sessionID
 	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	run.stateMu.Lock()
+	defer run.stateMu.Unlock()
 	run.timeline.AddEvent(model.DisplayEvent{
 		ID:        evt.ID,
 		Type:      evt.Type,
@@ -471,6 +1026,8 @@ func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
 	if ok {
+		run.stateMu.Lock()
+		defer run.stateMu.Unlock()
 		run.timeline.AddEvent(model.DisplayEvent{
 			ID:        evt.ID,
 			Type:      evt.Type,
@@ -509,7 +1066,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 			ss := s.sessionService
 			s.mu.Unlock()
 			if ss != nil {
-				go func() { _ = ss.SaveCurrentSession() }()
+				go func() { _ = ss.SaveSessionByID(sessionID) }()
 			}
 			lastSaveTime = time.Now()
 		}
@@ -638,7 +1195,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				}
 
 				// Store tool call message in session's context history
-				run.ctxEngine.AddMessage(&schema.Message{
+				run.addMessage(&schema.Message{
 					Role:      schema.Assistant,
 					Content:   msg.Content,
 					ToolCalls: msg.ToolCalls,
@@ -662,7 +1219,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				}, run)
 
 				// Store tool result in session's context history
-				run.ctxEngine.AddToolResult(msg.ToolCallID, msg.Content)
+				run.addToolResult(msg.ToolCallID, msg.Content)
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
 
@@ -711,7 +1268,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 		for toolCallID := range pendingToolCalls {
 			logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
 				"tool_call_id", toolCallID, "session", sessionID)
-			run.ctxEngine.AddToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+			run.addToolResult(toolCallID, "Error: tool execution failed or was interrupted")
 		}
 	}
 
@@ -726,10 +1283,14 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, checkpointID string, run *SessionRun) {
 	s.mu.Lock()
 	run.pendingInterrupt = &PendingInterrupt{
-		CheckpointID: checkpointID,
-		InterruptID:  interruptCtx.ID,
-		Info:         interruptCtx.Info,
+		CheckpointID:     checkpointID,
+		InterruptID:      interruptCtx.ID,
+		BundleGeneration: run.activeBundleGeneration,
+		RunnerKind:       run.activeRunnerKind,
+		Info:             interruptCtx.Info,
 	}
+	run.activeBundleGeneration = 0
+	run.activeRunnerKind = ""
 	s.mu.Unlock()
 
 	// Determine interrupt type and emit event
@@ -769,6 +1330,25 @@ func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, chec
 	}, run)
 }
 
+func (s *ChatService) resolvePendingRunnerLocked(run *SessionRun) (*RunnerBundle, *adk.Runner, *PendingInterrupt, error) {
+	if run == nil {
+		return nil, nil, nil, fmt.Errorf("no active session")
+	}
+	pending := run.pendingInterrupt
+	if pending == nil {
+		return nil, nil, nil, fmt.Errorf("no pending interrupt to resume")
+	}
+	bundle := s.findBundleByGenerationLocked(pending.BundleGeneration)
+	if bundle == nil {
+		return nil, nil, nil, fmt.Errorf("runner bundle generation %d is no longer available for resume", pending.BundleGeneration)
+	}
+	runner := runnerForKind(bundle, pending.RunnerKind)
+	if runner == nil {
+		return nil, nil, nil, fmt.Errorf("runner %s is unavailable for bundle generation %d", pending.RunnerKind, pending.BundleGeneration)
+	}
+	return bundle, runner, pending, nil
+}
+
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
@@ -781,24 +1361,22 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-
-	pending := run.pendingInterrupt
-	if pending == nil {
-		s.mu.Unlock()
-		return fmt.Errorf("no pending interrupt to resume")
-	}
-	run.pendingInterrupt = nil
-
 	if run.running {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
-
-	runner := s.defaultRunner
-	if run.mode == "plan" {
-		runner = s.planRunner
+	_, runner, pending, err := s.resolvePendingRunnerLocked(run)
+	if err != nil {
+		if run != nil {
+			run.pendingInterrupt = nil
+			s.cleanupRetiredBundlesLocked()
+		}
+		s.mu.Unlock()
+		return err
 	}
-
+	run.pendingInterrupt = nil
+	run.activeBundleGeneration = pending.BundleGeneration
+	run.activeRunnerKind = pending.RunnerKind
 	sessionID := run.sessionID
 	s.mu.Unlock()
 
@@ -825,6 +1403,9 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			run.activeBundleGeneration = 0
+			run.activeRunnerKind = ""
+			s.cleanupRetiredBundlesLocked()
 			s.mu.Unlock()
 		}()
 		defer cancel()
@@ -866,7 +1447,7 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		}
 
 		if lastContent != "" {
-			run.ctxEngine.AddAssistantMessage(lastContent)
+			run.addAssistantMessage(lastContent)
 		}
 
 		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
@@ -897,24 +1478,22 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-
-	pending := run.pendingInterrupt
-	if pending == nil {
-		s.mu.Unlock()
-		return fmt.Errorf("no pending interrupt to resume")
-	}
-	run.pendingInterrupt = nil
-
 	if run.running {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
-
-	runner := s.defaultRunner
-	if run.mode == "plan" {
-		runner = s.planRunner
+	_, runner, pending, err := s.resolvePendingRunnerLocked(run)
+	if err != nil {
+		if run != nil {
+			run.pendingInterrupt = nil
+			s.cleanupRetiredBundlesLocked()
+		}
+		s.mu.Unlock()
+		return err
 	}
-
+	run.pendingInterrupt = nil
+	run.activeBundleGeneration = pending.BundleGeneration
+	run.activeRunnerKind = pending.RunnerKind
 	sessionID := run.sessionID
 	s.mu.Unlock()
 
@@ -942,6 +1521,9 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			run.activeBundleGeneration = 0
+			run.activeRunnerKind = ""
+			s.cleanupRetiredBundlesLocked()
 			s.mu.Unlock()
 		}()
 		defer cancel()
@@ -983,7 +1565,7 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		}
 
 		if lastContent != "" {
-			run.ctxEngine.AddAssistantMessage(lastContent)
+			run.addAssistantMessage(lastContent)
 		}
 
 		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
@@ -1022,6 +1604,7 @@ func (s *ChatService) StopGeneration() error {
 		run.cancelFn()
 	}
 	run.pendingInterrupt = nil
+	s.cleanupRetiredBundlesLocked()
 	done := run.runDone
 	s.mu.Unlock()
 
@@ -1047,6 +1630,7 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 		run.cancelFn()
 	}
 	run.pendingInterrupt = nil
+	s.cleanupRetiredBundlesLocked()
 	done := run.runDone
 	s.mu.Unlock()
 
@@ -1073,11 +1657,10 @@ func (s *ChatService) ClearHistory() error {
 		return nil
 	}
 
-	run.ctxEngine.ClearHistory()
-	run.timeline.Clear()
-	run.streamingState = nil
+	run.clearSessionState()
 	run.pendingInterrupt = nil
 	s.invalidateRunners()
+	s.cleanupRetiredBundlesLocked()
 	tools.ClearTodos()
 	return nil
 }
@@ -1101,11 +1684,7 @@ func (s *ChatService) StreamingState() *model.StreamingState {
 	if run == nil {
 		return nil
 	}
-	if run.streamingState == nil {
-		return nil
-	}
-	ss := *run.streamingState
-	return &ss
+	return run.streamingStateSnapshot()
 }
 
 // CtxEngine returns the context engine for the active session.
@@ -1146,11 +1725,112 @@ func (s *ChatService) SessionStreamingState(sessionID string) *model.StreamingSt
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.sessions[sessionID]
-	if !ok || run.streamingState == nil {
+	if !ok {
 		return nil
 	}
-	ss := *run.streamingState
-	return &ss
+	return run.streamingStateSnapshot()
+}
+
+// ExportSessionSnapshot exports a single consistent snapshot for the given session.
+// The snapshot is copied under the session's state lock; disk IO must happen elsewhere.
+func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot, error) {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return &SessionSnapshot{
+			SessionData: &model.SessionData{
+				Version: 2,
+			},
+		}, nil
+	}
+	return run.snapshot(), nil
+}
+
+func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
+	s.mu.Lock()
+	run := s.getOrCreateRun(sessionID)
+	s.mu.Unlock()
+	run.importSessionData(data)
+}
+
+func (s *ChatService) AddDiscoveredTool(sessionID string, record model.DiscoveredToolRecord) bool {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return false
+	}
+	return run.upsertDiscoveredTool(record)
+}
+
+func (s *ChatService) ReplaceDiscoveredTools(sessionID string, records []model.DiscoveredToolRecord) {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	run.replaceDiscoveredTools(records)
+}
+
+func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+	if len(records) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	var catalog *tools.ToolCatalog
+	if s.installedBundle != nil {
+		catalog = s.installedBundle.MCPCatalog
+	}
+	s.mu.Unlock()
+
+	if catalog == nil {
+		return cloneAndSortDiscoveredTools(records)
+	}
+
+	valid := make(map[string]struct{})
+	for _, entry := range catalog.Entries() {
+		if !entry.IsMcp || !entry.ShouldDefer {
+			continue
+		}
+		valid[entry.CanonicalName] = struct{}{}
+	}
+
+	pruned := make([]model.DiscoveredToolRecord, 0, len(records))
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		if _, ok := valid[record.CanonicalName]; !ok {
+			continue
+		}
+		pruned = append(pruned, record)
+	}
+	return cloneAndSortDiscoveredTools(pruned)
+}
+
+func cloneAndSortDiscoveredTools(records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]model.DiscoveredToolRecord, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		if _, exists := seen[record.CanonicalName]; exists {
+			continue
+		}
+		seen[record.CanonicalName] = struct{}{}
+		out = append(out, record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CanonicalName < out[j].CanonicalName
+	})
+	return out
 }
 
 // GetSessionRunSnapshot returns a snapshot of a session's run state for the
@@ -1203,95 +1883,514 @@ func (s *ChatService) buildInterruptEvent(pi *PendingInterrupt, sessionID string
 // Runner building
 // ---------------------------------------------------------------------------
 
-// BuildRunners builds the deep agent and both runners using the current config.
+// BuildRunners builds and installs the shared runner bundle using the current config.
 func (s *ChatService) BuildRunners() error {
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cfg, digest, err := s.currentConfigSnapshot()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	prevCache := map[string]cachedMCPServerSurface(nil)
+	if s.installedBundle != nil {
+		prevCache = cloneSurfaceCache(s.installedBundle.CachedSurfaceMetadataByServer)
+	}
+	s.mu.Unlock()
+
+	bundle, err := s.prepareRunnerBundle(ctx, cfg, digest, prevCache)
+	if err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.buildRunnersLocked()
+	s.installRunnerBundleLocked(bundle)
+	return nil
 }
 
-// buildRunnersLocked builds the deep agent and both runners (caller must hold s.mu).
-func (s *ChatService) buildRunnersLocked() error {
-	if s.sandbox == nil || !s.sandbox.IsConnected() {
-		return fmt.Errorf("sandbox is not connected")
+func (s *ChatService) currentConfigSnapshot() (*config.AppConfig, string, error) {
+	if s.store == nil {
+		return nil, "", fmt.Errorf("config store is not available")
 	}
-
-	op := s.sandbox.Operator()
-	if op == nil {
-		return fmt.Errorf("sandbox operator is not available")
-	}
-
 	cfg := s.store.Get()
-	ctx := s.ctx
-
-	// Create LLM chat model
-	mdl, err := llm.NewChatModel(ctx, cfg.LLM)
+	digest, err := configDigest(cfg)
 	if err != nil {
-		logger.Error("[RUNNER] Failed to create chat model", err)
-		return fmt.Errorf("failed to create chat model: %w", err)
+		return nil, "", fmt.Errorf("compute config digest: %w", err)
 	}
-	logger.RunnerEvent("chat_model_created", "type", cfg.LLM.Type, "model", cfg.LLM.Model)
+	return cfg, digest, nil
+}
 
-	// Register built-in tools
-	registry := tools.NewToolRegistry()
-	if err := tools.RegisterBuiltinTools(registry, op, s.getWorkspacePath()); err != nil {
-		return fmt.Errorf("failed to register builtin tools: %w", err)
+func (s *ChatService) probeRunnerBundleSurface(ctx context.Context, cfg *config.AppConfig, previousCache map[string]cachedMCPServerSurface) (*runnerBundleSurface, error) {
+	if s.probeBundleSurfaceFn != nil {
+		return s.probeBundleSurfaceFn(ctx, cfg, previousCache)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
 	}
 
-	// Connect MCP servers and load their tools
+	surface := &runnerBundleSurface{
+		ActionCatalog:                 tools.NewToolCatalog(),
+		CachedSurfaceMetadataByServer: make(map[string]cachedMCPServerSurface),
+	}
+
 	for _, serverCfg := range cfg.MCP.Servers {
 		if !serverCfg.Enabled {
 			continue
 		}
-		session, err := tools.ConnectMCPServer(ctx, serverCfg)
+
+		handle, err := tools.ConnectMCPServerHandle(ctx, serverCfg)
 		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error",
-				fmt.Sprintf("MCP server %s connection failed: %v", serverCfg.Name, err))
-			continue
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, err
 		}
-		mcpTools, err := tools.LoadMCPTools(ctx, session, nil)
-		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error",
-				fmt.Sprintf("MCP server %s tool loading failed: %v", serverCfg.Name, err))
-			continue
+		surface.Handles = append(surface.Handles, handle)
+
+		cache := previousCache[serverCfg.Name]
+		if handle.SupportsResources() {
+			cache.SupportsResources = true
 		}
-		registry.RegisterMCPTools(serverCfg.Name, mcpTools)
+
+		if handle.ToolMetadataReady {
+			liveEntries := make([]tools.CatalogEntry, 0, len(handle.Tools))
+			for _, raw := range handle.Tools {
+				_, entry, err := tools.NewMCPActionAdapter(handle, raw)
+				if err != nil {
+					s.closeMCPHandlesLocked(surface.Handles)
+					return nil, err
+				}
+				if err := surface.ActionCatalog.Register(entry); err != nil {
+					s.closeMCPHandlesLocked(surface.Handles)
+					return nil, err
+				}
+				liveEntries = append(liveEntries, entry)
+			}
+			cache.ActionEntries = cloneCatalogEntries(liveEntries)
+			cache.HasToolMetadata = true
+		} else if handle.State == tools.MCPServerStatePending && cache.HasToolMetadata {
+			for _, entry := range cache.ActionEntries {
+				if err := surface.ActionCatalog.Register(entry); err != nil {
+					s.closeMCPHandlesLocked(surface.Handles)
+					return nil, err
+				}
+			}
+		}
+
+		surface.CachedSurfaceMetadataByServer[serverCfg.Name] = cache
 	}
 
-	extraTools := registry.GetAll()
+	fingerprint, err := surfaceRelevantFingerprint(surface.ActionCatalog, surface.Handles, surface.CachedSurfaceMetadataByServer)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, err
+	}
+	surface.SurfaceRelevantFingerprint = fingerprint
+	return surface, nil
+}
 
-	// Build agent context
+func (s *ChatService) prepareRunnerBundle(ctx context.Context, cfg *config.AppConfig, digest string, previousCache map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+	if s.prepareRunnerBundleFn != nil {
+		return s.prepareRunnerBundleFn(ctx, cfg, digest, previousCache)
+	}
+	surface, err := s.probeRunnerBundleSurface(ctx, cfg, previousCache)
+	if err != nil {
+		return nil, err
+	}
+	return s.prepareRunnerBundleFromSurface(ctx, cfg, digest, surface)
+}
+
+func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *config.AppConfig, digest string, surface *runnerBundleSurface) (*RunnerBundle, error) {
+	if s.prepareBundleFromSurfaceFn != nil {
+		return s.prepareBundleFromSurfaceFn(ctx, cfg, digest, surface)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+	if surface == nil {
+		return nil, fmt.Errorf("runner bundle surface is nil")
+	}
+	if s.sandbox == nil || !s.sandbox.IsConnected() {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("sandbox is not connected")
+	}
+
+	op := s.sandbox.Operator()
+	if op == nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("sandbox operator is not available")
+	}
+
+	mdl, err := llm.NewChatModel(ctx, cfg.LLM)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		logger.Error("[RUNNER] Failed to create chat model", err)
+		return nil, fmt.Errorf("failed to create chat model: %w", err)
+	}
+	logger.RunnerEvent("chat_model_created", "type", cfg.LLM.Type, "model", cfg.LLM.Model)
+
+	bundle := &RunnerBundle{
+		ConfigDigest:                  digest,
+		MCPHandles:                    surface.Handles,
+		SurfaceRelevantFingerprint:    surface.SurfaceRelevantFingerprint,
+		CachedSurfaceMetadataByServer: cloneSurfaceCache(surface.CachedSurfaceMetadataByServer),
+	}
+	provider := &deferredMCPProvider{chat: s, bundle: bundle}
+
+	topLevelCatalog := tools.NewToolCatalog()
+	for _, entry := range surface.ActionCatalog.Entries() {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to register MCP action tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
+
+	resourceEntries, err := tools.NewMCPResourceCatalogEntries(provider)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build MCP resource tools: %w", err)
+	}
+	for _, entry := range resourceEntries {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to register MCP resource tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
+	bundle.MCPCatalog = topLevelCatalog
+
+	toolSearchTool, err := tools.NewToolSearchTool(provider)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build tool_search: %w", err)
+	}
+
+	extraTools := make([]einotool.BaseTool, 0, len(topLevelCatalog.CanonicalNames())+1)
+	extraTools = append(extraTools, toolSearchTool)
+	extraTools = append(extraTools, topLevelCatalog.Tools()...)
+
 	ac := s.buildAgentContext()
+	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
+	unknownToolsHandler := newDeferredUnknownToolHandler(provider)
 
-	// Build the core deep agents with mode-specific permission boundaries.
-	deepAgentDefault, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault)
+	deepAgentDefault, err := agent.BuildDeepAgentForMode(
+		ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault,
+		[]adk.ChatModelAgentMiddleware{deferredHandler},
+		unknownToolsHandler,
+	)
 	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
 		logger.Error("[RUNNER] Failed to build default deep agent", err)
-		return fmt.Errorf("failed to build default deep agent: %w", err)
+		return nil, fmt.Errorf("failed to build default deep agent: %w", err)
 	}
 
-	deepAgentPlan, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan)
+	deepAgentPlan, err := agent.BuildDeepAgentForMode(
+		ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan,
+		[]adk.ChatModelAgentMiddleware{deferredHandler},
+		unknownToolsHandler,
+	)
 	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
 		logger.Error("[RUNNER] Failed to build plan deep agent", err)
-		return fmt.Errorf("failed to build plan deep agent: %w", err)
+		return nil, fmt.Errorf("failed to build plan deep agent: %w", err)
 	}
 
-	// Build default runner
-	defaultRunner := agent.BuildDefaultRunner(ctx, deepAgentDefault, s.checkpointStore)
-
-	// Build plan runner
-	planRunner, err := agent.BuildPlanRunner(ctx, mdl, deepAgentPlan, ac, s.checkpointStore)
+	bundle.DefaultRunner = agent.BuildDefaultRunner(ctx, deepAgentDefault, s.checkpointStore)
+	bundle.PlanRunner, err = agent.BuildPlanRunner(ctx, mdl, deepAgentPlan, ac, s.checkpointStore)
 	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
 		logger.Error("[RUNNER] Failed to build plan runner", err)
-		return fmt.Errorf("failed to build plan runner: %w", err)
+		return nil, fmt.Errorf("failed to build plan runner: %w", err)
+	}
+	bundle.LastFreshnessCheckAt = s.now()
+
+	for _, handle := range bundle.MCPHandles {
+		if handle == nil || handle.LastError == nil {
+			continue
+		}
+		wailsruntime.EventsEmit(s.ctx, "agent:error",
+			fmt.Sprintf("MCP server %s unavailable (%s): %v", handle.Name, handle.State, handle.LastError))
+	}
+	logger.RunnerEvent("runners_built", "extra_tools", len(extraTools))
+	return bundle, nil
+}
+
+func (s *ChatService) installRunnerBundleLocked(bundle *RunnerBundle) {
+	if bundle == nil {
+		return
+	}
+	bundle.Generation = s.nextBundleGenerationLocked()
+	bundle.LastFreshnessCheckAt = s.now()
+	oldBundle := s.installedBundle
+	s.installedBundle = bundle
+	s.retireBundleLocked(oldBundle)
+}
+
+func (s *ChatService) updateBundleFreshnessLocked(expectedGeneration uint64, expectedDigest string, checkedAt time.Time) bool {
+	if s.installedBundle == nil {
+		return false
+	}
+	if s.installedBundle.Generation != expectedGeneration || s.installedBundle.ConfigDigest != expectedDigest {
+		return false
+	}
+	s.installedBundle.LastFreshnessCheckAt = checkedAt
+	return true
+}
+
+func toolInfoSignature(entry tools.CatalogEntry) string {
+	if entry.Tool == nil {
+		return ""
+	}
+	info, err := entry.Tool.Info(context.Background())
+	if err != nil || info == nil {
+		return fmt.Sprintf("info-error:%v", err)
+	}
+	payload := struct {
+		Name   string `json:"name"`
+		Desc   string `json:"desc"`
+		Params string `json:"params"`
+	}{
+		Name:   info.Name,
+		Desc:   info.Desc,
+		Params: fmt.Sprintf("%#v", info.ParamsOneOf),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return payload.Name + "|" + payload.Desc + "|" + payload.Params
+	}
+	return string(data)
+}
+
+func surfaceRelevantFingerprint(catalog *tools.ToolCatalog, handles []*tools.MCPServerHandle, cache map[string]cachedMCPServerSurface) (string, error) {
+	type entrySummary struct {
+		CanonicalName string   `json:"canonicalName"`
+		RemoteName    string   `json:"remoteName"`
+		Aliases       []string `json:"aliases,omitempty"`
+		Kind          string   `json:"kind"`
+		Title         string   `json:"title,omitempty"`
+		Description   string   `json:"description,omitempty"`
+		SearchHint    string   `json:"searchHint,omitempty"`
+		ReadOnlyHint  bool     `json:"readOnlyHint"`
+		ReadOnlyTrust bool     `json:"readOnlyTrust"`
+		ToolInfo      string   `json:"toolInfo"`
+	}
+	type serverSummary struct {
+		Name                 string         `json:"name"`
+		State                string         `json:"state"`
+		HasCachedToolMeta    bool           `json:"hasCachedToolMeta"`
+		SupportsResources    bool           `json:"supportsResources"`
+		DeferredActionEntrys []entrySummary `json:"deferredActionEntries,omitempty"`
 	}
 
-	s.deepAgent = deepAgentDefault
-	s.defaultRunner = defaultRunner
-	s.planRunner = planRunner
+	if catalog == nil {
+		return "", nil
+	}
 
-	logger.RunnerEvent("runners_built", "extra_tools", len(extraTools))
-	return nil
+	entriesByServer := make(map[string][]tools.CatalogEntry)
+	for _, entry := range catalog.Entries() {
+		if !entry.IsMcp || entry.IsResourceTool {
+			continue
+		}
+		entriesByServer[entry.Server] = append(entriesByServer[entry.Server], entry)
+	}
+
+	summaries := make([]serverSummary, 0, len(handles))
+	for _, handle := range handles {
+		if handle == nil || handle.Name == "" {
+			continue
+		}
+		cacheEntry := cache[handle.Name]
+		summary := serverSummary{
+			Name:              handle.Name,
+			State:             string(handle.State),
+			HasCachedToolMeta: handle.ToolMetadataReady || len(handle.Tools) > 0 || cacheEntry.HasToolMetadata,
+			SupportsResources: handle.SupportsResources() || cacheEntry.SupportsResources,
+		}
+		for _, entry := range entriesByServer[handle.Name] {
+			summary.DeferredActionEntrys = append(summary.DeferredActionEntrys, entrySummary{
+				CanonicalName: entry.CanonicalName,
+				RemoteName:    entry.RemoteName,
+				Aliases:       append([]string(nil), entry.Aliases...),
+				Kind:          entry.Kind,
+				Title:         entry.Title,
+				Description:   entry.Description,
+				SearchHint:    entry.SearchHint,
+				ReadOnlyHint:  entry.ReadOnlyHint,
+				ReadOnlyTrust: entry.ReadOnlyTrusted,
+				ToolInfo:      toolInfoSignature(entry),
+			})
+		}
+		summaries = append(summaries, summary)
+	}
+
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].Name < summaries[j].Name
+	})
+	for i := range summaries {
+		sort.Slice(summaries[i].DeferredActionEntrys, func(a, b int) bool {
+			return summaries[i].DeferredActionEntrys[a].CanonicalName < summaries[i].DeferredActionEntrys[b].CanonicalName
+		})
+	}
+
+	data, err := json.Marshal(summaries)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context) (*RunnerBundle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	for {
+		cfg, digest, err := s.currentConfigSnapshot()
+		if err != nil {
+			return nil, err
+		}
+
+		s.mu.Lock()
+		bundle := s.installedBundle
+		if bundle == nil {
+			s.mu.Unlock()
+			newBundle, err := s.prepareRunnerBundle(ctx, cfg, digest, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			s.mu.Lock()
+			if s.installedBundle == nil {
+				currentCfg, currentDigest, digestErr := s.currentConfigSnapshot()
+				if digestErr == nil && currentDigest == digest {
+					_ = currentCfg
+					s.installRunnerBundleLocked(newBundle)
+					bundle = s.installedBundle
+					s.mu.Unlock()
+					return bundle, nil
+				}
+			}
+			s.mu.Unlock()
+			s.closeRunnerBundleLocked(newBundle)
+			continue
+		}
+
+		if s.freshnessTTL <= 0 || s.now().Sub(bundle.LastFreshnessCheckAt) < s.freshnessTTL {
+			s.mu.Unlock()
+			return bundle, nil
+		}
+
+		key := bundleKey(bundle.Generation, bundle.ConfigDigest)
+		if s.freshnessTask != nil && s.freshnessTask.key == key {
+			done := s.freshnessTask.done
+			s.mu.Unlock()
+			<-done
+			continue
+		}
+
+		task := &freshnessTask{
+			key:  key,
+			done: make(chan struct{}),
+		}
+		s.freshnessTask = task
+		expectedGeneration := bundle.Generation
+		expectedDigest := bundle.ConfigDigest
+		expectedFingerprint := bundle.SurfaceRelevantFingerprint
+		prevCache := cloneSurfaceCache(bundle.CachedSurfaceMetadataByServer)
+		s.mu.Unlock()
+
+		leaderBundle := s.runFreshnessTask(ctx, task, cfg, expectedGeneration, expectedDigest, expectedFingerprint, prevCache)
+		if leaderBundle != nil {
+			return leaderBundle, nil
+		}
+	}
+}
+
+func (s *ChatService) runFreshnessTask(
+	ctx context.Context,
+	task *freshnessTask,
+	cfg *config.AppConfig,
+	expectedGeneration uint64,
+	expectedDigest string,
+	expectedFingerprint string,
+	prevCache map[string]cachedMCPServerSurface,
+) *RunnerBundle {
+	finish := func(bundle *RunnerBundle) *RunnerBundle {
+		s.mu.Lock()
+		if s.freshnessTask == task {
+			s.freshnessTask = nil
+		}
+		close(task.done)
+		s.mu.Unlock()
+		return bundle
+	}
+
+	surface, err := s.probeRunnerBundleSurface(ctx, cfg, prevCache)
+	if err != nil {
+		logger.Warn("[RUNNER] Freshness probe failed", "error", err)
+		s.mu.Lock()
+		current := s.installedBundle
+		s.mu.Unlock()
+		return finish(current)
+	}
+
+	if surface.SurfaceRelevantFingerprint == expectedFingerprint {
+		s.closeMCPHandlesLocked(surface.Handles)
+		s.mu.Lock()
+		current := s.installedBundle
+		if current != nil {
+			s.updateBundleFreshnessLocked(expectedGeneration, expectedDigest, s.now())
+			current = s.installedBundle
+		}
+		if s.freshnessTask == task {
+			s.freshnessTask = nil
+		}
+		close(task.done)
+		s.mu.Unlock()
+		return current
+	}
+
+	newBundle, err := s.prepareRunnerBundleFromSurface(ctx, cfg, expectedDigest, surface)
+	if err != nil {
+		logger.Warn("[RUNNER] Freshness rebuild preparation failed", "error", err)
+		s.mu.Lock()
+		current := s.installedBundle
+		s.mu.Unlock()
+		return finish(current)
+	}
+
+	s.mu.Lock()
+	current := s.installedBundle
+	if current != nil && current.Generation == expectedGeneration && current.ConfigDigest == expectedDigest {
+		s.installRunnerBundleLocked(newBundle)
+		current = s.installedBundle
+		if s.freshnessTask == task {
+			s.freshnessTask = nil
+		}
+		close(task.done)
+		s.mu.Unlock()
+		return current
+	}
+	if s.freshnessTask == task {
+		s.freshnessTask = nil
+	}
+	close(task.done)
+	s.mu.Unlock()
+	s.closeRunnerBundleLocked(newBundle)
+	return current
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,10 +2553,10 @@ func (s *ChatService) drainStreamForRun(stream adk.MessageStream, agentName stri
 		case <-ticker.C:
 			flushChunks()
 			// Update session's streaming state for mid-stream saves
-			run.streamingState = &model.StreamingState{
+			run.setStreamingState(&model.StreamingState{
 				PartialContent: streamingContent.String(),
 				AgentName:      agentName,
-			}
+			})
 		default:
 			chunk, err := stream.Recv()
 			if err != nil {
@@ -1481,7 +2580,7 @@ func (s *ChatService) drainStreamForRun(stream adk.MessageStream, agentName stri
 	flushChunks()
 
 	// Clear session's streaming state
-	run.streamingState = nil
+	run.setStreamingState(nil)
 
 	// Signal stream end
 	s.emitTimelineForRun(TimelineEvent{

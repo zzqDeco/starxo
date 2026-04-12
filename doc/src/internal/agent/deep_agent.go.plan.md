@@ -2,58 +2,52 @@
 
 ## 1. 文件定位
 - 项目: starxo
-- 源文件: internal/agent/deep_agent.go
-- 文档文件: doc/src/internal/agent/deep_agent.go.plan.md
+- 源文件: `internal/agent/deep_agent.go`
+- 文档文件: `doc/src/internal/agent/deep_agent.go.plan.md`
 - 文件类型: Go 源码
 - 所属模块: agent
 
 ## 2. 核心职责
-- 该文件负责构建核心深度代理（deep agent），这是整个 AI 编码代理的中枢。它组装三个专用子代理（code_writer、code_executor、file_manager）和一组直接工具，使用 CloudWeGo Eino ADK 的 `deep.New()` 创建具备任务委派能力的自主代理。该代理在默认模式下作为 runner 的直接代理使用，在 plan 模式下作为 planexecute 的执行器使用。
-- 新增模式化构建能力：根据 `DeepAgentMode`（`default` / `plan`）对顶层代理的直连工具权限与系统提示词进行差异化约束。
-- 该文件的变更应与项目级规则文档和接口文档保持一致。
+- 构建顶层 `coding_agent`，统一组装：
+  - orchestration tools
+  - deferred MCP tools / `tool_search`
+  - 三个 sub-agents
+- 在 `default` / `plan` 两种模式下复用同一套 deep agent 框架，只改变 prompt 与 deferred MCP policy。
 
 ## 3. 输入与输出
-- 输入来源: `context.Context`、`model.ToolCallingChatModel`（LLM 模型）、`commandline.Operator`（沙箱操作器）、`[]tool.BaseTool`（额外工具如 MCP 工具）、`AgentContext`（运行时环境上下文）
-- 输出结果: 返回 `adk.Agent` 接口实例（deep agent），可被 runner 或 planexecute 直接使用；出错时返回 error
+- 输入来源: `context.Context`、`model.ToolCallingChatModel`、`commandline.Operator`、`extraTools`、`AgentContext`、`DeepAgentMode`
+- 输出结果: `adk.Agent`
 
 ## 4. 关键实现细节
-- 结构体/接口定义:
-  - `DeepAgentMode`：控制顶层代理的工具权限和提示词约束
-  - 常量：`DeepAgentModeDefault`、`DeepAgentModePlan`
-- 导出函数/方法:
-  - `BuildDeepAgent(ctx, mdl, op, extraTools, ac) (adk.Agent, error)`: 默认模式构建入口（内部委托 `BuildDeepAgentForMode(..., DeepAgentModeDefault)`）
-  - `BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, mode) (adk.Agent, error)`: 模式化构建入口
-- 模式行为:
-  - `default`：主代理保留 `write_todos`、`update_todo`，并附加 `extraTools`（如 MCP）
-  - `plan`：主代理保留编排工具与 todo 工具，不附加 `extraTools`，使用 `DeepAgentPlanPrompt`
-- Wails 绑定方法: 无（由 service 层间接调用）
-- 事件发射: 无直接事件发射，子代理工具通过 `AgentContext.OnToolEvent` 回调间接发射事件
+- `BuildDeepAgentForMode(...)` 现在额外接收：
+  - `handlers []adk.ChatModelAgentMiddleware`
+  - `unknownToolsHandler`
+- 两种 mode 都会挂载 `extraTools`，区别不再是“plan mode 不带 extraTools”，而是 deferred helper 在运行期决定 searchable/loadable。
+- 顶层 direct tools 保持为：
+  - `ask_user`
+  - `ask_choice`
+  - `notify_user`
+  - `write_todos`
+  - `update_todo`
+- 顶层不再直接暴露 shell/file/editor/python builtin；这些继续只属于 sub-agents。
 
 ## 5. 依赖关系
 - 内部依赖:
-  - `starxo/internal/tools` (agenttools): 提供 FollowUpTool、ChoiceTool、WriteTodosTool、UpdateTodoTool、NotifyUserTool
-  - 同包 `agent`: `NewCodeWriterAgent`、`NewCodeExecutorAgent`、`NewFileManagerAgent`、`DeepAgentPrompt`、`AgentContext`
+  - `internal/tools`: follow-up、choice、notify、todos
+  - `internal/agent/codewriter.go`
+  - `internal/agent/codeexecutor.go`
+  - `internal/agent/filemanager.go`
+  - `internal/agent/prompts.go`
 - 外部依赖:
-  - `github.com/cloudwego/eino-ext/components/tool/commandline`: 沙箱命令行操作器
-  - `github.com/cloudwego/eino/adk`: ADK 代理框架
-  - `github.com/cloudwego/eino/adk/prebuilt/deep`: 深度代理预构建模块
-  - `github.com/cloudwego/eino/components/model`: LLM 模型接口
-  - `github.com/cloudwego/eino/components/tool`: 工具接口
-  - `github.com/cloudwego/eino/compose`: 组合配置
-- 关键配置:
-  - `MaxIteration: 50`（深度代理最大迭代次数）
-  - `WithoutWriteTodos: true`（禁用 Eino 框架内置的 write_todos 工具，使用 starxo 自定义实现，含 DAG 验证和前端渲染）
+  - `github.com/cloudwego/eino/adk`
+  - `github.com/cloudwego/eino/adk/prebuilt/deep`
+  - `github.com/cloudwego/eino/compose`
 
 ## 6. 变更影响面
-- 修改子代理列表会影响代理的任务委派能力
-- 修改直接工具列表会影响代理与用户的交互方式（中断、进度跟踪等）
-- `BuildDeepAgentForMode` 的策略会直接影响 plan/default 两种模式下主代理是否可直接调用 MCP 等额外工具
-- `MaxIteration` 变更影响代理执行复杂任务的能力上限
-- 影响 `runner.go` 中 `BuildDefaultRunner` 和 `BuildPlanRunner` 的行为
-- 影响 `internal/service/chat.go` 中 `BuildRunners` 方法
+- 顶层工具面现在允许 deferred MCP middleware 在每次模型调用前裁剪可见工具。
+- `UnknownToolsHandler` 成为“已知但未加载工具 -> 提示先 `tool_search`”的恢复路径。
+- plan mode 的 read-only MCP 约束不在本文件硬编码，而由上层 permission helper + middleware 驱动。
 
 ## 7. 维护建议
-- 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- 新增子代理时需同时在 `prompts.go` 中添加对应的 system prompt，并在 `DeepAgentPrompt` 中更新子代理说明。
-- 新增直接工具时需确保在 `internal/tools` 包中实现并遵循 Eino BaseTool 接口。
-- 调整 `MaxIteration` 需考虑 LLM 调用成本与超时风险。
+- 若新增顶层 direct tool，需同时评估它是否应进入 deferred catalog。
+- 不要在本文件引入 session 级状态；top-level deep agent 必须保持跨 session 可共享。

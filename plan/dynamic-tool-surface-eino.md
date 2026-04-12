@@ -1,5 +1,37 @@
 # `starxo` 基于 Eino 的 Dynamic Tool Surface + ToolSearch + MCP Resources 技术方案
 
+## 实施收敛结果（2026-04）
+
+当前实现按以下语义收敛，作为本文档的最终落地约束：
+
+- 总语义固定为 `session-persisted discovery + per-model-call late binding`
+- 范围固定为 cc 的 MCP deferred 子集，不覆盖 builtin `shouldDefer`
+- 唯一持久化状态源是 `SessionData.DiscoveredTools`
+- `effectiveDiscovered` 在每次模型调用前、按 `context.Context` 中的 `sessionID` 现算
+- shared runner 不保存 session discovery；共享 runner 已收敛为带 generation 的 `RunnerBundle`
+- resume 绑定 `BundleGeneration + RunnerKind`，恢复时忽略当前 session mode，不 fallback 到当前 installed runner
+- save-time discovery 剪枝只删除结构性无效记录，不因当前 mode / permission / runtime 暂时收缩 discovered history
+- `tool_search`、announcement、visible tool list、execution gating 共用同一套 deferred helper
+- freshness check 采用 detached probe + singleflight + transactional swap：
+  - 锁内只判定和登记 task
+  - 网络 IO 全在锁外
+  - 只有 surface-relevant fingerprint 变化才 rebuild
+  - 旧 bundle 走 retire，等待运行中和 pending interrupt 引用消失后再回收
+- `default mode`:
+  - `searchable = searchableDeferredPool`
+  - `loadable = loadableDeferredPool`
+- `plan mode`:
+  - `searchable = searchableDeferredPool ∩ ReadOnlyHint=true(显式且可信)`
+  - `loadable = loadableDeferredPool ∩ ReadOnlyHint=true(显式且可信)`
+- `tool_search` 支持：
+  - `select:<tool>`
+  - `select:A,B,C`
+  - bare exact-name
+  - 关键词搜索
+  - `+term` 必选词
+- `matches` 一律返回 canonical name
+- pending server 只有在已有 cached tool metadata 时才会贡献具体 searchable names；否则只让 `tool_search` 保持可见，并出现在 `pending_mcp_servers`
+
 ## 1. 背景与目标
 
 `starxo` 当前已经具备多会话、Plan Mode、MCP、interrupt/resume、远程 SSH + Docker sandbox、基础文件和命令执行能力，但工具面仍然是“构建时一次性注入、运行期整体暴露”的形态。这个形态在 MCP server 数量增加后会出现三个直接问题：
@@ -96,7 +128,7 @@
 
 ### 3.1 Eino 0.8.x 已具备动态工具所需接入面
 
-基于 `cloudwego/eino@v0.8.1` 源码，动态工具面所需的关键能力已经具备：
+基于 `cloudwego/eino@v0.8.8` 源码，动态工具面所需的关键能力已经具备：
 
 - `adk.ChatModelAgentMiddleware`
 - `BeforeAgent(...)`
@@ -110,7 +142,7 @@
 
 ### 3.2 Eino 官方已有 `toolsearch` 中间件原型
 
-`cloudwego/eino@v0.8.1/adk/middlewares/dynamictool/toolsearch/toolsearch.go` 已给出官方原型：
+`cloudwego/eino@v0.8.8/adk/middlewares/dynamictool/toolsearch/toolsearch.go` 已给出官方原型：
 
 - 注入 `tool_search`
 - 默认隐藏 dynamic tools
@@ -171,7 +203,7 @@
 
 本方案固定采用以下决策：
 
-1. 升级到 `Eino 0.8.x`，推荐锁定 `v0.8.1` 作为第一实现版本。
+1. 升级到 `Eino 0.8.x`，当前实现锁定 `v0.8.8`。
 2. 动态工具面基于 `adk.ChatModelAgentMiddleware` 实现。
 3. `tool_search` 对外接口使用“自然语言检索 + 结构化过滤”，不使用 regex-only 接口。
 4. MCP action tools 统一使用 `mcp__<server>__<tool>` canonical name。

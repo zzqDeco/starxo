@@ -23,6 +23,29 @@ func TestWindowMessagesEmpty(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+func TestWindowMessagesWithPinnedPrefix(t *testing.T) {
+	cfg := WindowConfig{MaxMessages: 4, MaxContentLen: 4000}
+
+	prefix := []*schema.Message{
+		schema.SystemMessage("sys"),
+		schema.UserMessage("<available-deferred-tools>"),
+	}
+	history := []*schema.Message{
+		schema.UserMessage("u1"),
+		schema.AssistantMessage("a1", nil),
+		schema.UserMessage("u2"),
+		schema.AssistantMessage("a2", nil),
+	}
+
+	result := WindowMessagesWithPinnedPrefix(prefix, history, cfg)
+	require.Len(t, result, 5)
+	assert.Equal(t, "sys", result[0].Content)
+	assert.Equal(t, "<available-deferred-tools>", result[1].Content)
+	assert.Equal(t, "[Earlier conversation with 2 messages omitted for brevity]", result[2].Content)
+	assert.Equal(t, "u2", result[3].Content)
+	assert.Equal(t, "a2", result[4].Content)
+}
+
 func TestWindowMessagesWithinBudget(t *testing.T) {
 	msgs := make([]*schema.Message, 5)
 	for i := range msgs {

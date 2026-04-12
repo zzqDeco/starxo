@@ -21,16 +21,17 @@ func DefaultWindowConfig() WindowConfig {
 	}
 }
 
-// WindowMessages applies windowing to a slice of messages:
-//  1. If total messages <= MaxMessages, only truncate oversized content.
-//  2. Otherwise keep the first message (system) + the last MaxMessages messages,
-//     inserting a summary placeholder for the omitted gap.
-//  3. Truncate any individual message content that exceeds MaxContentLen.
+// WindowMessages applies legacy windowing to a flat slice of messages.
+// The first message is treated as pinned prefix and preserved.
 func WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Message {
 	if len(messages) == 0 {
 		return messages
 	}
+	return WindowMessagesWithPinnedPrefix(messages[:1], messages[1:], cfg)
+}
 
+// WindowMessagesWithPinnedPrefix preserves pinnedPrefix in full and windows only the history tail.
+func WindowMessagesWithPinnedPrefix(pinnedPrefix []*schema.Message, history []*schema.Message, cfg WindowConfig) []*schema.Message {
 	if cfg.MaxMessages <= 0 {
 		cfg.MaxMessages = DefaultWindowConfig().MaxMessages
 	}
@@ -38,32 +39,40 @@ func WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Mess
 		cfg.MaxContentLen = DefaultWindowConfig().MaxContentLen
 	}
 
-	// If within budget, just truncate long content.
-	if len(messages) <= cfg.MaxMessages {
-		return truncateAll(messages, cfg.MaxContentLen)
+	prefix := truncateAll(pinnedPrefix, cfg.MaxContentLen)
+	if len(history) == 0 {
+		return prefix
 	}
 
-	// Keep first message (typically system) + last MaxMessages-1 messages.
-	// Insert a placeholder between them describing the gap.
-	keepTail := cfg.MaxMessages - 1 // reserve 1 slot for the first message
+	total := len(prefix) + len(history)
+
+	// If within budget, just truncate long content.
+	if total <= cfg.MaxMessages {
+		result := make([]*schema.Message, 0, total)
+		result = append(result, prefix...)
+		result = append(result, truncateAll(history, cfg.MaxContentLen)...)
+		return result
+	}
+
+	// Preserve the entire prefix and keep the newest history entries within the remaining budget.
+	keepTail := cfg.MaxMessages - len(prefix)
 	if keepTail < 1 {
 		keepTail = 1
 	}
 
-	first := messages[0]
-	tailStart := len(messages) - keepTail
-	if tailStart < 1 {
-		tailStart = 1
+	tailStart := len(history) - keepTail
+	if tailStart < 0 {
+		tailStart = 0
 	}
 
 	// Adjust tailStart to avoid splitting tool call groups.
 	// A tool call group = assistant message with ToolCalls + subsequent tool result messages.
-	tailStart = adjustForToolCallGroups(messages, tailStart)
+	tailStart = adjustForToolCallGroups(history, tailStart)
 
-	omitted := tailStart - 1 // number of messages dropped (between first and tail)
+	omitted := tailStart
 
-	result := make([]*schema.Message, 0, 1+1+keepTail)
-	result = append(result, truncateMsg(first, cfg.MaxContentLen))
+	result := make([]*schema.Message, 0, len(prefix)+1+keepTail)
+	result = append(result, prefix...)
 
 	if omitted > 0 {
 		placeholder := schema.UserMessage(
@@ -72,7 +81,7 @@ func WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Mess
 		result = append(result, placeholder)
 	}
 
-	for _, msg := range messages[tailStart:] {
+	for _, msg := range history[tailStart:] {
 		result = append(result, truncateMsg(msg, cfg.MaxContentLen))
 	}
 
