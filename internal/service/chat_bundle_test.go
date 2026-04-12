@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -43,11 +44,21 @@ func updateTestLLMModel(t *testing.T, store *config.Store, model string) {
 	}
 }
 
+func mustConfigDigest(t *testing.T, chat *ChatService) string {
+	t.Helper()
+	_, digest, err := chat.currentConfigSnapshot()
+	if err != nil {
+		t.Fatalf("config snapshot: %v", err)
+	}
+	return digest
+}
+
 func markSessionStarting(chat *ChatService, sessionID string) {
 	chat.mu.Lock()
 	defer chat.mu.Unlock()
 	run := chat.getOrCreateRun(sessionID)
 	run.starting = true
+	run.startDone = make(chan struct{})
 }
 
 func TestResolvePendingRunnerLockedUsesInterruptBundleGenerationAndKind(t *testing.T) {
@@ -477,6 +488,12 @@ func TestMatchingSurfaceCacheEntry_RequiresMatchingConfigIdentityDigest(t *testi
 
 func TestPruneDiscoveredToolsForSave_NoInstalledBundleFailOpens(t *testing.T) {
 	store := newTestConfigStore(t)
+	setTestMCPServers(t, store, []config.MCPServerConfig{{
+		Name:      "alpha",
+		Transport: "stdio",
+		Command:   "alpha",
+		Enabled:   true,
+	}})
 	chat := NewChatService(store)
 
 	records := []model.DiscoveredToolRecord{
@@ -498,6 +515,10 @@ func TestPruneDiscoveredToolsForSave_NoInstalledBundleFailOpens(t *testing.T) {
 func TestPruneDiscoveredToolsForSave_ResourceDiscoveryWithEmptyServerSurvives(t *testing.T) {
 	store := newTestConfigStore(t)
 	chat := NewChatService(store)
+	_, digest, err := chat.currentConfigSnapshot()
+	if err != nil {
+		t.Fatalf("config snapshot: %v", err)
+	}
 	catalog := tools.NewToolCatalog()
 	resource := stubDeferredResourceEntry(tools.ReadMCPResourceName)
 	if err := catalog.Register(resource); err != nil {
@@ -506,9 +527,10 @@ func TestPruneDiscoveredToolsForSave_ResourceDiscoveryWithEmptyServerSurvives(t 
 
 	chat.mu.Lock()
 	chat.installedBundle = &RunnerBundle{
-		Generation:   1,
-		ConfigDigest: "digest",
-		MCPCatalog:   catalog,
+		Generation:           1,
+		ConfigDigest:         digest,
+		MCPCatalog:           catalog,
+		LastFreshnessCheckAt: time.Now(),
 	}
 	chat.mu.Unlock()
 
@@ -550,12 +572,13 @@ func TestPruneDiscoveredToolsForSave_KeepsRecordsWhenRuntimeMetadataShrinks(t *t
 			chat.mu.Lock()
 			chat.installedBundle = &RunnerBundle{
 				Generation:   1,
-				ConfigDigest: "digest",
+				ConfigDigest: mustConfigDigest(t, chat),
 				MCPCatalog:   catalog,
 				MCPHandles: []*tools.MCPServerHandle{{
 					Name:  "alpha",
 					State: state,
 				}},
+				LastFreshnessCheckAt: time.Now(),
 				CachedSurfaceMetadataByServer: map[string]cachedMCPServerSurface{
 					"alpha": {},
 				},
@@ -591,9 +614,10 @@ func TestPruneDiscoveredToolsForSave_IgnoresMismatchedCacheForDeletion(t *testin
 
 	chat.mu.Lock()
 	chat.installedBundle = &RunnerBundle{
-		Generation:   1,
-		ConfigDigest: "digest",
-		MCPCatalog:   tools.NewToolCatalog(),
+		Generation:           1,
+		ConfigDigest:         mustConfigDigest(t, chat),
+		MCPCatalog:           tools.NewToolCatalog(),
+		LastFreshnessCheckAt: time.Now(),
 		CachedSurfaceMetadataByServer: map[string]cachedMCPServerSurface{
 			"alpha": {
 				ConfigIdentityDigest: oldIdentity,
@@ -627,6 +651,7 @@ func TestPruneDiscoveredToolsForSave_DeletesOnlyWhenClearlyInvalid(t *testing.T)
 		},
 	})
 	chat := NewChatService(store)
+	currentDigest := mustConfigDigest(t, chat)
 	identity, err := mcpServerConfigIdentityDigest(config.MCPServerConfig{
 		Name:      "alpha",
 		Transport: "stdio",
@@ -644,9 +669,10 @@ func TestPruneDiscoveredToolsForSave_DeletesOnlyWhenClearlyInvalid(t *testing.T)
 
 	chat.mu.Lock()
 	chat.installedBundle = &RunnerBundle{
-		Generation:   1,
-		ConfigDigest: "digest",
-		MCPCatalog:   catalog,
+		Generation:           1,
+		ConfigDigest:         currentDigest,
+		MCPCatalog:           catalog,
+		LastFreshnessCheckAt: time.Now(),
 		CachedSurfaceMetadataByServer: map[string]cachedMCPServerSurface{
 			"alpha": {
 				ConfigIdentityDigest: identity,
@@ -669,6 +695,87 @@ func TestPruneDiscoveredToolsForSave_DeletesOnlyWhenClearlyInvalid(t *testing.T)
 	})
 	if len(got) != 1 || got[0].CanonicalName != keptResourceRecord.CanonicalName {
 		t.Fatalf("expected only clearly valid records to remain, got %#v", got)
+	}
+}
+
+func TestPruneDiscoveredToolsForSave_StaleBundleOnlyDeletesCurrentConfigFacts(t *testing.T) {
+	store := newTestConfigStore(t)
+	setTestMCPServers(t, store, []config.MCPServerConfig{{
+		Name:      "alpha",
+		Transport: "stdio",
+		Command:   "alpha",
+		Enabled:   true,
+	}})
+	chat := NewChatService(store)
+	currentDigest := mustConfigDigest(t, chat)
+	identity, err := mcpServerConfigIdentityDigest(config.MCPServerConfig{
+		Name:      "alpha",
+		Transport: "stdio",
+		Command:   "alpha",
+		Enabled:   true,
+	})
+	if err != nil {
+		t.Fatalf("identity digest: %v", err)
+	}
+
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(stubToolSearchCatalogEntry("mcp__alpha__read", "alpha")); err != nil {
+		t.Fatalf("register action entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	chat.installedBundle = &RunnerBundle{
+		Generation:   1,
+		ConfigDigest: currentDigest,
+		MCPCatalog:   catalog,
+		CachedSurfaceMetadataByServer: map[string]cachedMCPServerSurface{
+			"alpha": {
+				ConfigIdentityDigest: identity,
+				HasToolMetadata:      true,
+				ActionEntries:        []tools.CatalogEntry{stubToolSearchCatalogEntry("mcp__alpha__read", "alpha")},
+			},
+		},
+		LastFreshnessCheckAt: time.Time{},
+	}
+	chat.mu.Unlock()
+
+	alphaWrite := model.DiscoveredToolRecord{CanonicalName: "mcp__alpha__write", Server: "alpha", Kind: tools.ToolKindAction, DiscoveredAt: 1}
+	betaWrite := model.DiscoveredToolRecord{CanonicalName: "mcp__beta__write", Server: "beta", Kind: tools.ToolKindAction, DiscoveredAt: 2}
+	got := chat.PruneDiscoveredToolsForSave("sess-1", []model.DiscoveredToolRecord{alphaWrite, betaWrite})
+	if len(got) != 1 || got[0].CanonicalName != alphaWrite.CanonicalName {
+		t.Fatalf("expected stale bundle pruning to keep canonical absence fail-open but drop removed server, got %#v", got)
+	}
+}
+
+func TestPruneDiscoveredToolsForSave_ConfigDigestMismatchOnlyDeletesCurrentConfigFacts(t *testing.T) {
+	store := newTestConfigStore(t)
+	setTestMCPServers(t, store, []config.MCPServerConfig{{
+		Name:      "alpha",
+		Transport: "stdio",
+		Command:   "alpha",
+		Enabled:   true,
+	}})
+	chat := NewChatService(store)
+
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(stubToolSearchCatalogEntry("mcp__alpha__read", "alpha")); err != nil {
+		t.Fatalf("register action entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	chat.installedBundle = &RunnerBundle{
+		Generation:           1,
+		ConfigDigest:         "stale-digest",
+		MCPCatalog:           catalog,
+		LastFreshnessCheckAt: time.Now(),
+	}
+	chat.mu.Unlock()
+
+	alphaWrite := model.DiscoveredToolRecord{CanonicalName: "mcp__alpha__write", Server: "alpha", Kind: tools.ToolKindAction, DiscoveredAt: 1}
+	betaWrite := model.DiscoveredToolRecord{CanonicalName: "mcp__beta__write", Server: "beta", Kind: tools.ToolKindAction, DiscoveredAt: 2}
+	got := chat.PruneDiscoveredToolsForSave("sess-1", []model.DiscoveredToolRecord{alphaWrite, betaWrite})
+	if len(got) != 1 || got[0].CanonicalName != alphaWrite.CanonicalName {
+		t.Fatalf("expected config-drift pruning to keep canonical absence fail-open but drop removed server, got %#v", got)
 	}
 }
 
@@ -808,6 +915,262 @@ func TestEnsureBundleReadyForNewRun_ConfigVersionTaskMismatchRechecksAfterWait(t
 	}
 	if got := atomic.LoadInt32(&probeCalls); got < 2 {
 		t.Fatalf("expected a second probe after config changed, got %d", got)
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_ColdStartFailureDoesNotReuseCompletedTask(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-1")
+	markSessionStarting(chat, "sess-2")
+
+	var prepareCalls int32
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		if atomic.AddInt32(&prepareCalls, 1) == 1 {
+			return nil, fmt.Errorf("cold-start failed")
+		}
+		return &RunnerBundle{
+			ConfigDigest:  mustConfigDigest(t, chat),
+			DefaultRunner: &adk.Runner{},
+			PlanRunner:    &adk.Runner{},
+		}, nil
+	}
+
+	if _, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-1"); err == nil {
+		t.Fatal("expected first cold-start attempt to fail")
+	}
+
+	bundle, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-2")
+	if err != nil {
+		t.Fatalf("second cold-start should rebuild with a fresh task: %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("expected rebuilt bundle after failed cold-start task")
+	}
+	if got := atomic.LoadInt32(&prepareCalls); got != 2 {
+		t.Fatalf("expected failed cold-start task to be replaced, got %d prepare calls", got)
+	}
+	chat.mu.Lock()
+	defer chat.mu.Unlock()
+	if chat.coldStartTask != nil {
+		t.Fatalf("expected completed cold-start task slot to be cleared, got %#v", chat.coldStartTask)
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_ColdStartDiscardClosesBundleAndRechecksInstalledState(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-a")
+	markSessionStarting(chat, "sess-b")
+
+	targetDigest := mustConfigDigest(t, chat)
+	builtBundle := &RunnerBundle{
+		ConfigDigest:  targetDigest,
+		DefaultRunner: &adk.Runner{},
+		PlanRunner:    &adk.Runner{},
+	}
+	warmBundle := &RunnerBundle{
+		Generation:           7,
+		ConfigDigest:         targetDigest,
+		DefaultRunner:        &adk.Runner{},
+		PlanRunner:           &adk.Runner{},
+		LastFreshnessCheckAt: time.Now(),
+	}
+
+	releaseBuild := make(chan struct{})
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		<-releaseBuild
+		return builtBundle, nil
+	}
+
+	closed := make(chan *RunnerBundle, 1)
+	chat.closeRunnerBundleFn = func(bundle *RunnerBundle) {
+		closed <- bundle
+	}
+
+	done := make(chan *RunnerBundle, 1)
+	errs := make(chan error, 1)
+	go func() {
+		bundle, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-a")
+		done <- bundle
+		errs <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	chat.mu.Lock()
+	chat.installedBundle = warmBundle
+	chat.mu.Unlock()
+	close(releaseBuild)
+
+	if err := <-errs; err != nil {
+		t.Fatalf("ensure bundle should re-read installed state after discard: %v", err)
+	}
+	if got := <-done; got != warmBundle {
+		t.Fatalf("expected caller to return currently installed warm bundle, got %#v", got)
+	}
+	if got := <-closed; got != builtBundle {
+		t.Fatalf("expected discarded cold-start bundle to be closed, got %#v", got)
+	}
+	chat.mu.Lock()
+	defer chat.mu.Unlock()
+	if chat.coldStartTask != nil {
+		t.Fatalf("expected cold-start task slot to be cleared, got %#v", chat.coldStartTask)
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_FreshnessProbeErrorFallsBackButColdStartDoesNot(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-1")
+
+	digest := mustConfigDigest(t, chat)
+	current := &RunnerBundle{
+		Generation:                 4,
+		ConfigDigest:               digest,
+		DefaultRunner:              &adk.Runner{},
+		PlanRunner:                 &adk.Runner{},
+		LastFreshnessCheckAt:       time.Time{},
+		SurfaceRelevantFingerprint: "same-fp",
+	}
+	chat.mu.Lock()
+	chat.installedBundle = current
+	chat.mu.Unlock()
+
+	chat.probeBundleSurfaceFn = func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error) {
+		return nil, fmt.Errorf("network down")
+	}
+
+	got, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("freshness task should fall back to current bundle: %v", err)
+	}
+	if got != current {
+		t.Fatalf("expected fallback to current installed bundle, got %#v", got)
+	}
+
+	chat2 := NewChatService(store)
+	markSessionStarting(chat2, "sess-2")
+	chat2.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		return nil, fmt.Errorf("cold-start build failed")
+	}
+	if _, err := chat2.ensureBundleReadyForNewRun(context.Background(), "sess-2"); err == nil {
+		t.Fatal("expected cold-start build failure to remain a hard error")
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_AllCanceledWaitersStillWarmInstalledBundle(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-a")
+	markSessionStarting(chat, "sess-b")
+	markSessionStarting(chat, "sess-c")
+
+	targetDigest := mustConfigDigest(t, chat)
+	releaseBuild := make(chan struct{})
+	var prepareCalls int32
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		atomic.AddInt32(&prepareCalls, 1)
+		<-releaseBuild
+		return &RunnerBundle{
+			ConfigDigest:  targetDigest,
+			DefaultRunner: &adk.Runner{},
+			PlanRunner:    &adk.Runner{},
+		}, nil
+	}
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	ctxB, cancelB := context.WithCancel(context.Background())
+	aErr := make(chan error, 1)
+	bErr := make(chan error, 1)
+	go func() {
+		_, err := chat.ensureBundleReadyForNewRun(ctxA, "sess-a")
+		aErr <- err
+	}()
+	go func() {
+		_, err := chat.ensureBundleReadyForNewRun(ctxB, "sess-b")
+		bErr <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancelA()
+	cancelB()
+	if err := <-aErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected caller A cancellation, got %v", err)
+	}
+	if err := <-bErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected caller B cancellation, got %v", err)
+	}
+	chat.mu.Lock()
+	if run := chat.sessions["sess-a"]; run == nil || run.pendingStartBundleGeneration != 0 {
+		chat.mu.Unlock()
+		t.Fatalf("expected canceled waiter A to avoid reserving pending start, got %#v", run)
+	}
+	chat.mu.Unlock()
+
+	close(releaseBuild)
+	time.Sleep(20 * time.Millisecond)
+
+	bundle, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-c")
+	if err != nil {
+		t.Fatalf("expected later caller to reuse installed warm bundle: %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("expected installed bundle after detached task completed without waiters")
+	}
+	if got := atomic.LoadInt32(&prepareCalls); got != 1 {
+		t.Fatalf("expected detached build to continue independently, got %d prepare calls", got)
+	}
+}
+
+func TestSendMessage_StopGenerationDuringColdStartCancelsWaitButLeavesDetachedBuildAlive(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	chat.SetContext(context.Background())
+	chat.SetActiveSessionID("sess-1")
+
+	targetDigest := mustConfigDigest(t, chat)
+	enteredBuild := make(chan struct{}, 1)
+	releaseBuild := make(chan struct{})
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		enteredBuild <- struct{}{}
+		<-releaseBuild
+		return &RunnerBundle{
+			ConfigDigest:  targetDigest,
+			DefaultRunner: &adk.Runner{},
+			PlanRunner:    &adk.Runner{},
+		}, nil
+	}
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- chat.SendMessage("build a plan")
+	}()
+
+	<-enteredBuild
+	if err := chat.StopGeneration(); err != nil {
+		t.Fatalf("stop generation: %v", err)
+	}
+	if err := <-sendDone; err != nil {
+		t.Fatalf("expected startup stop to return nil, got %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.sessions["sess-1"]
+	if run == nil || run.starting || run.running || run.pendingStartBundleGeneration != 0 || run.cancelFn != nil {
+		chat.mu.Unlock()
+		t.Fatalf("expected startup state to be fully cleared after stop, got %#v", run)
+	}
+	chat.mu.Unlock()
+
+	markSessionStarting(chat, "sess-2")
+	close(releaseBuild)
+	time.Sleep(20 * time.Millisecond)
+	bundle, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-2")
+	if err != nil {
+		t.Fatalf("expected detached cold-start build to warm future requests: %v", err)
+	}
+	if bundle == nil || bundle.ConfigDigest != targetDigest {
+		t.Fatalf("expected warm bundle after detached build completion, got %#v", bundle)
 	}
 }
 

@@ -50,21 +50,38 @@
   - `CachedSurfaceMetadataByServer`
 - `CachedSurfaceMetadataByServer` 只有在 `server name + ConfigIdentityDigest` 同时匹配当前 config 时才被视为可信：
   - 可参与 detached probe 的 searchable names 继承
-  - 可参与 save-time pruning 的“明确无效”判断
+  - 仅在 bundle config 未漂移且 pruning freshness 仍有效时，才可参与 save-time pruning 的“明确无效”判断
   - digest 不匹配时一律视为未知信息
+- save-time pruning 进一步收敛为：
+  - current config 始终是权威信息
+  - `CanonicalName == ""` 才直接删除
+  - `record.Server != ""` 且 server 已从当前 config 移除时删除
+  - 只有 `installedBundle.ConfigDigest == currentConfigDigest` 且 bundle surface fresh 时，才允许用 bundle metadata 证明 canonical 已不存在
+  - stale bundle、metadata-less cache、identity mismatch cache 都只按未知信息处理，不能触发 canonical-existence 删除
+- detached bundle task 覆盖 cold-start 与 freshness：
+  - cold-start task key = `cold-start + TargetConfigDigest`
+  - freshness task key = `ExpectedGeneration + ExpectedConfigDigest`
+  - caller 只等待 `task.done` 或 `ctx.Done()`，然后重读 installed state / current config
+  - task 自己在锁内决定 install / discard，并在结束时清掉 active task 槽
+  - discard 的 bundle / handles 必须显式关闭，避免泄漏
 - freshness coordinator 采用 detached probe：
   - 锁内只读取 installed bundle 快照并登记 singleflight task
-  - `RefreshMetadata` / list 拉取全部在锁外进行
+  - `RefreshMetadata` / list 拉取全部在 service-scoped detached context 中锁外进行
   - `currentConfigDigest != installedBundle.ConfigDigest` 时必须直接进入 rebuild-required 路径，不能走 TTL/no-change shortcut
   - `freshnessTask` 绑定 `TargetConfigDigest`；只有 digest 相同的请求才能复用
   - 等待中的请求若发现自己的 config digest 已变化，必须在 task 完成后重新进入判定循环
   - probe 无变化时只在 generation + digest 仍匹配时回写 freshness 时间戳
   - probe 有变化时锁外 prepare 新 bundle，锁内 install；旧 bundle 进入 retire
-  - probe / refresh 网络错误不阻断当前消息，直接回退到当前 installed bundle，不更新 freshness 时间戳
+  - probe / refresh 网络错误不阻断当前消息；等待中的 caller 在重判后可继续使用当前 installed bundle
 - deferred MCP provider 绑定在 runner generation 上：
   - catalog / handles 固定到该代 runner
   - discovery 仍从 `SessionRun` 按 session 读取
   - 避免 runner 重建时污染正在运行的旧会话
+- startup 生命周期通过单一 helper 收口：
+  - 关闭 `startDone`
+  - 清 `starting / cancelFn / pendingStartBundleGeneration`
+  - 成功 publish 到 running、startup 失败、caller cancel、session 删除/放弃都走同一套清理逻辑
+  - startup-stop 不发 `agent:error`，也不额外发 `agent:done`
 - resume 不按当前 session mode 选 runner：
   - interrupt 时把 `BundleGeneration + RunnerKind` 写进 `PendingInterrupt`
   - resume 必须按这两个字段取同代、同类 runner
@@ -74,7 +91,7 @@
   - 成功保存时采用 fail-open：
     - `CanonicalName == ""` 才直接删除
     - `record.Server != ""` 且 server 已从当前 config 移除时删除
-    - 只有已知 metadata 明确证明 canonical 已不存在或已不再 deferred 时才删除
+    - 只有 current config 对应、且 fresh bundle 的已知 metadata 明确证明 canonical 已不存在或已不再 deferred 时才删除
     - 其余情况一律保留
   - 剪枝结果同时写回内存和磁盘
 

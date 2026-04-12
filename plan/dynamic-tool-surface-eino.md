@@ -11,10 +11,20 @@
 - shared runner 不保存 session discovery；共享 runner 已收敛为带 generation 的 `RunnerBundle`
 - resume 绑定 `BundleGeneration + RunnerKind`，恢复时忽略当前 session mode，不 fallback 到当前 installed runner
 - save-time discovery 剪枝采用 fail-open：
-  - 只删除明确无效记录
+  - current config 始终是权威信息
+  - 只有 `installedBundle.ConfigDigest == currentConfigDigest` 且 bundle surface fresh 时，才允许用 bundle metadata 证明 canonical 已不存在
+  - stale / metadata-less bundle 只能删除空 canonical 或 current config 已移除的 server 记录
   - `Server == ""` 的 deferred MCP resource discovery 不因信息不足被误删
-  - 当前没有 installed bundle 时只做排序去重并保留历史
 - `tool_search`、announcement、visible tool list、execution gating 共用同一套 deferred helper
+- freshness check / cold-start build 都采用 detached shared bundle task：
+  - cold-start task key = `cold-start + TargetConfigDigest`
+  - freshness task key = `ExpectedGeneration + ExpectedConfigDigest`
+  - caller 只等待并重判，不直接安装 task 结果
+  - task 自己负责在锁内 install-or-discard，并在结束时清空 active task 槽
+- detached task 的实际 probe / prepare 使用 service-scoped context：
+  - stop 只取消“这次消息发送的等待”
+  - 不保证终止后台 detached build / freshness task
+  - task 即使暂时没有 waiter，也可以继续完成并安装 warm bundle
 - freshness check 采用 detached probe + singleflight + transactional swap：
   - `currentConfigDigest != installedBundle.ConfigDigest` 的优先级高于 TTL 和 fingerprint no-change
   - `freshnessTask` 绑定 `TargetConfigDigest`
@@ -23,6 +33,10 @@
   - 只有 surface-relevant fingerprint 变化才 rebuild
   - probe / refresh 网络错误不阻断当前消息，继续使用当前 installed bundle
   - 旧 bundle 走 retire，等待运行中和 pending interrupt 引用消失后再回收
+- startup-stop contract：
+  - 不发 `agent:error`
+  - 不额外发 `agent:done`
+  - 前端在 startup-stop 路径只依赖 stop 调用本身返回收口状态
 - cached surface metadata 只有在 `server name + ConfigIdentityDigest` 同时匹配当前 config 时才可复用
 - run 启动前通过 `pendingStartBundleGeneration` 为“最终返回给这次 run 的 bundle”建立临时引用，防止被并发 rebuild 提前 retire
 - `default mode`:
