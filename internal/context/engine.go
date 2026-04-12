@@ -53,6 +53,14 @@ func (e *Engine) AddToolResult(toolCallID, content string) {
 //  1. System message (with file context injected if files are present)
 //  2. Windowed conversation history (recent messages kept, older ones summarized)
 func (e *Engine) PrepareMessages() []*schema.Message {
+	return e.PrepareMessagesWithPinnedPrefix(nil)
+}
+
+// PrepareMessagesWithPinnedPrefix builds the full message list for the agent:
+//  1. System message
+//  2. Synthetic pinned prefix messages
+//  3. Windowed conversation history
+func (e *Engine) PrepareMessagesWithPinnedPrefix(pinnedPrefix []*schema.Message) []*schema.Message {
 	e.mu.RLock()
 	sysPrompt := e.systemPrompt
 	e.mu.RUnlock()
@@ -69,10 +77,9 @@ func (e *Engine) PrepareMessages() []*schema.Message {
 	// Get conversation history and apply windowing.
 	historyMsgs := e.history.GetAll()
 
-	// Combine system message + history, then window.
-	all := make([]*schema.Message, 0, 1+len(historyMsgs))
-	all = append(all, sysMsg)
-	all = append(all, historyMsgs...)
+	prefix := make([]*schema.Message, 0, 1+len(pinnedPrefix))
+	prefix = append(prefix, sysMsg)
+	prefix = append(prefix, pinnedPrefix...)
 
 	// Estimate a reasonable message count from token budget.
 	// Rough heuristic: ~200 tokens per message on average.
@@ -84,7 +91,7 @@ func (e *Engine) PrepareMessages() []*schema.Message {
 		}
 	}
 
-	return WindowMessages(all, cfg)
+	return WindowMessagesWithPinnedPrefix(prefix, historyMsgs, cfg)
 }
 
 // FileContext returns the file context manager.
