@@ -2,55 +2,36 @@
 
 ## 1. 文件定位
 - 项目: starxo
-- 源文件: internal/context/windowing.go
-- 文档文件: doc/src/internal/context/windowing.go.plan.md
+- 源文件: `internal/context/windowing.go`
+- 文档文件: `doc/src/internal/context/windowing.go.plan.md`
 - 文件类型: Go 源码
-- 所属模块: agentctx
+- 所属模块: `agentctx`
 
 ## 2. 核心职责
-- 该文件实现了对话消息的窗口化（windowing）策略，用于在消息数量超出 LLM 上下文窗口限制时进行智能裁剪。核心策略为：保留第一条消息（通常是系统提示词）和最近的 N 条消息，中间省略的部分插入摘要占位符。同时提供单条消息内容的智能截断功能，保留头部 60% 和尾部 20% 的内容，中间用截断标记替代。
-- 该文件的变更应与项目级规则文档和接口文档保持一致。
+- 对消息做窗口化裁剪与内容截断。
+- 现在支持显式 pinned prefix：始终保留 prefix，再裁剪普通 history。
 
 ## 3. 输入与输出
-- 输入来源: `[]*schema.Message` 消息切片；`WindowConfig` 配置（最大消息数、最大单条内容长度）
-- 输出结果: 经过窗口化和截断处理的 `[]*schema.Message` 新切片
+- 输入来源:
+  - `WindowMessages(messages, cfg)`
+  - `WindowMessagesWithPinnedPrefix(pinnedPrefix, history, cfg)`
+- 输出结果: 裁剪后的 `[]*schema.Message`
 
 ## 4. 关键实现细节
-- 结构体/接口定义:
-  - `WindowConfig` — 窗口化配置，包含 `MaxMessages` (默认 20) 和 `MaxContentLen` (默认 4000)
-- 导出函数/方法:
-  - `DefaultWindowConfig() WindowConfig` — 返回默认窗口配置
-  - `WindowMessages(messages []*schema.Message, cfg WindowConfig) []*schema.Message` — 对消息列表应用窗口化策略
-  - `TruncateContent(content string, maxLen int) string` — 智能截断单条消息内容
-- 未导出函数:
-  - `adjustForToolCallGroups(messages []*schema.Message, tailStart int) int` — 调整窗口裁剪点，避免将 tool call 组（assistant ToolCalls + 后续 tool result 消息）拆分到不同窗口，防止 LLM API 报 "No tool output found" 错误
-  - `truncateAll(messages []*schema.Message, maxContentLen int) []*schema.Message` — 批量截断所有消息
-  - `truncateMsg(msg *schema.Message, maxContentLen int) *schema.Message` — 截断单条消息（无需截断时返回原指针）
-- Wails 绑定方法: 无
-- 事件发射: 无
-- 窗口化算法:
-  1. 消息总数 <= MaxMessages: 仅截断超长内容
-  2. 消息总数 > MaxMessages: 保留第 1 条 + 最后 (MaxMessages-1) 条，中间插入省略占位符
-  3. 裁剪点自动调整: 若 tailStart 落在 tool result 消息上，向前移动以保留完整的 tool call 组（assistant ToolCalls + tool results）
-- 内容截断算法: 保留前 60% + `...[truncated]...` 标记 + 后 20%
+- `WindowMessagesWithPinnedPrefix(...)` 是新的通用入口：
+  - prefix 永不裁掉
+  - history 按原有窗口规则裁剪
+  - tool-call group 保留逻辑继续生效
+- 不再依赖“保留前两条消息”之类的硬编码特殊 case。
 
 ## 5. 依赖关系
-- 内部依赖: 无
 - 外部依赖:
-  - `fmt` (格式化占位符文本)
-  - `github.com/cloudwego/eino/schema` (Message 消息类型)
-- 关键配置:
-  - 默认最大消息数: 20
-  - 默认最大单条内容长度: 4000 字符
+  - `github.com/cloudwego/eino/schema`
+  - `fmt`
 
 ## 6. 变更影响面
-- 修改窗口化策略会直接影响 Agent 的上下文记忆能力和 Token 消耗
-- 修改截断比例（60%/20%）会影响 Agent 对长消息的理解
-- `WindowMessages` 被 `Engine.PrepareMessages()` 调用，是消息发送到 LLM 前的最后处理环节
-- 占位符文本格式 `[Earlier conversation with N messages omitted for brevity]` 若变更需注意 Agent 是否能正确理解
+- deferred MCP announcement 可以稳定地位于 system prompt 之后、windowed history 之前。
+- 为未来额外的 pinned meta hint 留出扩展空间。
 
 ## 7. 维护建议
-- 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- 当前窗口化策略基于消息数量而非实际 Token 数，后续可集成 tokenizer 实现更精确的预算控制。
-- 截断标记 `...[truncated]...` 为硬编码字符串，Agent 可能无法完全理解其含义，可考虑在系统提示词中说明。
-- `truncateMsg` 在无需截断时返回原始指针以避免不必要的内存分配，修改此优化时需注意副作用。
+- 若后续新增 pinned 内容，优先扩展 prefix 机制，不要再次引入按位置硬编码的保留规则。

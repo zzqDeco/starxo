@@ -43,7 +43,7 @@ type DisplayEvent struct {
 	ToolID      string `json:"toolId,omitempty"`
 	ToolResult  string `json:"toolResult,omitempty"`
 	Timestamp   int64  `json:"timestamp"`
-	IsStreaming  bool   `json:"isStreaming,omitempty"`
+	IsStreaming bool   `json:"isStreaming,omitempty"`
 }
 
 // StreamingState captures partial streaming content so that mid-stream saves
