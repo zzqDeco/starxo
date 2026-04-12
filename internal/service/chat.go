@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -82,6 +83,8 @@ type ChatService struct {
 	deepAgent       adk.Agent
 	defaultRunner   *adk.Runner
 	planRunner      *adk.Runner
+	mcpHandles      []*tools.MCPServerHandle
+	retiredMCPs     []*tools.MCPServerHandle
 	sandbox         *sandbox.SandboxManager
 	store           *config.Store
 	checkpointStore compose.CheckPointStore
@@ -136,6 +139,8 @@ func (s *ChatService) InvalidateRunner() {
 }
 
 func (s *ChatService) invalidateRunners() {
+	s.retireMCPHandlesLocked(s.mcpHandles)
+	s.mcpHandles = nil
 	s.deepAgent = nil
 	s.defaultRunner = nil
 	s.planRunner = nil
@@ -174,6 +179,45 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 	}
 	s.sessions[sessionID] = run
 	return run
+}
+
+func (s *ChatService) anySessionRunningLocked() bool {
+	for _, run := range s.sessions {
+		if run.running {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *ChatService) retireMCPHandlesLocked(handles []*tools.MCPServerHandle) {
+	if len(handles) == 0 {
+		return
+	}
+	if s.anySessionRunningLocked() {
+		s.retiredMCPs = append(s.retiredMCPs, handles...)
+		return
+	}
+	s.closeMCPHandlesLocked(handles)
+}
+
+func (s *ChatService) closeMCPHandlesLocked(handles []*tools.MCPServerHandle) {
+	for _, handle := range handles {
+		if handle == nil {
+			continue
+		}
+		if err := handle.Close(); err != nil {
+			logger.Warn("[CHAT] Failed to close MCP handle", "server", handle.Name, "error", err)
+		}
+	}
+}
+
+func (s *ChatService) cleanupRetiredMCPHandlesLocked() {
+	if s.anySessionRunningLocked() || len(s.retiredMCPs) == 0 {
+		return
+	}
+	s.closeMCPHandlesLocked(s.retiredMCPs)
+	s.retiredMCPs = nil
 }
 
 // activeRun returns the SessionRun for the currently active session.
@@ -383,6 +427,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			s.cleanupRetiredMCPHandlesLocked()
 			s.mu.Unlock()
 		}()
 		defer cancel()
@@ -825,6 +870,7 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			s.cleanupRetiredMCPHandlesLocked()
 			s.mu.Unlock()
 		}()
 		defer cancel()
@@ -942,6 +988,7 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			s.cleanupRetiredMCPHandlesLocked()
 			s.mu.Unlock()
 		}()
 		defer cancel()
@@ -1238,24 +1285,25 @@ func (s *ChatService) buildRunnersLocked() error {
 		return fmt.Errorf("failed to register builtin tools: %w", err)
 	}
 
-	// Connect MCP servers and load their tools
-	for _, serverCfg := range cfg.MCP.Servers {
-		if !serverCfg.Enabled {
+	mcpHandles, mcpCatalog, err := tools.BuildMCPActionCatalog(ctx, cfg.MCP.Servers)
+	if err != nil {
+		return fmt.Errorf("failed to build MCP action catalog: %w", err)
+	}
+	for _, handle := range mcpHandles {
+		if handle == nil {
 			continue
 		}
-		session, err := tools.ConnectMCPServer(ctx, serverCfg)
-		if err != nil {
+		if handle.LastError != nil {
 			wailsruntime.EventsEmit(s.ctx, "agent:error",
-				fmt.Sprintf("MCP server %s connection failed: %v", serverCfg.Name, err))
-			continue
+				fmt.Sprintf("MCP server %s unavailable (%s): %v", handle.Name, handle.State, handle.LastError))
 		}
-		mcpTools, err := tools.LoadMCPTools(ctx, session, nil)
-		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error",
-				fmt.Sprintf("MCP server %s tool loading failed: %v", serverCfg.Name, err))
-			continue
-		}
-		registry.RegisterMCPTools(serverCfg.Name, mcpTools)
+	}
+	toolsByServer := make(map[string][]einotool.BaseTool)
+	for _, entry := range mcpCatalog.Entries() {
+		toolsByServer[entry.Server] = append(toolsByServer[entry.Server], entry.Tool)
+	}
+	for serverName, serverTools := range toolsByServer {
+		registry.RegisterMCPTools(serverName, serverTools)
 	}
 
 	extraTools := registry.GetAll()
@@ -1266,12 +1314,14 @@ func (s *ChatService) buildRunnersLocked() error {
 	// Build the core deep agents with mode-specific permission boundaries.
 	deepAgentDefault, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault)
 	if err != nil {
+		s.closeMCPHandlesLocked(mcpHandles)
 		logger.Error("[RUNNER] Failed to build default deep agent", err)
 		return fmt.Errorf("failed to build default deep agent: %w", err)
 	}
 
 	deepAgentPlan, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan)
 	if err != nil {
+		s.closeMCPHandlesLocked(mcpHandles)
 		logger.Error("[RUNNER] Failed to build plan deep agent", err)
 		return fmt.Errorf("failed to build plan deep agent: %w", err)
 	}
@@ -1282,13 +1332,17 @@ func (s *ChatService) buildRunnersLocked() error {
 	// Build plan runner
 	planRunner, err := agent.BuildPlanRunner(ctx, mdl, deepAgentPlan, ac, s.checkpointStore)
 	if err != nil {
+		s.closeMCPHandlesLocked(mcpHandles)
 		logger.Error("[RUNNER] Failed to build plan runner", err)
 		return fmt.Errorf("failed to build plan runner: %w", err)
 	}
 
+	oldHandles := s.mcpHandles
 	s.deepAgent = deepAgentDefault
 	s.defaultRunner = defaultRunner
 	s.planRunner = planRunner
+	s.mcpHandles = mcpHandles
+	s.retireMCPHandlesLocked(oldHandles)
 
 	logger.RunnerEvent("runners_built", "extra_tools", len(extraTools))
 	return nil
