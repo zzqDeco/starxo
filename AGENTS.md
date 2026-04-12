@@ -34,7 +34,7 @@ Note: there is no complete test infrastructure yet; rely on manual verification 
 - Go 1.24, Wails v2.11
 - Vue 3.5 (`<script setup>`), TypeScript 5.7, Vite 6
 - Naive UI, Pinia, xterm.js
-- CloudWeGo Eino v0.7 (agent framework)
+- CloudWeGo Eino v0.8.8 (agent framework)
 - LLM providers via eino-ext (OpenAI, DeepSeek, Ark, Ollama)
 - MCP via `eino-ext/components/tool/mcp/officialmcp`
 - i18n via `vue-i18n` (zh default, en fallback)
@@ -184,7 +184,7 @@ For each feature/fix/refactor:
 3. Sync docs:
    - update corresponding `doc/src/<file>.plan.md`
    - update relevant project-level docs under `doc/`
-   - update `doc/files.index.plan.md` and `doc/files.coverage.plan.md` if file set changed
+   - update `doc/files.index.plan.md` and `doc/files.coverage.plan.md` if file set changed and those overview files exist in the current worktree
    - update `README.md` and `README_CN.md` for user-visible behavior/config changes
 4. Verify manually with `wails dev`
 

@@ -24,7 +24,7 @@ No test infrastructure exists yet.
 
 ## Tech Stack
 
-- **Backend:** Go 1.24, Wails v2.11, CloudWeGo Eino v0.7 (agent framework)
+- **Backend:** Go 1.24, Wails v2.11, CloudWeGo Eino v0.8.8 (agent framework)
 - **Frontend:** Vue 3.5 (`<script setup>` + TypeScript 5.7), Vite 6, Naive UI, Pinia, xterm.js
 - **LLM providers:** OpenAI, DeepSeek, Volcengine Ark, Ollama (via eino-ext)
 - **MCP:** Model Context Protocol via `eino-ext/components/tool/mcp/officialmcp`
@@ -179,7 +179,7 @@ Every feature, fix, or improvement follows a plan-first, doc-synced workflow:
 4. **Sync Docs** — Update all affected documentation:
    - `doc/src/<file>.plan.md` for any modified source files (keep the 7-section template in sync)
    - `doc/` project-level docs if business rules, interfaces, or flows changed
-   - `doc/files.index.plan.md` and `doc/files.coverage.plan.md` if files were added/removed
+   - `doc/files.index.plan.md` and `doc/files.coverage.plan.md` if files were added/removed and those overview files exist in the current worktree
    - `README.md` / `README_CN.md` if user-facing features or config changed
 5. **Verify** — Run `wails dev`, manually verify the changes work correctly
 6. **Commit & Push** — Commit with conventional commit messages, push to remote

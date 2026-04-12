@@ -31,13 +31,16 @@ const (
 // and plan mode (as the executor inside planexecute.New()).
 func BuildDeepAgent(ctx context.Context, mdl model.ToolCallingChatModel,
 	op commandline.Operator, extraTools []tool.BaseTool, ac AgentContext) (adk.Agent, error) {
-	return BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, DeepAgentModeDefault)
+	return BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, DeepAgentModeDefault, nil, nil)
 }
 
 // BuildDeepAgentForMode creates the core deep agent with mode-specific direct
 // tool permissions and prompt constraints.
 func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
-	op commandline.Operator, extraTools []tool.BaseTool, ac AgentContext, mode DeepAgentMode) (adk.Agent, error) {
+	op commandline.Operator, extraTools []tool.BaseTool, ac AgentContext, mode DeepAgentMode,
+	handlers []adk.ChatModelAgentMiddleware,
+	unknownToolsHandler func(ctx context.Context, name, input string) (string, error),
+) (adk.Agent, error) {
 
 	// Build sub-agents (no Exit tool — deep agent manages their lifecycle)
 	codeWriter, err := NewCodeWriterAgent(ctx, mdl, op, ac)
@@ -71,9 +74,10 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 			agenttools.NewWriteTodosTool(),
 			agenttools.NewUpdateTodoTool(),
 		)
+		directTools = append(directTools, extraTools...)
 		instruction = DeepAgentPlanPrompt(ac)
 	case DeepAgentModeDefault:
-		// In default mode keep existing behavior, including MCP/extra tools.
+		// In default mode keep existing behavior, including extra tools.
 		directTools = append(directTools,
 			agenttools.NewWriteTodosTool(),
 			agenttools.NewUpdateTodoTool(),
@@ -91,10 +95,12 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 		SubAgents:   []adk.Agent{codeWriter, codeExecutor, fileManager},
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: directTools,
+				Tools:               directTools,
+				UnknownToolsHandler: unknownToolsHandler,
 			},
 		},
 		MaxIteration:      50,
 		WithoutWriteTodos: true,
+		Handlers:          handlers,
 	})
 }
