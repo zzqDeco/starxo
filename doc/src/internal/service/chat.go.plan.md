@@ -34,6 +34,10 @@
   - `activeBundleGeneration`
   - `activeRunnerKind`
   用于运行中引用 bundle；interrupt 挂起后引用转移到 `PendingInterrupt`
+- `SessionRun` 在 run 真正启动前还会记录 `pendingStartBundleGeneration`：
+  - 只对最终返回给这次 run 的 bundle 建立临时引用
+  - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`
+  - 启动放弃、session 删除、runner/context 创建失败时立即清掉并触发 retired cleanup
 - `contextWithSessionID(...)` 是所有 per-model-call deferred 计算的唯一 sessionID 注入入口；下游只能从 `context.Context` 读取，不从 shared runner 或全局 active session 推断。
 - shared runner 已收敛为 `RunnerBundle`：
   - `Generation`
@@ -44,11 +48,19 @@
   - `LastFreshnessCheckAt`
   - `SurfaceRelevantFingerprint`
   - `CachedSurfaceMetadataByServer`
+- `CachedSurfaceMetadataByServer` 只有在 `server name + ConfigIdentityDigest` 同时匹配当前 config 时才被视为可信：
+  - 可参与 detached probe 的 searchable names 继承
+  - 可参与 save-time pruning 的“明确无效”判断
+  - digest 不匹配时一律视为未知信息
 - freshness coordinator 采用 detached probe：
   - 锁内只读取 installed bundle 快照并登记 singleflight task
   - `RefreshMetadata` / list 拉取全部在锁外进行
+  - `currentConfigDigest != installedBundle.ConfigDigest` 时必须直接进入 rebuild-required 路径，不能走 TTL/no-change shortcut
+  - `freshnessTask` 绑定 `TargetConfigDigest`；只有 digest 相同的请求才能复用
+  - 等待中的请求若发现自己的 config digest 已变化，必须在 task 完成后重新进入判定循环
   - probe 无变化时只在 generation + digest 仍匹配时回写 freshness 时间戳
   - probe 有变化时锁外 prepare 新 bundle，锁内 install；旧 bundle 进入 retire
+  - probe / refresh 网络错误不阻断当前消息，直接回退到当前 installed bundle，不更新 freshness 时间戳
 - deferred MCP provider 绑定在 runner generation 上：
   - catalog / handles 固定到该代 runner
   - discovery 仍从 `SessionRun` 按 session 读取
@@ -59,7 +71,11 @@
   - 找不到对应 bundle 或 runner 时显式失败，不 fallback
 - save-time discovery 剪枝规则：
   - 运行前重建只读
-  - 成功保存时只删除“canonical 不存在”或“已不再属于 deferred MCP 范围”的记录
+  - 成功保存时采用 fail-open：
+    - `CanonicalName == ""` 才直接删除
+    - `record.Server != ""` 且 server 已从当前 config 移除时删除
+    - 只有已知 metadata 明确证明 canonical 已不存在或已不再 deferred 时才删除
+    - 其余情况一律保留
   - 剪枝结果同时写回内存和磁盘
 
 ## 5. 依赖关系

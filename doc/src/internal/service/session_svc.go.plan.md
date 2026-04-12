@@ -33,8 +33,10 @@
   - 在落盘前调用 discovery 剪枝
   - 落盘成功后把剪枝结果写回 `ChatService`
 - save-time discovery 剪枝已经收敛为“结构性剪枝”：
-  - 只删除 canonical name 已不存在于当前 catalog 的记录
-  - 只删除已不再属于 deferred MCP 范围的记录
+  - 当前没有 installed bundle 时，只做排序去重并保留 history
+  - `CanonicalName == ""` 才直接删除
+  - `record.Server != ""` 且 server 已从当前 config 移除时删除
+  - 只有已知 metadata 明确证明 canonical 已不存在或已不再属于 deferred MCP 范围时才删除
   - 不因当前 mode、权限或 server 临时状态而丢失 discovered history
 - durability 目标是 best effort，不承诺硬崩溃零丢失。
 

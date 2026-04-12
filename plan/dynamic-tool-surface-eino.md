@@ -10,13 +10,21 @@
 - `effectiveDiscovered` 在每次模型调用前、按 `context.Context` 中的 `sessionID` 现算
 - shared runner 不保存 session discovery；共享 runner 已收敛为带 generation 的 `RunnerBundle`
 - resume 绑定 `BundleGeneration + RunnerKind`，恢复时忽略当前 session mode，不 fallback 到当前 installed runner
-- save-time discovery 剪枝只删除结构性无效记录，不因当前 mode / permission / runtime 暂时收缩 discovered history
+- save-time discovery 剪枝采用 fail-open：
+  - 只删除明确无效记录
+  - `Server == ""` 的 deferred MCP resource discovery 不因信息不足被误删
+  - 当前没有 installed bundle 时只做排序去重并保留历史
 - `tool_search`、announcement、visible tool list、execution gating 共用同一套 deferred helper
 - freshness check 采用 detached probe + singleflight + transactional swap：
+  - `currentConfigDigest != installedBundle.ConfigDigest` 的优先级高于 TTL 和 fingerprint no-change
+  - `freshnessTask` 绑定 `TargetConfigDigest`
   - 锁内只判定和登记 task
   - 网络 IO 全在锁外
   - 只有 surface-relevant fingerprint 变化才 rebuild
+  - probe / refresh 网络错误不阻断当前消息，继续使用当前 installed bundle
   - 旧 bundle 走 retire，等待运行中和 pending interrupt 引用消失后再回收
+- cached surface metadata 只有在 `server name + ConfigIdentityDigest` 同时匹配当前 config 时才可复用
+- run 启动前通过 `pendingStartBundleGeneration` 为“最终返回给这次 run 的 bundle”建立临时引用，防止被并发 rebuild 提前 retire
 - `default mode`:
   - `searchable = searchableDeferredPool`
   - `loadable = loadableDeferredPool`

@@ -74,9 +74,10 @@ const (
 )
 
 type cachedMCPServerSurface struct {
-	HasToolMetadata   bool
-	SupportsResources bool
-	ActionEntries     []tools.CatalogEntry
+	ConfigIdentityDigest string
+	HasToolMetadata      bool
+	SupportsResources    bool
+	ActionEntries        []tools.CatalogEntry
 }
 
 type RunnerBundle struct {
@@ -92,8 +93,11 @@ type RunnerBundle struct {
 }
 
 type freshnessTask struct {
-	key  string
-	done chan struct{}
+	key                string
+	TargetConfigDigest string
+	err                error
+	fallbackToCurrent  bool
+	done               chan struct{}
 }
 
 type runnerBundleSurface struct {
@@ -113,15 +117,17 @@ type SessionRun struct {
 	discoveredTools map[string]model.DiscoveredToolRecord
 
 	// Run lifecycle
-	running                bool
-	cancelFn               context.CancelFunc
-	runDone                chan struct{}
-	pendingInterrupt       *PendingInterrupt
-	streamingState         *model.StreamingState
-	mode                   string // "default" or "plan"
-	currentAgent           string
-	activeBundleGeneration uint64
-	activeRunnerKind       RunnerKind
+	running                      bool
+	starting                     bool
+	cancelFn                     context.CancelFunc
+	runDone                      chan struct{}
+	pendingInterrupt             *PendingInterrupt
+	streamingState               *model.StreamingState
+	mode                         string // "default" or "plan"
+	currentAgent                 string
+	pendingStartBundleGeneration uint64
+	activeBundleGeneration       uint64
+	activeRunnerKind             RunnerKind
 }
 
 type SessionSnapshot struct {
@@ -608,6 +614,9 @@ func (s *ChatService) bundleGenerationReferencedLocked(generation uint64) bool {
 		return false
 	}
 	for _, run := range s.sessions {
+		if run.pendingStartBundleGeneration == generation {
+			return true
+		}
 		if run.activeBundleGeneration == generation {
 			return true
 		}
@@ -697,12 +706,28 @@ func cloneSurfaceCache(in map[string]cachedMCPServerSurface) map[string]cachedMC
 	out := make(map[string]cachedMCPServerSurface, len(in))
 	for server, cache := range in {
 		out[server] = cachedMCPServerSurface{
-			HasToolMetadata:   cache.HasToolMetadata,
-			SupportsResources: cache.SupportsResources,
-			ActionEntries:     cloneCatalogEntries(cache.ActionEntries),
+			ConfigIdentityDigest: cache.ConfigIdentityDigest,
+			HasToolMetadata:      cache.HasToolMetadata,
+			SupportsResources:    cache.SupportsResources,
+			ActionEntries:        cloneCatalogEntries(cache.ActionEntries),
 		}
 	}
 	return out
+}
+
+type mcpServerConfigIdentity struct {
+	Name      string              `json:"name"`
+	Transport string              `json:"transport"`
+	Command   string              `json:"command"`
+	Args      []string            `json:"args"`
+	URL       string              `json:"url"`
+	Env       []mcpServerEnvValue `json:"env"`
+	Enabled   bool                `json:"enabled"`
+}
+
+type mcpServerEnvValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 func configDigest(cfg *config.AppConfig) (string, error) {
@@ -715,6 +740,106 @@ func configDigest(cfg *config.AppConfig) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func mcpServerConfigIdentityDigest(cfg config.MCPServerConfig) (string, error) {
+	env := make([]mcpServerEnvValue, 0, len(cfg.Env))
+	for k, v := range cfg.Env {
+		env = append(env, mcpServerEnvValue{Key: k, Value: v})
+	}
+	sort.Slice(env, func(i, j int) bool {
+		return env[i].Key < env[j].Key
+	})
+
+	identity := mcpServerConfigIdentity{
+		Name:      cfg.Name,
+		Transport: cfg.Transport,
+		Command:   cfg.Command,
+		Args:      append([]string{}, cfg.Args...),
+		URL:       cfg.URL,
+		Env:       env,
+		Enabled:   cfg.Enabled,
+	}
+
+	if identity.Args == nil {
+		identity.Args = []string{}
+	}
+	if identity.Env == nil {
+		identity.Env = []mcpServerEnvValue{}
+	}
+
+	data, err := json.Marshal(identity)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func configuredMCPServerIdentityDigests(cfg *config.AppConfig) (map[string]string, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+	out := make(map[string]string, len(cfg.MCP.Servers))
+	for _, server := range cfg.MCP.Servers {
+		digest, err := mcpServerConfigIdentityDigest(server)
+		if err != nil {
+			return nil, fmt.Errorf("compute MCP server config identity for %s: %w", server.Name, err)
+		}
+		out[server.Name] = digest
+	}
+	return out, nil
+}
+
+func matchingSurfaceCacheEntry(cache map[string]cachedMCPServerSurface, serverName, currentIdentityDigest string) (cachedMCPServerSurface, bool) {
+	if len(cache) == 0 || serverName == "" || currentIdentityDigest == "" {
+		return cachedMCPServerSurface{}, false
+	}
+	entry, ok := cache[serverName]
+	if !ok || entry.ConfigIdentityDigest == "" || entry.ConfigIdentityDigest != currentIdentityDigest {
+		return cachedMCPServerSurface{}, false
+	}
+	return entry, true
+}
+
+func (s *ChatService) reservePendingStartLocked(sessionID string, generation uint64) (*SessionRun, error) {
+	if generation == 0 {
+		return nil, fmt.Errorf("runner bundle generation is required")
+	}
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.running {
+		return nil, fmt.Errorf("agent is already running in this session")
+	}
+	if !run.starting {
+		return nil, fmt.Errorf("session %s startup is no longer active", sessionID)
+	}
+	run.pendingStartBundleGeneration = generation
+	return run, nil
+}
+
+func (s *ChatService) clearPendingStartLocked(sessionID string) {
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		s.cleanupRetiredBundlesLocked()
+		return
+	}
+	run.starting = false
+	run.pendingStartBundleGeneration = 0
+	s.cleanupRetiredBundlesLocked()
+}
+
+func (s *ChatService) reserveInstalledBundleLocked(sessionID string) (*RunnerBundle, error) {
+	bundle := s.installedBundle
+	if bundle == nil {
+		return nil, fmt.Errorf("runner bundle is not installed")
+	}
+	if _, err := s.reservePendingStartLocked(sessionID, bundle.Generation); err != nil {
+		return nil, err
+	}
+	return bundle, nil
 }
 
 // activeRun returns the SessionRun for the currently active session.
@@ -848,7 +973,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	run := s.activeRun()
 
 	// Per-session concurrent run guard
-	if run.running {
+	if run.running || run.starting {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
@@ -886,10 +1011,14 @@ func (s *ChatService) SendMessage(userMessage string) error {
 
 	sessionID := run.sessionID
 	mode := run.mode
+	run.starting = true
 	s.mu.Unlock()
 
-	bundle, err := s.ensureBundleReadyForNewRun(s.ctx)
+	bundle, err := s.ensureBundleReadyForNewRun(s.ctx, sessionID)
 	if err != nil {
+		s.mu.Lock()
+		s.clearPendingStartLocked(sessionID)
+		s.mu.Unlock()
 		logger.Error("[CHAT] Failed to prepare runner bundle", err)
 		wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
 			"sessionId": sessionID,
@@ -901,6 +1030,9 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	runnerKind := runnerKindForMode(mode)
 	runner := runnerForKind(bundle, runnerKind)
 	if runner == nil {
+		s.mu.Lock()
+		s.clearPendingStartLocked(sessionID)
+		s.mu.Unlock()
 		return fmt.Errorf("runner %s unavailable for bundle generation %d", runnerKind, bundle.Generation)
 	}
 
@@ -912,10 +1044,21 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	if !ok {
 		s.mu.Unlock()
 		cancel()
+		s.mu.Lock()
+		s.cleanupRetiredBundlesLocked()
+		s.mu.Unlock()
 		return fmt.Errorf("session %s not found", sessionID)
 	}
+	if !run.starting || run.pendingStartBundleGeneration != bundle.Generation {
+		s.clearPendingStartLocked(sessionID)
+		s.mu.Unlock()
+		cancel()
+		return fmt.Errorf("session %s startup is no longer active", sessionID)
+	}
 	run.cancelFn = cancel
+	run.starting = false
 	run.running = true
+	run.pendingStartBundleGeneration = 0
 	run.activeBundleGeneration = bundle.Generation
 	run.activeRunnerKind = runnerKind
 	done := make(chan struct{})
@@ -1779,10 +1922,23 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		return nil
 	}
 
+	cfg, _, err := s.currentConfigSnapshot()
+	if err != nil || cfg == nil {
+		return cloneAndSortDiscoveredTools(records)
+	}
+	configuredServers, err := configuredMCPServerIdentityDigests(cfg)
+	if err != nil {
+		return cloneAndSortDiscoveredTools(records)
+	}
+
 	s.mu.Lock()
-	var catalog *tools.ToolCatalog
+	var (
+		catalog *tools.ToolCatalog
+		cache   map[string]cachedMCPServerSurface
+	)
 	if s.installedBundle != nil {
 		catalog = s.installedBundle.MCPCatalog
+		cache = cloneSurfaceCache(s.installedBundle.CachedSurfaceMetadataByServer)
 	}
 	s.mu.Unlock()
 
@@ -1790,12 +1946,42 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		return cloneAndSortDiscoveredTools(records)
 	}
 
-	valid := make(map[string]struct{})
+	knownDeferredCanonicalNames := make(map[string]struct{})
+	serverHasTrustedMetadata := make(map[string]bool)
+	trustedServerCanonicalNames := make(map[string]map[string]struct{})
 	for _, entry := range catalog.Entries() {
 		if !entry.IsMcp || !entry.ShouldDefer {
 			continue
 		}
-		valid[entry.CanonicalName] = struct{}{}
+		knownDeferredCanonicalNames[entry.CanonicalName] = struct{}{}
+		if entry.Server == "" {
+			continue
+		}
+		serverHasTrustedMetadata[entry.Server] = true
+		if _, ok := trustedServerCanonicalNames[entry.Server]; !ok {
+			trustedServerCanonicalNames[entry.Server] = make(map[string]struct{})
+		}
+		trustedServerCanonicalNames[entry.Server][entry.CanonicalName] = struct{}{}
+	}
+	for server := range cache {
+		expectedDigest, ok := configuredServers[server]
+		if !ok {
+			continue
+		}
+		trustedCacheEntry, trusted := matchingSurfaceCacheEntry(cache, server, expectedDigest)
+		if !trusted {
+			continue
+		}
+		serverHasTrustedMetadata[server] = true
+		if _, exists := trustedServerCanonicalNames[server]; !exists {
+			trustedServerCanonicalNames[server] = make(map[string]struct{})
+		}
+		for _, entry := range trustedCacheEntry.ActionEntries {
+			if !entry.IsMcp || !entry.ShouldDefer {
+				continue
+			}
+			trustedServerCanonicalNames[server][entry.CanonicalName] = struct{}{}
+		}
 	}
 
 	pruned := make([]model.DiscoveredToolRecord, 0, len(records))
@@ -1803,8 +1989,19 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		if record.CanonicalName == "" {
 			continue
 		}
-		if _, ok := valid[record.CanonicalName]; !ok {
+		if record.Server != "" {
+			if _, ok := configuredServers[record.Server]; !ok {
+				continue
+			}
+		}
+		if _, ok := knownDeferredCanonicalNames[record.CanonicalName]; ok {
+			pruned = append(pruned, record)
 			continue
+		}
+		if record.Server != "" && serverHasTrustedMetadata[record.Server] {
+			if _, ok := trustedServerCanonicalNames[record.Server][record.CanonicalName]; !ok {
+				continue
+			}
 		}
 		pruned = append(pruned, record)
 	}
@@ -1940,6 +2137,10 @@ func (s *ChatService) probeRunnerBundleSurface(ctx context.Context, cfg *config.
 		ActionCatalog:                 tools.NewToolCatalog(),
 		CachedSurfaceMetadataByServer: make(map[string]cachedMCPServerSurface),
 	}
+	configIdentityDigests, err := configuredMCPServerIdentityDigests(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, serverCfg := range cfg.MCP.Servers {
 		if !serverCfg.Enabled {
@@ -1953,7 +2154,9 @@ func (s *ChatService) probeRunnerBundleSurface(ctx context.Context, cfg *config.
 		}
 		surface.Handles = append(surface.Handles, handle)
 
-		cache := previousCache[serverCfg.Name]
+		identityDigest := configIdentityDigests[serverCfg.Name]
+		cache, _ := matchingSurfaceCacheEntry(previousCache, serverCfg.Name, identityDigest)
+		cache.ConfigIdentityDigest = identityDigest
 		if handle.SupportsResources() {
 			cache.SupportsResources = true
 		}
@@ -2252,13 +2455,16 @@ func surfaceRelevantFingerprint(catalog *tools.ToolCatalog, handles []*tools.MCP
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context) (*RunnerBundle, error) {
+func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID string) (*RunnerBundle, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
 
 	for {
-		cfg, digest, err := s.currentConfigSnapshot()
+		cfg, currentDigest, err := s.currentConfigSnapshot()
 		if err != nil {
 			return nil, err
 		}
@@ -2267,20 +2473,19 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context) (*RunnerBu
 		bundle := s.installedBundle
 		if bundle == nil {
 			s.mu.Unlock()
-			newBundle, err := s.prepareRunnerBundle(ctx, cfg, digest, nil)
+			newBundle, err := s.prepareRunnerBundle(ctx, cfg, currentDigest, nil)
 			if err != nil {
 				return nil, err
 			}
 
 			s.mu.Lock()
 			if s.installedBundle == nil {
-				currentCfg, currentDigest, digestErr := s.currentConfigSnapshot()
-				if digestErr == nil && currentDigest == digest {
+				currentCfg, latestDigest, digestErr := s.currentConfigSnapshot()
+				if digestErr == nil && latestDigest == currentDigest {
 					_ = currentCfg
 					s.installRunnerBundleLocked(newBundle)
-					bundle = s.installedBundle
 					s.mu.Unlock()
-					return bundle, nil
+					continue
 				}
 			}
 			s.mu.Unlock()
@@ -2288,22 +2493,45 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context) (*RunnerBu
 			continue
 		}
 
-		if s.freshnessTTL <= 0 || s.now().Sub(bundle.LastFreshnessCheckAt) < s.freshnessTTL {
+		configChanged := currentDigest != bundle.ConfigDigest
+		if !configChanged && (s.freshnessTTL <= 0 || s.now().Sub(bundle.LastFreshnessCheckAt) < s.freshnessTTL) {
+			if _, err := s.reservePendingStartLocked(sessionID, bundle.Generation); err != nil {
+				s.mu.Unlock()
+				return nil, err
+			}
 			s.mu.Unlock()
 			return bundle, nil
 		}
 
-		key := bundleKey(bundle.Generation, bundle.ConfigDigest)
-		if s.freshnessTask != nil && s.freshnessTask.key == key {
-			done := s.freshnessTask.done
+		if s.freshnessTask != nil {
+			task := s.freshnessTask
+			done := task.done
+			reuse := currentDigest == task.TargetConfigDigest
 			s.mu.Unlock()
 			<-done
+			if !reuse {
+				continue
+			}
+			if task.err != nil {
+				if task.fallbackToCurrent {
+					s.mu.Lock()
+					bundle, err := s.reserveInstalledBundleLocked(sessionID)
+					s.mu.Unlock()
+					if err != nil {
+						return nil, err
+					}
+					return bundle, nil
+				}
+				return nil, task.err
+			}
 			continue
 		}
 
+		key := bundleKey(bundle.Generation, bundle.ConfigDigest)
 		task := &freshnessTask{
-			key:  key,
-			done: make(chan struct{}),
+			key:                key,
+			TargetConfigDigest: currentDigest,
+			done:               make(chan struct{}),
 		}
 		s.freshnessTask = task
 		expectedGeneration := bundle.Generation
@@ -2312,9 +2540,18 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context) (*RunnerBu
 		prevCache := cloneSurfaceCache(bundle.CachedSurfaceMetadataByServer)
 		s.mu.Unlock()
 
-		leaderBundle := s.runFreshnessTask(ctx, task, cfg, expectedGeneration, expectedDigest, expectedFingerprint, prevCache)
-		if leaderBundle != nil {
-			return leaderBundle, nil
+		s.runFreshnessTask(ctx, task, cfg, expectedGeneration, expectedDigest, expectedFingerprint, currentDigest, prevCache)
+		if task.err != nil {
+			if task.fallbackToCurrent {
+				s.mu.Lock()
+				bundle, err := s.reserveInstalledBundleLocked(sessionID)
+				s.mu.Unlock()
+				if err != nil {
+					return nil, err
+				}
+				return bundle, nil
+			}
+			return nil, task.err
 		}
 	}
 }
@@ -2326,63 +2563,58 @@ func (s *ChatService) runFreshnessTask(
 	expectedGeneration uint64,
 	expectedDigest string,
 	expectedFingerprint string,
+	targetConfigDigest string,
 	prevCache map[string]cachedMCPServerSurface,
-) *RunnerBundle {
-	finish := func(bundle *RunnerBundle) *RunnerBundle {
+) {
+	finish := func() {
 		s.mu.Lock()
 		if s.freshnessTask == task {
 			s.freshnessTask = nil
 		}
 		close(task.done)
 		s.mu.Unlock()
-		return bundle
 	}
 
 	surface, err := s.probeRunnerBundleSurface(ctx, cfg, prevCache)
 	if err != nil {
 		logger.Warn("[RUNNER] Freshness probe failed", "error", err)
-		s.mu.Lock()
-		current := s.installedBundle
-		s.mu.Unlock()
-		return finish(current)
+		task.err = err
+		task.fallbackToCurrent = true
+		finish()
+		return
 	}
 
-	if surface.SurfaceRelevantFingerprint == expectedFingerprint {
+	if targetConfigDigest == expectedDigest && surface.SurfaceRelevantFingerprint == expectedFingerprint {
 		s.closeMCPHandlesLocked(surface.Handles)
 		s.mu.Lock()
-		current := s.installedBundle
-		if current != nil {
+		if s.installedBundle != nil {
 			s.updateBundleFreshnessLocked(expectedGeneration, expectedDigest, s.now())
-			current = s.installedBundle
 		}
 		if s.freshnessTask == task {
 			s.freshnessTask = nil
 		}
 		close(task.done)
 		s.mu.Unlock()
-		return current
+		return
 	}
 
-	newBundle, err := s.prepareRunnerBundleFromSurface(ctx, cfg, expectedDigest, surface)
+	newBundle, err := s.prepareRunnerBundleFromSurface(ctx, cfg, targetConfigDigest, surface)
 	if err != nil {
 		logger.Warn("[RUNNER] Freshness rebuild preparation failed", "error", err)
-		s.mu.Lock()
-		current := s.installedBundle
-		s.mu.Unlock()
-		return finish(current)
+		task.err = err
+		finish()
+		return
 	}
 
 	s.mu.Lock()
-	current := s.installedBundle
-	if current != nil && current.Generation == expectedGeneration && current.ConfigDigest == expectedDigest {
+	if s.installedBundle != nil && s.installedBundle.Generation == expectedGeneration && s.installedBundle.ConfigDigest == expectedDigest {
 		s.installRunnerBundleLocked(newBundle)
-		current = s.installedBundle
 		if s.freshnessTask == task {
 			s.freshnessTask = nil
 		}
 		close(task.done)
 		s.mu.Unlock()
-		return current
+		return
 	}
 	if s.freshnessTask == task {
 		s.freshnessTask = nil
@@ -2390,7 +2622,6 @@ func (s *ChatService) runFreshnessTask(
 	close(task.done)
 	s.mu.Unlock()
 	s.closeRunnerBundleLocked(newBundle)
-	return current
 }
 
 // ---------------------------------------------------------------------------
