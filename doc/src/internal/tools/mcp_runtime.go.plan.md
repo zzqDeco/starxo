@@ -18,6 +18,9 @@
 - server 状态至少包含 `disabled / pending / connected / failed / needs_auth`
 - metadata 缓存包括 `Tools / Resources / ResourceTemplates`
 - action tool adapter 对外暴露 canonical name，对内调用 remote name
+- service 层复用 cached metadata 时必须额外校验 server config identity：
+  - 只有 `server name + ConfigIdentityDigest` 同时匹配当前 config 时才可信
+  - 同名但 command / url / env / transport 等 identity 变化时，旧 cache 不能复用
 
 ## 5. 依赖关系
 - 外部依赖:
