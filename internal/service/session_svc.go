@@ -454,9 +454,15 @@ func (s *SessionService) saveSessionByIDBlockingLocked(sessionID string) error {
 	if snapshot == nil || snapshot.SessionData == nil {
 		return nil
 	}
+	if s.chatService != nil {
+		snapshot.SessionData.DiscoveredTools = s.chatService.PruneDiscoveredToolsForSave(sessionID, snapshot.SessionData.DiscoveredTools)
+	}
 
 	if err := s.sessionStore.SaveSessionData(sessionID, snapshot.SessionData); err != nil {
 		return fmt.Errorf("failed to save session data: %w", err)
+	}
+	if s.chatService != nil {
+		s.chatService.ReplaceDiscoveredTools(sessionID, snapshot.SessionData.DiscoveredTools)
 	}
 
 	var sess *model.Session

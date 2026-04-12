@@ -17,6 +17,7 @@ type ToolPermissionContext struct {
 type MCPServerPermissionState struct {
 	State                 MCPServerState
 	HasCachedToolMetadata bool
+	SupportsResources     bool
 }
 
 type PermissionDecision struct {
@@ -41,6 +42,23 @@ func CanSearchCatalogEntry(entry CatalogEntry, ctx ToolPermissionContext) Permis
 	}
 	if ctx.Mode == "plan" && !entry.ReadOnlyEligible() {
 		return PermissionDecision{Allowed: false, Reason: "tool is not read-only in plan mode"}
+	}
+
+	if entry.IsResourceTool && entry.Server == "" {
+		for _, server := range ctx.Servers {
+			if !server.SupportsResources {
+				continue
+			}
+			switch server.State {
+			case MCPServerStateConnected:
+				return PermissionDecision{Allowed: true}
+			case MCPServerStatePending:
+				if server.HasCachedToolMetadata {
+					return PermissionDecision{Allowed: true}
+				}
+			}
+		}
+		return PermissionDecision{Allowed: false, Reason: "no searchable MCP resource server available"}
 	}
 
 	server := ctx.Servers[entry.Server]
@@ -70,6 +88,15 @@ func CanLoadCatalogEntry(entry CatalogEntry, ctx ToolPermissionContext) Permissi
 	}
 	if ctx.Mode == "plan" && !entry.ReadOnlyEligible() {
 		return PermissionDecision{Allowed: false, Reason: "tool is not read-only in plan mode"}
+	}
+
+	if entry.IsResourceTool && entry.Server == "" {
+		for _, server := range ctx.Servers {
+			if server.SupportsResources && server.State == MCPServerStateConnected {
+				return PermissionDecision{Allowed: true}
+			}
+		}
+		return PermissionDecision{Allowed: false, Reason: "no loadable MCP resource server available"}
 	}
 
 	server := ctx.Servers[entry.Server]

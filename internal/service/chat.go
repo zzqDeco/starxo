@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -61,10 +62,10 @@ type PendingInterrupt struct {
 // SessionRun holds per-session agent execution state.
 // Each session gets its own context engine, timeline, and run lifecycle.
 type SessionRun struct {
-	sessionID string
-	stateMu   sync.RWMutex
-	ctxEngine *agentctx.Engine
-	timeline  *agentctx.TimelineCollector
+	sessionID       string
+	stateMu         sync.RWMutex
+	ctxEngine       *agentctx.Engine
+	timeline        *agentctx.TimelineCollector
 	discoveredTools map[string]model.DiscoveredToolRecord
 
 	// Run lifecycle
@@ -178,6 +179,9 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 	for _, record := range r.discoveredTools {
 		discovered = append(discovered, record)
 	}
+	sort.Slice(discovered, func(i, j int) bool {
+		return discovered[i].CanonicalName < discovered[j].CanonicalName
+	})
 
 	return &SessionSnapshot{
 		HasSessionRun: true,
@@ -208,12 +212,180 @@ func (r *SessionRun) upsertDiscoveredTool(record model.DiscoveredToolRecord) boo
 	return true
 }
 
+func (r *SessionRun) discoveredToolsSnapshot() map[string]model.DiscoveredToolRecord {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	out := make(map[string]model.DiscoveredToolRecord, len(r.discoveredTools))
+	for k, v := range r.discoveredTools {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *SessionRun) replaceDiscoveredTools(records []model.DiscoveredToolRecord) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.discoveredTools = make(map[string]model.DiscoveredToolRecord, len(records))
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		r.discoveredTools[record.CanonicalName] = record
+	}
+}
+
 func cloneStreamingState(in *model.StreamingState) *model.StreamingState {
 	if in == nil {
 		return nil
 	}
 	cp := *in
 	return &cp
+}
+
+type deferredMCPProvider struct {
+	chat    *ChatService
+	catalog *tools.ToolCatalog
+	handles []*tools.MCPServerHandle
+}
+
+func (p *deferredMCPProvider) MCPHandleSnapshot() []*tools.MCPServerHandle {
+	if len(p.handles) == 0 {
+		return nil
+	}
+	out := make([]*tools.MCPServerHandle, len(p.handles))
+	copy(out, p.handles)
+	return out
+}
+
+func (p *deferredMCPProvider) LookupCatalogEntry(name string) (tools.CatalogEntry, bool) {
+	if p.catalog == nil {
+		return tools.CatalogEntry{}, false
+	}
+	return p.catalog.LookupExact(name)
+}
+
+func (p *deferredMCPProvider) ToolPermissionContext(ctx context.Context) (tools.ToolPermissionContext, error) {
+	sessionID, mode, _, err := p.sessionState(ctx)
+	if err != nil {
+		return tools.ToolPermissionContext{}, err
+	}
+	return p.permissionContext(sessionID, mode), nil
+}
+
+func (p *deferredMCPProvider) DeferredMCPState(ctx context.Context) (tools.DeferredMCPState, error) {
+	sessionID, mode, discovered, err := p.sessionState(ctx)
+	if err != nil {
+		return tools.DeferredMCPState{}, err
+	}
+	return tools.ComputeDeferredMCPState(p.catalog, discovered, p.permissionContext(sessionID, mode)), nil
+}
+
+func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSearchState, error) {
+	state, err := p.DeferredMCPState(ctx)
+	if err != nil {
+		return tools.ToolSearchState{}, err
+	}
+	return tools.ToolSearchState{
+		SearchablePool:   state.SearchablePoolForMode,
+		CurrentLoaded:    state.CurrentLoadedTools,
+		PendingMCPServer: state.PendingMCPServers,
+	}, nil
+}
+
+func (p *deferredMCPProvider) AddDiscoveredTools(ctx context.Context, records []model.DiscoveredToolRecord) error {
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		return fmt.Errorf("sessionID missing from context")
+	}
+
+	changed := false
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		entry, ok := p.LookupCatalogEntry(record.CanonicalName)
+		if !ok || !entry.ShouldDefer || entry.AlwaysLoad {
+			continue
+		}
+		if p.chat.AddDiscoveredTool(sessionID, record) {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+
+	p.chat.mu.Lock()
+	ss := p.chat.sessionService
+	p.chat.mu.Unlock()
+	if ss == nil {
+		return nil
+	}
+	return ss.SaveSessionByID(sessionID)
+}
+
+func (p *deferredMCPProvider) sessionState(ctx context.Context) (string, string, map[string]model.DiscoveredToolRecord, error) {
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		return "", "", nil, fmt.Errorf("sessionID missing from context")
+	}
+
+	p.chat.mu.Lock()
+	run, ok := p.chat.sessions[sessionID]
+	if !ok {
+		p.chat.mu.Unlock()
+		return "", "", nil, fmt.Errorf("session %s not found", sessionID)
+	}
+	mode := run.mode
+	p.chat.mu.Unlock()
+
+	return sessionID, mode, run.discoveredToolsSnapshot(), nil
+}
+
+func (p *deferredMCPProvider) permissionContext(sessionID, mode string) tools.ToolPermissionContext {
+	servers := make(map[string]tools.MCPServerPermissionState, len(p.handles))
+	for _, handle := range p.handles {
+		if handle == nil || handle.Name == "" {
+			continue
+		}
+		servers[handle.Name] = tools.MCPServerPermissionState{
+			State:                 handle.State,
+			HasCachedToolMetadata: handle.ToolMetadataReady || len(handle.Tools) > 0,
+			SupportsResources:     handle.SupportsResources(),
+		}
+	}
+	return tools.ToolPermissionContext{
+		SessionID: sessionID,
+		Mode:      mode,
+		Servers:   servers,
+	}
+}
+
+func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx context.Context, name, input string) (string, error) {
+	return func(ctx context.Context, name, input string) (string, error) {
+		state, err := provider.DeferredMCPState(ctx)
+		if err != nil {
+			return "", err
+		}
+
+		if name == "tool_search" {
+			if len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0 {
+				return "", nil
+			}
+			return "tool_search is unavailable because no deferred MCP tools are currently searchable", nil
+		}
+
+		if entry, ok := provider.LookupCatalogEntry(name); ok {
+			for _, loaded := range state.CurrentLoadedTools {
+				if loaded.CanonicalName == entry.CanonicalName {
+					return fmt.Sprintf("tool %s is already loaded; call it by its canonical name %s", name, entry.CanonicalName), nil
+				}
+			}
+			return fmt.Sprintf("tool %s is available but not currently loaded; use tool_search first", entry.CanonicalName), nil
+		}
+
+		return fmt.Sprintf("unknown tool %s", name), nil
+	}
 }
 
 // ChatService manages chat interactions between the frontend and the AI agent.
@@ -224,6 +396,7 @@ type ChatService struct {
 	deepAgent       adk.Agent
 	defaultRunner   *adk.Runner
 	planRunner      *adk.Runner
+	mcpCatalog      *tools.ToolCatalog
 	mcpHandles      []*tools.MCPServerHandle
 	retiredMCPs     []*tools.MCPServerHandle
 	sandbox         *sandbox.SandboxManager
@@ -281,6 +454,7 @@ func (s *ChatService) InvalidateRunner() {
 
 func (s *ChatService) invalidateRunners() {
 	s.retireMCPHandlesLocked(s.mcpHandles)
+	s.mcpCatalog = nil
 	s.mcpHandles = nil
 	s.deepAgent = nil
 	s.defaultRunner = nil
@@ -313,7 +487,7 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		return run
 	}
 	run := &SessionRun{
-		sessionID: sessionID,
+		sessionID:       sessionID,
 		ctxEngine:       agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
 		timeline:        agentctx.NewTimelineCollector(),
 		discoveredTools: make(map[string]model.DiscoveredToolRecord),
@@ -1372,6 +1546,83 @@ func (s *ChatService) AddDiscoveredTool(sessionID string, record model.Discovere
 	return run.upsertDiscoveredTool(record)
 }
 
+func (s *ChatService) ReplaceDiscoveredTools(sessionID string, records []model.DiscoveredToolRecord) {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	run.replaceDiscoveredTools(records)
+}
+
+func (s *ChatService) PruneDiscoveredToolsForSave(sessionID string, records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+	if len(records) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	mode := "default"
+	if ok {
+		mode = run.mode
+	}
+	catalog := s.mcpCatalog
+	handles := append([]*tools.MCPServerHandle(nil), s.mcpHandles...)
+	s.mu.Unlock()
+
+	if catalog == nil {
+		return cloneAndSortDiscoveredTools(records)
+	}
+
+	discovered := make(map[string]model.DiscoveredToolRecord, len(records))
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		discovered[record.CanonicalName] = record
+	}
+
+	provider := &deferredMCPProvider{
+		chat:    s,
+		catalog: catalog,
+		handles: handles,
+	}
+	state := tools.ComputeDeferredMCPState(catalog, discovered, provider.permissionContext(sessionID, mode))
+
+	pruned := make([]model.DiscoveredToolRecord, 0, len(state.EffectiveDiscovered))
+	for _, entry := range state.EffectiveDiscovered {
+		record, ok := discovered[entry.CanonicalName]
+		if !ok {
+			continue
+		}
+		pruned = append(pruned, record)
+	}
+	return cloneAndSortDiscoveredTools(pruned)
+}
+
+func cloneAndSortDiscoveredTools(records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]model.DiscoveredToolRecord, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		if record.CanonicalName == "" {
+			continue
+		}
+		if _, exists := seen[record.CanonicalName]; exists {
+			continue
+		}
+		seen[record.CanonicalName] = struct{}{}
+		out = append(out, record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CanonicalName < out[j].CanonicalName
+	})
+	return out
+}
+
 // GetSessionRunSnapshot returns a snapshot of a session's run state for the
 // SessionSwitchedEvent. Safe to call from SessionService.
 func (s *ChatService) GetSessionRunSnapshot(sessionID string) (running bool, currentAgent, mode string, interrupt *InterruptEvent) {
@@ -1451,13 +1702,7 @@ func (s *ChatService) buildRunnersLocked() error {
 	}
 	logger.RunnerEvent("chat_model_created", "type", cfg.LLM.Type, "model", cfg.LLM.Model)
 
-	// Register built-in tools
-	registry := tools.NewToolRegistry()
-	if err := tools.RegisterBuiltinTools(registry, op, s.getWorkspacePath()); err != nil {
-		return fmt.Errorf("failed to register builtin tools: %w", err)
-	}
-
-	mcpHandles, mcpCatalog, err := tools.BuildMCPActionCatalog(ctx, cfg.MCP.Servers)
+	mcpHandles, mcpActionCatalog, err := tools.BuildMCPActionCatalog(ctx, cfg.MCP.Servers)
 	if err != nil {
 		return fmt.Errorf("failed to build MCP action catalog: %w", err)
 	}
@@ -1470,28 +1715,69 @@ func (s *ChatService) buildRunnersLocked() error {
 				fmt.Sprintf("MCP server %s unavailable (%s): %v", handle.Name, handle.State, handle.LastError))
 		}
 	}
-	toolsByServer := make(map[string][]einotool.BaseTool)
-	for _, entry := range mcpCatalog.Entries() {
-		toolsByServer[entry.Server] = append(toolsByServer[entry.Server], entry.Tool)
-	}
-	for serverName, serverTools := range toolsByServer {
-		registry.RegisterMCPTools(serverName, serverTools)
+
+	provider := &deferredMCPProvider{
+		chat:    s,
+		handles: mcpHandles,
 	}
 
-	extraTools := registry.GetAll()
+	topLevelCatalog := tools.NewToolCatalog()
+	for _, entry := range mcpActionCatalog.Entries() {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(mcpHandles)
+			return fmt.Errorf("failed to register MCP action tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
+
+	resourceEntries, err := tools.NewMCPResourceCatalogEntries(provider)
+	if err != nil {
+		s.closeMCPHandlesLocked(mcpHandles)
+		return fmt.Errorf("failed to build MCP resource tools: %w", err)
+	}
+	for _, entry := range resourceEntries {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(mcpHandles)
+			return fmt.Errorf("failed to register MCP resource tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
+	provider.catalog = topLevelCatalog
+
+	toolSearchTool, err := tools.NewToolSearchTool(provider)
+	if err != nil {
+		s.closeMCPHandlesLocked(mcpHandles)
+		return fmt.Errorf("failed to build tool_search: %w", err)
+	}
+
+	extraTools := make([]einotool.BaseTool, 0, len(topLevelCatalog.CanonicalNames())+1)
+	extraTools = append(extraTools, toolSearchTool)
+	extraTools = append(extraTools, topLevelCatalog.Tools()...)
 
 	// Build agent context
 	ac := s.buildAgentContext()
+	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
+	unknownToolsHandler := newDeferredUnknownToolHandler(provider)
 
 	// Build the core deep agents with mode-specific permission boundaries.
-	deepAgentDefault, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault)
+	deepAgentDefault, err := agent.BuildDeepAgentForMode(
+		ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault,
+		[]adk.ChatModelAgentMiddleware{deferredHandler},
+		unknownToolsHandler,
+	)
 	if err != nil {
 		s.closeMCPHandlesLocked(mcpHandles)
 		logger.Error("[RUNNER] Failed to build default deep agent", err)
 		return fmt.Errorf("failed to build default deep agent: %w", err)
 	}
 
-	deepAgentPlan, err := agent.BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan)
+	deepAgentPlan, err := agent.BuildDeepAgentForMode(
+		ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan,
+		[]adk.ChatModelAgentMiddleware{deferredHandler},
+		unknownToolsHandler,
+	)
 	if err != nil {
 		s.closeMCPHandlesLocked(mcpHandles)
 		logger.Error("[RUNNER] Failed to build plan deep agent", err)
@@ -1513,6 +1799,7 @@ func (s *ChatService) buildRunnersLocked() error {
 	s.deepAgent = deepAgentDefault
 	s.defaultRunner = defaultRunner
 	s.planRunner = planRunner
+	s.mcpCatalog = topLevelCatalog
 	s.mcpHandles = mcpHandles
 	s.retireMCPHandlesLocked(oldHandles)
 

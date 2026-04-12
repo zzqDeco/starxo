@@ -5,18 +5,18 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/components/tool"
+	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	defaultMCPResourceLimit   = 50
-	maxMCPResourceTextBytes   = 32 * 1024
-	maxMCPResourceBlobBytes   = 32 * 1024
-	ListMCPResourcesName      = "list_mcp_resources"
-	ListMCPTemplatesName      = "list_mcp_resource_templates"
-	ReadMCPResourceName       = "read_mcp_resource"
+	defaultMCPResourceLimit = 50
+	maxMCPResourceTextBytes = 32 * 1024
+	maxMCPResourceBlobBytes = 32 * 1024
+	ListMCPResourcesName    = "list_mcp_resources"
+	ListMCPTemplatesName    = "list_mcp_resource_templates"
+	ReadMCPResourceName     = "read_mcp_resource"
 )
 
 type MCPHandleSource interface {
@@ -199,6 +199,75 @@ func NewReadMCPResourceTool(source MCPHandleSource) (tool.BaseTool, error) {
 			}
 			return out, nil
 		})
+}
+
+func NewMCPResourceCatalogEntries(source MCPHandleSource) ([]CatalogEntry, error) {
+	listTool, err := NewListMCPResourcesTool(source)
+	if err != nil {
+		return nil, err
+	}
+	templateTool, err := NewListMCPResourceTemplatesTool(source)
+	if err != nil {
+		return nil, err
+	}
+	readTool, err := NewReadMCPResourceTool(source)
+	if err != nil {
+		return nil, err
+	}
+
+	return []CatalogEntry{
+		{
+			CanonicalName:   ListMCPResourcesName,
+			Source:          ToolSourceMCP,
+			Kind:            ToolKindResourceList,
+			Title:           "List MCP Resources",
+			Description:     "List available MCP resources on a connected server.",
+			ShouldDefer:     true,
+			IsMcp:           true,
+			IsResourceTool:  true,
+			ReadOnlyHint:    true,
+			ReadOnlyTrusted: true,
+			PermissionSpec: PermissionSpec{
+				AllowSearch:  true,
+				AllowExecute: true,
+			},
+			Tool: listTool,
+		},
+		{
+			CanonicalName:   ListMCPTemplatesName,
+			Source:          ToolSourceMCP,
+			Kind:            ToolKindResourceTemplate,
+			Title:           "List MCP Resource Templates",
+			Description:     "List available MCP resource templates on a connected server.",
+			ShouldDefer:     true,
+			IsMcp:           true,
+			IsResourceTool:  true,
+			ReadOnlyHint:    true,
+			ReadOnlyTrusted: true,
+			PermissionSpec: PermissionSpec{
+				AllowSearch:  true,
+				AllowExecute: true,
+			},
+			Tool: templateTool,
+		},
+		{
+			CanonicalName:   ReadMCPResourceName,
+			Source:          ToolSourceMCP,
+			Kind:            ToolKindResourceRead,
+			Title:           "Read MCP Resource",
+			Description:     "Read an MCP resource by URI from a connected server.",
+			ShouldDefer:     true,
+			IsMcp:           true,
+			IsResourceTool:  true,
+			ReadOnlyHint:    true,
+			ReadOnlyTrusted: true,
+			PermissionSpec: PermissionSpec{
+				AllowSearch:  true,
+				AllowExecute: true,
+			},
+			Tool: readTool,
+		},
+	}, nil
 }
 
 func selectMCPHandle(handles []*MCPServerHandle, requested string) (*MCPServerHandle, error) {
