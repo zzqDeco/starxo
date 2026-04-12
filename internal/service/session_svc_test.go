@@ -73,12 +73,16 @@ func TestSessionServiceSaveSessionByIDPreservesDeferredDiscoveryAcrossModes(t *t
 	chat.mu.Lock()
 	run := chat.getOrCreateRun(sess.ID)
 	run.mode = "plan"
-	chat.mcpCatalog = catalog
-	chat.mcpHandles = []*tools.MCPServerHandle{{
-		Name:              "alpha",
-		State:             tools.MCPServerStateConnected,
-		ToolMetadataReady: true,
-	}}
+	chat.installedBundle = &RunnerBundle{
+		Generation:   1,
+		ConfigDigest: "test",
+		MCPCatalog:   catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
 	chat.mu.Unlock()
 
 	run.addUserMessage("need readonly mcp")
