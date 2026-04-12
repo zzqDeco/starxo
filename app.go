@@ -122,7 +122,7 @@ func (a *App) startup(ctx context.Context) {
 
 	// Auto-save session after agent finishes (callback receives sessionID)
 	a.chatService.SetOnAgentDone(func(sessionID string) {
-		_ = a.sessionService.SaveCurrentSession()
+		_ = a.sessionService.SaveSessionByID(sessionID)
 	})
 
 	// Load or create default session

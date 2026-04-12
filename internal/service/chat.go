@@ -62,8 +62,10 @@ type PendingInterrupt struct {
 // Each session gets its own context engine, timeline, and run lifecycle.
 type SessionRun struct {
 	sessionID string
+	stateMu   sync.RWMutex
 	ctxEngine *agentctx.Engine
 	timeline  *agentctx.TimelineCollector
+	discoveredTools map[string]model.DiscoveredToolRecord
 
 	// Run lifecycle
 	running          bool
@@ -73,6 +75,145 @@ type SessionRun struct {
 	streamingState   *model.StreamingState
 	mode             string // "default" or "plan"
 	currentAgent     string
+}
+
+type SessionSnapshot struct {
+	SessionData   *model.SessionData
+	MessageCount  int
+	HasSessionRun bool
+}
+
+func (r *SessionRun) addUserMessage(content string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddUserMessage(content)
+}
+
+func (r *SessionRun) addAssistantMessage(content string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddAssistantMessage(content)
+}
+
+func (r *SessionRun) addToolResult(toolCallID, content string) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddToolResult(toolCallID, content)
+}
+
+func (r *SessionRun) addMessage(msg *schema.Message) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.AddMessage(msg)
+}
+
+func (r *SessionRun) addUserTurn(id, content string, timestamp int64) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.timeline.AddUserTurn(id, content, timestamp)
+}
+
+func (r *SessionRun) prepareMessages() []*schema.Message {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return r.ctxEngine.PrepareMessages()
+}
+
+func (r *SessionRun) clearSessionState() {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.ctxEngine.ClearHistory()
+	r.timeline.Clear()
+	r.streamingState = nil
+	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+}
+
+func (r *SessionRun) setStreamingState(state *model.StreamingState) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.streamingState = state
+}
+
+func (r *SessionRun) streamingStateSnapshot() *model.StreamingState {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	if r.streamingState == nil {
+		return nil
+	}
+	ss := *r.streamingState
+	return &ss
+}
+
+func (r *SessionRun) importSessionData(data *model.SessionData) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if data != nil && data.Messages != nil {
+		r.ctxEngine.ImportMessages(data.Messages)
+	} else {
+		r.ctxEngine.ClearHistory()
+	}
+	if data != nil && data.Display != nil {
+		r.timeline.Import(data.Display)
+	} else {
+		r.timeline.Clear()
+	}
+	r.streamingState = data.Streaming
+	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	if data == nil {
+		return
+	}
+	for _, record := range data.DiscoveredTools {
+		if record.CanonicalName == "" {
+			continue
+		}
+		r.discoveredTools[record.CanonicalName] = record
+	}
+}
+
+func (r *SessionRun) snapshot() *SessionSnapshot {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+
+	discovered := make([]model.DiscoveredToolRecord, 0, len(r.discoveredTools))
+	for _, record := range r.discoveredTools {
+		discovered = append(discovered, record)
+	}
+
+	return &SessionSnapshot{
+		HasSessionRun: true,
+		MessageCount:  r.ctxEngine.MessageCount(),
+		SessionData: &model.SessionData{
+			Version:         2,
+			Messages:        r.ctxEngine.ExportMessages(),
+			Display:         r.timeline.Export(),
+			Streaming:       cloneStreamingState(r.streamingState),
+			DiscoveredTools: discovered,
+		},
+	}
+}
+
+func (r *SessionRun) upsertDiscoveredTool(record model.DiscoveredToolRecord) bool {
+	if record.CanonicalName == "" {
+		return false
+	}
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if r.discoveredTools == nil {
+		r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	}
+	if _, exists := r.discoveredTools[record.CanonicalName]; exists {
+		return false
+	}
+	r.discoveredTools[record.CanonicalName] = record
+	return true
+}
+
+func cloneStreamingState(in *model.StreamingState) *model.StreamingState {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
 }
 
 // ChatService manages chat interactions between the frontend and the AI agent.
@@ -173,9 +314,10 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 	}
 	run := &SessionRun{
 		sessionID: sessionID,
-		ctxEngine: agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
-		timeline:  agentctx.NewTimelineCollector(),
-		mode:      "default",
+		ctxEngine:       agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
+		timeline:        agentctx.NewTimelineCollector(),
+		discoveredTools: make(map[string]model.DiscoveredToolRecord),
+		mode:            "default",
 	}
 	s.sessions[sessionID] = run
 	return run
@@ -362,10 +504,10 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	)
 
 	// Add user message to session's context engine
-	run.ctxEngine.AddUserMessage(userMessage)
+	run.addUserMessage(userMessage)
 
 	// Record user turn in session's timeline collector
-	run.timeline.AddUserTurn(
+	run.addUserTurn(
 		fmt.Sprintf("usr-%d", time.Now().UnixNano()),
 		userMessage,
 		time.Now().UnixMilli(),
@@ -417,7 +559,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	s.mu.Unlock()
 
 	// Prepare messages
-	messages := run.ctxEngine.PrepareMessages()
+	messages := run.prepareMessages()
 	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 
 	// Launch the agent run in a goroutine
@@ -460,7 +602,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 
 		// Add final assistant response to session's context engine
 		if lastContent != "" {
-			run.ctxEngine.AddAssistantMessage(lastContent)
+			run.addAssistantMessage(lastContent)
 		}
 
 		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
@@ -495,6 +637,8 @@ func (s *ChatService) SendMessage(userMessage string) error {
 func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 	evt.SessionID = run.sessionID
 	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	run.stateMu.Lock()
+	defer run.stateMu.Unlock()
 	run.timeline.AddEvent(model.DisplayEvent{
 		ID:        evt.ID,
 		Type:      evt.Type,
@@ -516,6 +660,8 @@ func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
 	if ok {
+		run.stateMu.Lock()
+		defer run.stateMu.Unlock()
 		run.timeline.AddEvent(model.DisplayEvent{
 			ID:        evt.ID,
 			Type:      evt.Type,
@@ -554,7 +700,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 			ss := s.sessionService
 			s.mu.Unlock()
 			if ss != nil {
-				go func() { _ = ss.SaveCurrentSession() }()
+				go func() { _ = ss.SaveSessionByID(sessionID) }()
 			}
 			lastSaveTime = time.Now()
 		}
@@ -683,7 +829,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				}
 
 				// Store tool call message in session's context history
-				run.ctxEngine.AddMessage(&schema.Message{
+				run.addMessage(&schema.Message{
 					Role:      schema.Assistant,
 					Content:   msg.Content,
 					ToolCalls: msg.ToolCalls,
@@ -707,7 +853,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				}, run)
 
 				// Store tool result in session's context history
-				run.ctxEngine.AddToolResult(msg.ToolCallID, msg.Content)
+				run.addToolResult(msg.ToolCallID, msg.Content)
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
 
@@ -756,7 +902,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 		for toolCallID := range pendingToolCalls {
 			logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
 				"tool_call_id", toolCallID, "session", sessionID)
-			run.ctxEngine.AddToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+			run.addToolResult(toolCallID, "Error: tool execution failed or was interrupted")
 		}
 	}
 
@@ -912,7 +1058,7 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		}
 
 		if lastContent != "" {
-			run.ctxEngine.AddAssistantMessage(lastContent)
+			run.addAssistantMessage(lastContent)
 		}
 
 		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
@@ -1030,7 +1176,7 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		}
 
 		if lastContent != "" {
-			run.ctxEngine.AddAssistantMessage(lastContent)
+			run.addAssistantMessage(lastContent)
 		}
 
 		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
@@ -1120,9 +1266,7 @@ func (s *ChatService) ClearHistory() error {
 		return nil
 	}
 
-	run.ctxEngine.ClearHistory()
-	run.timeline.Clear()
-	run.streamingState = nil
+	run.clearSessionState()
 	run.pendingInterrupt = nil
 	s.invalidateRunners()
 	tools.ClearTodos()
@@ -1148,11 +1292,7 @@ func (s *ChatService) StreamingState() *model.StreamingState {
 	if run == nil {
 		return nil
 	}
-	if run.streamingState == nil {
-		return nil
-	}
-	ss := *run.streamingState
-	return &ss
+	return run.streamingStateSnapshot()
 }
 
 // CtxEngine returns the context engine for the active session.
@@ -1193,11 +1333,43 @@ func (s *ChatService) SessionStreamingState(sessionID string) *model.StreamingSt
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.sessions[sessionID]
-	if !ok || run.streamingState == nil {
+	if !ok {
 		return nil
 	}
-	ss := *run.streamingState
-	return &ss
+	return run.streamingStateSnapshot()
+}
+
+// ExportSessionSnapshot exports a single consistent snapshot for the given session.
+// The snapshot is copied under the session's state lock; disk IO must happen elsewhere.
+func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot, error) {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return &SessionSnapshot{
+			SessionData: &model.SessionData{
+				Version: 2,
+			},
+		}, nil
+	}
+	return run.snapshot(), nil
+}
+
+func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
+	s.mu.Lock()
+	run := s.getOrCreateRun(sessionID)
+	s.mu.Unlock()
+	run.importSessionData(data)
+}
+
+func (s *ChatService) AddDiscoveredTool(sessionID string, record model.DiscoveredToolRecord) bool {
+	s.mu.Lock()
+	run, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return false
+	}
+	return run.upsertDiscoveredTool(record)
 }
 
 // GetSessionRunSnapshot returns a snapshot of a session's run state for the
@@ -1508,10 +1680,10 @@ func (s *ChatService) drainStreamForRun(stream adk.MessageStream, agentName stri
 		case <-ticker.C:
 			flushChunks()
 			// Update session's streaming state for mid-stream saves
-			run.streamingState = &model.StreamingState{
+			run.setStreamingState(&model.StreamingState{
 				PartialContent: streamingContent.String(),
 				AgentName:      agentName,
-			}
+			})
 		default:
 			chunk, err := stream.Recv()
 			if err != nil {
@@ -1535,7 +1707,7 @@ func (s *ChatService) drainStreamForRun(stream adk.MessageStream, agentName stri
 	flushChunks()
 
 	// Clear session's streaming state
-	run.streamingState = nil
+	run.setStreamingState(nil)
 
 	// Signal stream end
 	s.emitTimelineForRun(TimelineEvent{

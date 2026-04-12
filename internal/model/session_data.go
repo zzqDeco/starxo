@@ -5,10 +5,20 @@ package model
 // atomically-written file. This eliminates the dual-source split between
 // messages.json (backend) and display.json (frontend).
 type SessionData struct {
-	Version   int                `json:"version"`             // format version for future migrations
-	Messages  []PersistedMessage `json:"messages"`            // LLM conversation history
-	Display   []DisplayTurn      `json:"display"`             // frontend-renderable timeline turns
-	Streaming *StreamingState    `json:"streaming,omitempty"` // non-nil when interrupted mid-stream
+	Version         int                    `json:"version"`                   // format version for future migrations
+	Messages        []PersistedMessage     `json:"messages"`                  // LLM conversation history
+	Display         []DisplayTurn          `json:"display"`                   // frontend-renderable timeline turns
+	Streaming       *StreamingState        `json:"streaming,omitempty"`       // non-nil when interrupted mid-stream
+	DiscoveredTools []DiscoveredToolRecord `json:"discoveredTools,omitempty"` // MCP deferred discovery state
+}
+
+// DiscoveredToolRecord is the persisted discovery record for a deferred MCP tool.
+// CanonicalName is the primary key across in-memory and on-disk state.
+type DiscoveredToolRecord struct {
+	CanonicalName string `json:"canonicalName"`
+	Server        string `json:"server"`
+	Kind          string `json:"kind"`
+	DiscoveredAt  int64  `json:"discoveredAt"`
 }
 
 // DisplayTurn represents a single turn (user or assistant) in the chat timeline,

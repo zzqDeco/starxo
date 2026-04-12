@@ -22,7 +22,13 @@ type SessionService struct {
 	activeSession      *model.Session
 	onSessionSwitch    func(containerRegID string)
 	onDestroyContainer func(containerRegID string) error
+	saveStates         map[string]*sessionSaveState
 	mu                 sync.Mutex
+}
+
+type sessionSaveState struct {
+	inFlight bool
+	pending  bool
 }
 
 // NewSessionService creates a new SessionService.
@@ -30,6 +36,7 @@ func NewSessionService(sessionStore *storage.SessionStore, containerStore *stora
 	return &SessionService{
 		sessionStore:   sessionStore,
 		containerStore: containerStore,
+		saveStates:     make(map[string]*sessionSaveState),
 	}
 }
 
@@ -185,17 +192,7 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 		// Only load from disk if the session is NOT currently running
 		// (a running session already has up-to-date state in its SessionRun)
 		if !s.chatService.IsSessionRunning(sessionID) {
-			run := s.chatService.GetOrCreateRun(sessionID)
-			if sessionData != nil && sessionData.Messages != nil {
-				run.ctxEngine.ImportMessages(sessionData.Messages)
-			} else {
-				run.ctxEngine.ClearHistory()
-			}
-			if sessionData != nil && sessionData.Display != nil {
-				run.timeline.Import(sessionData.Display)
-			} else {
-				run.timeline.Clear()
-			}
+			s.chatService.RestoreSessionData(sessionID, sessionData)
 		}
 	}
 
@@ -381,40 +378,106 @@ func (s *SessionService) SaveCurrentSession() error {
 	return s.saveCurrentLocked()
 }
 
+// SaveSessionByID schedules a best-effort asynchronous save for the given session.
+// Saves are coalesced per session so at most one save is in-flight and one trailing
+// save is queued.
+func (s *SessionService) SaveSessionByID(sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	state := s.saveStates[sessionID]
+	if state == nil {
+		state = &sessionSaveState{}
+		s.saveStates[sessionID] = state
+	}
+	if state.inFlight {
+		state.pending = true
+		s.mu.Unlock()
+		return nil
+	}
+	state.inFlight = true
+	s.mu.Unlock()
+
+	go s.runCoalescedSave(sessionID)
+	return nil
+}
+
+func (s *SessionService) runCoalescedSave(sessionID string) {
+	for {
+		_ = s.saveSessionByIDBlocking(sessionID)
+
+		s.mu.Lock()
+		state := s.saveStates[sessionID]
+		if state == nil {
+			s.mu.Unlock()
+			return
+		}
+		if state.pending {
+			state.pending = false
+			s.mu.Unlock()
+			continue
+		}
+		state.inFlight = false
+		delete(s.saveStates, sessionID)
+		s.mu.Unlock()
+		return
+	}
+}
+
 // saveCurrentLocked persists the current session (caller must hold the lock).
-// Uses ChatService's per-session ctxEngine and timeline.
 func (s *SessionService) saveCurrentLocked() error {
 	if s.activeSession == nil || s.chatService == nil {
 		return nil
 	}
 
 	sessionID := s.activeSession.ID
-	ctxEngine := s.chatService.SessionCtxEngine(sessionID)
-	if ctxEngine == nil {
+	return s.saveSessionByIDBlockingLocked(sessionID)
+}
+
+func (s *SessionService) saveSessionByIDBlocking(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveSessionByIDBlockingLocked(sessionID)
+}
+
+func (s *SessionService) saveSessionByIDBlockingLocked(sessionID string) error {
+	if sessionID == "" || s.chatService == nil {
 		return nil
 	}
 
-	// Build unified session data from the session's per-session state
-	sd := &model.SessionData{
-		Version:  1,
-		Messages: ctxEngine.ExportMessages(),
+	snapshot, err := s.chatService.ExportSessionSnapshot(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to export session snapshot: %w", err)
+	}
+	if snapshot == nil || snapshot.SessionData == nil {
+		return nil
 	}
 
-	// Include timeline and streaming state
-	timeline := s.chatService.SessionTimeline(sessionID)
-	if timeline != nil {
-		sd.Display = timeline.Export()
-	}
-	sd.Streaming = s.chatService.SessionStreamingState(sessionID)
-
-	if err := s.sessionStore.SaveSessionData(sessionID, sd); err != nil {
+	if err := s.sessionStore.SaveSessionData(sessionID, snapshot.SessionData); err != nil {
 		return fmt.Errorf("failed to save session data: %w", err)
 	}
 
-	// Update session metadata
-	s.activeSession.MessageCount = ctxEngine.MessageCount()
-	if err := s.sessionStore.Update(s.activeSession); err != nil {
+	var sess *model.Session
+	if s.activeSession != nil && s.activeSession.ID == sessionID {
+		copySess := *s.activeSession
+		sess = &copySess
+	} else {
+		loaded, err := s.sessionStore.Get(sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to load session metadata: %w", err)
+		}
+		sess = loaded
+	}
+
+	sess.MessageCount = snapshot.MessageCount
+	if err := s.sessionStore.Update(sess); err != nil {
 		return fmt.Errorf("failed to update session: %w", err)
+	}
+	if s.activeSession != nil && s.activeSession.ID == sessionID {
+		s.activeSession.MessageCount = sess.MessageCount
+		s.activeSession.UpdatedAt = sess.UpdatedAt
 	}
 
 	return nil
@@ -451,13 +514,7 @@ func (s *SessionService) EnsureDefaultSession() error {
 		return nil // non-fatal, just start with empty history
 	}
 	if s.chatService != nil && sessionData != nil {
-		run := s.chatService.GetOrCreateRun(mostRecent.ID)
-		if sessionData.Messages != nil {
-			run.ctxEngine.ImportMessages(sessionData.Messages)
-		}
-		if sessionData.Display != nil {
-			run.timeline.Import(sessionData.Display)
-		}
+		s.chatService.RestoreSessionData(mostRecent.ID, sessionData)
 	}
 
 	return nil
