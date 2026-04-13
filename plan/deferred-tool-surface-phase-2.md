@@ -216,7 +216,7 @@ delta state 必须满足：
 
 ### 6.3 State model
 
-新增 session 级 `MCPInstructionsDeltaState`，建议最少包含：
+新增 session 级 `MCPInstructionsDeltaState`，固定包含：
 
 - `LastAnnouncedSearchableServers []string`
 - `LastAnnouncedPendingServers []string`
@@ -228,6 +228,8 @@ delta state 必须满足：
 - 只记录对模型有意义的 instructions summary
 - 不持久化原始错误文本
 - 不持久化完整 tool schema
+- 三组 server 集合都使用稳定排序后的规范化表示
+- fingerprint 只能基于规范化后的三组集合计算
 
 ### 6.4 Delta content
 
@@ -249,8 +251,9 @@ delta state 必须满足：
 
 - [`/Users/zhaoziqian/starxo/internal/tools/dynamic_mcp_surface.go`](/Users/zhaoziqian/starxo/internal/tools/dynamic_mcp_surface.go)
   - 在 deferred tools delta 之外，再注入一个 MCP instructions delta synthetic message
+  - server summary 规范化与 fingerprint 计算必须收成单点 helper
 - [`/Users/zhaoziqian/starxo/internal/agent/prompts.go`](/Users/zhaoziqian/starxo/internal/agent/prompts.go)
-  - 把提示词里的静态描述改成“模型会收到增量 MCP instructions”的骨架文案
+  - 把提示词里的静态描述改成“模型会收到 deferred tools delta + MCP instructions delta”的骨架文案
 
 ### 6.6 Acceptance
 

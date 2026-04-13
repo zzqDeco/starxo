@@ -25,6 +25,9 @@
   - `FileManagerPrompt(ac AgentContext) string`: 生成文件管理代理提示词，使用 list_files、read_file、write_file 工具处理非代码文件和批量操作；包含 reasoning 指导
 - 关键约束补充:
   - `CodeWriterPrompt` 新增 `str_replace_editor` 失败后的恢复规则：先读取上下文再重试，避免重复相同失败参数
+  - `DeepAgentPrompt` / `DeepAgentPlanPrompt` 的 deferred MCP 说明已同步成 phase-2 语义：
+    - 模型会收到 `deferred-tools-delta`
+    - MCP runtime 变化会收到 `mcp-instructions-delta`
 - Wails 绑定方法: 无
 - 事件发射: 无
 

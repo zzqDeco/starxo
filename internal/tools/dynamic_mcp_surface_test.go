@@ -230,3 +230,42 @@ func TestDynamicMCPSurface_GenerateCommitsPreparedStateOnlyOnSuccess(t *testing.
 		t.Fatalf("expected failed generate not to commit, got %d", commits)
 	}
 }
+
+func TestDynamicMCPSurface_BuildMCPInstructionsDeltaMessageBootstrapAndStableFingerprint(t *testing.T) {
+	summary := NormalizeMCPInstructionsSummary(DeferredMCPState{
+		SearchablePoolForMode: []CatalogEntry{
+			{CanonicalName: "mcp__alpha__grep", Server: "alpha", IsMcp: true},
+			{CanonicalName: "mcp__alpha__status", Server: "alpha", IsMcp: true},
+		},
+	}, ToolPermissionContext{
+		Servers: map[string]MCPServerPermissionState{
+			"alpha": {State: MCPServerStateConnected},
+			"beta":  {State: MCPServerStatePending},
+			"gamma": {State: MCPServerStateFailed},
+		},
+	})
+	msg, next := BuildMCPInstructionsDeltaMessage(summary, nil)
+	if msg == nil {
+		t.Fatal("expected bootstrap instructions message")
+	}
+	if !strings.Contains(msg.Content, "searchable_servers:\nalpha\n") {
+		t.Fatalf("expected searchable server snapshot, got %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "pending_servers:\nbeta\n") {
+		t.Fatalf("expected pending server snapshot, got %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "unavailable_servers:\ngamma:failed\n") {
+		t.Fatalf("expected unavailable server snapshot, got %q", msg.Content)
+	}
+	if next == nil || next.LastInstructionsFingerprint == "" {
+		t.Fatalf("expected normalized instructions state with fingerprint, got %#v", next)
+	}
+
+	same, nextSame := BuildMCPInstructionsDeltaMessage(summary, next)
+	if same != nil {
+		t.Fatalf("expected same summary not to emit a second message, got %q", same.Content)
+	}
+	if nextSame == nil || nextSame.LastInstructionsFingerprint != next.LastInstructionsFingerprint {
+		t.Fatalf("expected stable fingerprint, got %#v", nextSame)
+	}
+}

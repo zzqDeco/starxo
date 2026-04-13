@@ -2,7 +2,10 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -17,6 +20,13 @@ import (
 type DeferredSyntheticMessages struct {
 	Messages []*schema.Message
 	Commit   func()
+}
+
+type MCPInstructionsSummary struct {
+	SearchableServers  []string
+	PendingServers     []string
+	UnavailableServers []string
+	Fingerprint        string
 }
 
 type DeferredMCPProvider interface {
@@ -212,6 +222,120 @@ func BuildDeferredAnnouncementDelta(current []string, prior *starxomodel.Deferre
 		return nil, next
 	}
 	return BuildDeferredToolsDeltaMessage("delta", added, removed), next
+}
+
+func NormalizeMCPInstructionsSummary(state DeferredMCPState, permCtx ToolPermissionContext) MCPInstructionsSummary {
+	searchableSet := make(map[string]struct{})
+	for _, entry := range state.SearchablePoolForMode {
+		if !entry.IsMcp || entry.Server == "" {
+			continue
+		}
+		searchableSet[entry.Server] = struct{}{}
+	}
+
+	searchable := make([]string, 0, len(searchableSet))
+	pending := make([]string, 0, len(permCtx.Servers))
+	unavailable := make([]string, 0, len(permCtx.Servers))
+	for serverName, server := range permCtx.Servers {
+		switch server.State {
+		case MCPServerStatePending:
+			pending = append(pending, serverName)
+		case MCPServerStateNeedsAuth, MCPServerStateDisabled, MCPServerStateFailed:
+			unavailable = append(unavailable, fmt.Sprintf("%s:%s", serverName, mcpUnavailableReasonClass(server.State)))
+		}
+	}
+	for serverName := range searchableSet {
+		searchable = append(searchable, serverName)
+	}
+	sort.Strings(searchable)
+	sort.Strings(pending)
+	sort.Strings(unavailable)
+	return MCPInstructionsSummary{
+		SearchableServers:  searchable,
+		PendingServers:     pending,
+		UnavailableServers: unavailable,
+		Fingerprint:        ComputeMCPInstructionsFingerprint(searchable, pending, unavailable),
+	}
+}
+
+func ComputeMCPInstructionsFingerprint(searchable, pending, unavailable []string) string {
+	var b strings.Builder
+	b.WriteString("searchable:")
+	b.WriteString(strings.Join(searchable, "\n"))
+	b.WriteString("\npending:")
+	b.WriteString(strings.Join(pending, "\n"))
+	b.WriteString("\nunavailable:")
+	b.WriteString(strings.Join(unavailable, "\n"))
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+func NormalizedMCPInstructionsState(summary MCPInstructionsSummary) *starxomodel.MCPInstructionsDeltaState {
+	return &starxomodel.MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  CloneNormalizedCanonicalNames(summary.SearchableServers),
+		LastAnnouncedPendingServers:     CloneNormalizedCanonicalNames(summary.PendingServers),
+		LastAnnouncedUnavailableServers: CloneNormalizedCanonicalNames(summary.UnavailableServers),
+		LastInstructionsFingerprint:     summary.Fingerprint,
+	}
+}
+
+func BuildMCPInstructionsDeltaMessage(summary MCPInstructionsSummary, prior *starxomodel.MCPInstructionsDeltaState) (*schema.Message, *starxomodel.MCPInstructionsDeltaState) {
+	next := NormalizedMCPInstructionsState(summary)
+	if prior == nil {
+		if len(summary.SearchableServers) == 0 && len(summary.PendingServers) == 0 && len(summary.UnavailableServers) == 0 {
+			return nil, next
+		}
+		return buildMCPInstructionsSummaryMessage(summary), next
+	}
+	if mcpInstructionsStateEqual(prior, next) {
+		return nil, next
+	}
+	return buildMCPInstructionsSummaryMessage(summary), next
+}
+
+func buildMCPInstructionsSummaryMessage(summary MCPInstructionsSummary) *schema.Message {
+	var b strings.Builder
+	b.WriteString("<mcp-instructions-delta>\n")
+	b.WriteString("searchable_servers:\n")
+	for _, name := range summary.SearchableServers {
+		b.WriteString(name)
+		b.WriteString("\n")
+	}
+	b.WriteString("pending_servers:\n")
+	for _, name := range summary.PendingServers {
+		b.WriteString(name)
+		b.WriteString("\n")
+	}
+	b.WriteString("unavailable_servers:\n")
+	for _, name := range summary.UnavailableServers {
+		b.WriteString(name)
+		b.WriteString("\n")
+	}
+	b.WriteString("</mcp-instructions-delta>")
+	return schema.UserMessage(b.String())
+}
+
+func mcpUnavailableReasonClass(state MCPServerState) string {
+	switch state {
+	case MCPServerStateNeedsAuth:
+		return "needs_auth"
+	case MCPServerStateDisabled:
+		return "disabled"
+	case MCPServerStateFailed:
+		return "failed"
+	default:
+		return string(state)
+	}
+}
+
+func mcpInstructionsStateEqual(left, right *starxomodel.MCPInstructionsDeltaState) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.LastInstructionsFingerprint == right.LastInstructionsFingerprint &&
+		slices.Equal(left.LastAnnouncedSearchableServers, right.LastAnnouncedSearchableServers) &&
+		slices.Equal(left.LastAnnouncedPendingServers, right.LastAnnouncedPendingServers) &&
+		slices.Equal(left.LastAnnouncedUnavailableServers, right.LastAnnouncedUnavailableServers)
 }
 
 func injectSyntheticMessages(input []*schema.Message, prepared *DeferredSyntheticMessages) []*schema.Message {

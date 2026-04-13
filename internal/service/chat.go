@@ -321,6 +321,28 @@ func (r *SessionRun) setDeferredAnnouncementState(state *model.DeferredAnnouncem
 	r.deferredAnnouncementState = cloneDeferredAnnouncementState(state)
 }
 
+func (r *SessionRun) mcpInstructionsDeltaStateSnapshot() *model.MCPInstructionsDeltaState {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState)
+}
+
+func (r *SessionRun) applySyntheticDeltaStates(
+	announcement *model.DeferredAnnouncementState,
+	updateAnnouncement bool,
+	instructions *model.MCPInstructionsDeltaState,
+	updateInstructions bool,
+) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	if updateAnnouncement {
+		r.deferredAnnouncementState = cloneDeferredAnnouncementState(announcement)
+	}
+	if updateInstructions {
+		r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(instructions)
+	}
+}
+
 func cloneStreamingState(in *model.StreamingState) *model.StreamingState {
 	if in == nil {
 		return nil
@@ -400,13 +422,14 @@ func (p *deferredMCPProvider) DeferredMCPState(ctx context.Context) (tools.Defer
 }
 
 func (p *deferredMCPProvider) PrepareDeferredSyntheticMessages(ctx context.Context) (*tools.DeferredSyntheticMessages, error) {
-	state, err := p.DeferredMCPState(ctx)
+	sessionID, mode, discovered, err := p.sessionState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	sessionID := SessionIDFromContext(ctx)
-	if sessionID == "" {
-		return nil, fmt.Errorf("sessionID missing from context")
+	permCtx := p.permissionContext(sessionID, mode)
+	state := tools.DeferredMCPState{}
+	if p.bundle != nil && p.bundle.MCPCatalog != nil {
+		state = tools.ComputeDeferredMCPState(p.bundle.MCPCatalog, discovered, permCtx)
 	}
 
 	p.chat.mu.Lock()
@@ -420,21 +443,37 @@ func (p *deferredMCPProvider) PrepareDeferredSyntheticMessages(ctx context.Conte
 	prior := run.deferredAnnouncementStateSnapshot()
 	msg, next := tools.BuildDeferredAnnouncementDelta(current, prior)
 
-	needsCommit := prior == nil
-	if !needsCommit && next != nil {
-		needsCommit = !slices.Equal(prior.AnnouncedSearchableCanonicalNames, next.AnnouncedSearchableCanonicalNames)
+	needsAnnouncementCommit := prior == nil
+	if !needsAnnouncementCommit && next != nil {
+		needsAnnouncementCommit = !slices.Equal(prior.AnnouncedSearchableCanonicalNames, next.AnnouncedSearchableCanonicalNames)
 	}
-	if msg == nil && !needsCommit {
+
+	summary := tools.NormalizeMCPInstructionsSummary(state, permCtx)
+	priorInstructions := run.mcpInstructionsDeltaStateSnapshot()
+	instructionsMsg, nextInstructions := tools.BuildMCPInstructionsDeltaMessage(summary, priorInstructions)
+	needsInstructionsCommit := priorInstructions == nil
+	if !needsInstructionsCommit && nextInstructions != nil {
+		needsInstructionsCommit =
+			priorInstructions.LastInstructionsFingerprint != nextInstructions.LastInstructionsFingerprint ||
+				!slices.Equal(priorInstructions.LastAnnouncedSearchableServers, nextInstructions.LastAnnouncedSearchableServers) ||
+				!slices.Equal(priorInstructions.LastAnnouncedPendingServers, nextInstructions.LastAnnouncedPendingServers) ||
+				!slices.Equal(priorInstructions.LastAnnouncedUnavailableServers, nextInstructions.LastAnnouncedUnavailableServers)
+	}
+
+	if msg == nil && instructionsMsg == nil && !needsAnnouncementCommit && !needsInstructionsCommit {
 		return nil, nil
 	}
 
 	prepared := &tools.DeferredSyntheticMessages{}
 	if msg != nil {
-		prepared.Messages = []*schema.Message{msg}
+		prepared.Messages = append(prepared.Messages, msg)
 	}
-	if needsCommit {
+	if instructionsMsg != nil {
+		prepared.Messages = append(prepared.Messages, instructionsMsg)
+	}
+	if needsAnnouncementCommit || needsInstructionsCommit {
 		prepared.Commit = func() {
-			run.setDeferredAnnouncementState(next)
+			run.applySyntheticDeltaStates(next, needsAnnouncementCommit, nextInstructions, needsInstructionsCommit)
 		}
 	}
 	return prepared, nil

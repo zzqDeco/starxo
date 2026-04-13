@@ -205,3 +205,64 @@ func TestSessionServiceSaveSessionByIDPersistsDeferredAnnouncementState(t *testi
 		t.Fatalf("unexpected message snapshot: %#v", saved.Messages)
 	}
 }
+
+func TestSessionServiceSaveSessionByIDPersistsMCPInstructionsDeltaState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessionStore.Create("MCP Instructions")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sess.ID)
+	chat.mu.Unlock()
+
+	run.applySyntheticDeltaStates(nil, false, &model.MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  []string{"alpha"},
+		LastAnnouncedPendingServers:     []string{"beta"},
+		LastAnnouncedUnavailableServers: []string{"gamma:failed"},
+		LastInstructionsFingerprint:     tools.ComputeMCPInstructionsFingerprint([]string{"alpha"}, []string{"beta"}, []string{"gamma:failed"}),
+	}, true)
+
+	if err := ss.SaveSessionByID(sess.ID); err != nil {
+		t.Fatalf("save session by id: %v", err)
+	}
+
+	var saved *model.SessionData
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		saved, err = sessionStore.LoadSessionData(sess.ID)
+		if err == nil && saved != nil && saved.MCPInstructionsDeltaState != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("load session data: %v", err)
+	}
+	if saved == nil || saved.MCPInstructionsDeltaState == nil {
+		t.Fatal("expected MCP instructions delta state to be saved")
+	}
+	if got := saved.MCPInstructionsDeltaState.LastAnnouncedSearchableServers; len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("unexpected searchable servers: %#v", got)
+	}
+	if got := saved.MCPInstructionsDeltaState.LastAnnouncedPendingServers; len(got) != 1 || got[0] != "beta" {
+		t.Fatalf("unexpected pending servers: %#v", got)
+	}
+	if got := saved.MCPInstructionsDeltaState.LastAnnouncedUnavailableServers; len(got) != 1 || got[0] != "gamma:failed" {
+		t.Fatalf("unexpected unavailable servers: %#v", got)
+	}
+	if saved.MCPInstructionsDeltaState.LastInstructionsFingerprint == "" {
+		t.Fatal("expected persisted fingerprint")
+	}
+}
