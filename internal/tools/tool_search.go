@@ -41,7 +41,7 @@ type ToolSearchProvider interface {
 
 func NewToolSearchTool(provider ToolSearchProvider) (tool.InvokableTool, error) {
 	return toolutils.InferTool("tool_search",
-		"Search deferred MCP tools by canonical name, alias, or keywords. Supports select:<tool>, select:A,B,C, exact name matching, and +required terms.",
+		"Search deferred tools by canonical name, alias, or keywords. Supports select:<tool>, select:A,B,C, exact name matching, and +required terms.",
 		func(ctx context.Context, input ToolSearchInput) (ToolSearchOutput, error) {
 			state, err := provider.ToolSearchState(ctx)
 			if err != nil {

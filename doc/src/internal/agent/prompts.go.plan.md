@@ -28,6 +28,8 @@
   - `DeepAgentPrompt` / `DeepAgentPlanPrompt` 的 deferred MCP 说明已同步成 phase-2 语义：
     - 模型会收到 `deferred-tools-delta`
     - MCP runtime 变化会收到 `mcp-instructions-delta`
+    - tool loading / unknown-tool / execution gating 的 wording 改成 generic deferred wording
+    - MCP instructions 仍保持 MCP-specific wording
 - Wails 绑定方法: 无
 - 事件发射: 无
 

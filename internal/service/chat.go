@@ -581,7 +581,7 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 			if len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0 {
 				return "", nil
 			}
-			return "tool_search is unavailable because no deferred MCP tools are currently searchable", nil
+			return "tool_search is unavailable because no deferred tools are currently searchable", nil
 		}
 
 		if entry, ok := provider.LookupCatalogEntry(name); ok {

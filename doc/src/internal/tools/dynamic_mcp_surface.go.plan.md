@@ -6,7 +6,7 @@
 - 所属模块: tools
 
 ## 2. 核心职责
-- 实现 deferred MCP middleware，在每次模型调用前做 announcement 注入、visible tool filtering 和 execution gating。
+- 实现 deferred middleware，在每次模型调用前做 delta 注入、visible tool filtering 和 execution gating。
 
 ## 3. 输入与输出
 - 输入来源: `DeferredMCPProvider`
@@ -31,6 +31,7 @@
   - 未加载但当前可搜索的 deferred tool 被调用时返回“先用 tool_search”
   - catalog 中存在但当前 mode / permission / runtime 下不可搜索的 tool 会直接返回 unavailable，不再误导去搜
   - announcement、tool_search、visible tool list、execution gating 共用同一份 deferred state
+  - 2C 起 runtime wording 改成 generic deferred wording，只有 MCP instructions 仍保持 MCP-specific
 
 ## 5. 依赖关系
 - 内部依赖: `deferred_state.go`

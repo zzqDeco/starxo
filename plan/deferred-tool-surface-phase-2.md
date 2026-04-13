@@ -294,8 +294,10 @@ delta state 必须满足：
 
 `tool_search` 从“只搜索 deferred MCP tools”扩展到“搜索所有 deferred tools”，但 phase-2 实施顺序要求：
 
-1. 先保留 MCP-only output compatibility
-2. 再扩展到非 MCP deferred tools
+1. 这一批只做 framework-first
+2. 不修改任何真实生产顶层非 MCP 工具的默认暴露状态
+3. 非 MCP deferred 只通过 test-only / hidden sample entries 验证
+4. 默认生产 registry 不注册这些 sample entries
 
 输出兼容要求：
 
@@ -308,8 +310,9 @@ delta state 必须满足：
 完成后必须满足：
 
 - `alwaysLoad` 真正成为统一的 opt-out 规则
-- 非 MCP deferred tools 也能被 `tool_search` 激活
+- hidden/test-only 的非 MCP deferred sample 也能被 `tool_search` 激活
 - plan mode 对只读约束仍只影响 MCP deferred pool，不误伤非 MCP builtin tools
+- prompt / runtime wording 不再错误宣称“只有 deferred MCP tools”
 
 ## 8. Branch / Commit Plan
 
@@ -355,14 +358,17 @@ phase-2 建议拆成三条实现分支，按顺序进入 `dev`：
 - pending -> connected 时，发送 runtime state delta
 - connected -> needs_auth / failed 时，发送 runtime state delta
 - pending 且无 cached metadata 时，只提示 server pending，不提示具体工具名
-- mode 切换导致 searchable pool 变化时，instructions delta 与 deferred tools delta 一致
+- 纯 tool-level 变化但 server-summary 不变时，只发 deferred tools delta
+- 纯 server-summary 变化但 tool-level 不变时，只发 instructions delta
+- 同一 server 原始错误文本变化但 reason-class 不变时，不重复发送 instructions delta
 
 ### 9.3 General deferred framework
 
 - `alwaysLoad == true` 的工具永不进入 deferred pool
-- 非 MCP `shouldDefer == true` 的工具可被 `tool_search` 激活
+- 非 MCP hidden/test-only sample entry 可被 `tool_search` 激活
 - exact-name / `select:` / partial-hit 语义对非 MCP deferred tools 同样成立
 - `tool_search` 的 canonical output / pending server 语义对 MCP 不回退
+- plan mode 不会错误过滤非 MCP hidden/test-only sample entry
 
 ### 9.4 Regression
 
@@ -375,7 +381,7 @@ phase-2 建议拆成三条实现分支，按顺序进入 `dev`：
 
 - `wails dev` 下 searchable pool 变化时，不再每轮重发完整 deferred tool 名单
 - MCP server 从 pending 变 connected 后，模型能收到增量提示而不是只能靠 tool call 报错理解
-- 非 MCP deferred tool 接入后，能先 `tool_search` 再调用
+- 2C 合入后，真实生产顶层非 MCP 工具行为保持不变
 
 ## 10. Non-Goals
 

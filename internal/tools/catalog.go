@@ -15,6 +15,10 @@ const (
 	ToolSourceMCP     = "mcp"
 	ToolSourceCustom  = "custom"
 
+	ToolClassBuiltin     = "builtin"
+	ToolClassMCPAction   = "mcp_action"
+	ToolClassMCPResource = "mcp_resource"
+
 	ToolKindAction           = "action"
 	ToolKindResourceList     = "resource_list"
 	ToolKindResourceRead     = "resource_read"
@@ -38,6 +42,8 @@ type CatalogEntry struct {
 	Title          string
 	Description    string
 	SearchHint     string
+	ToolClass      string
+	DeferReason    string
 	AlwaysLoad     bool
 	ShouldDefer    bool
 	IsMcp          bool
