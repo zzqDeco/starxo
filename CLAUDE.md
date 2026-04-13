@@ -103,7 +103,7 @@ Pinia stores in `frontend/src/stores/`: `chatStore` (messages, streaming, interr
 
 ### Branch Management (Trunk-based)
 
-`master` is the main branch, always kept in a buildable state. Direct pushes to `master` are forbidden — all changes enter via pull request.
+`master` is the trunk branch, always kept in a buildable state. `dev` is the development buffer branch. Direct pushes to `master` are forbidden — routine changes enter through pull requests to `dev` first.
 
 Branch naming:
 - `feature/<desc>` — new features (e.g., `feature/plugin-system`)
@@ -114,7 +114,8 @@ Branch naming:
 - `release/<version>` — release preparation (e.g., `release/0.2.0`)
 
 Rules:
-- Feature branches are created from `master` and merged back to `master`
+- Feature branches are created from `dev` and merged back to `dev`
+- `dev` is merged into `master` after integration is verified
 - Delete branches after merge
 - Keep branches short-lived (days, not weeks)
 

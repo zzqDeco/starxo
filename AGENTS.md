@@ -136,7 +136,8 @@ Do not manually edit generated Wails bindings unless regeneration is explicitly 
 ### Branching (trunk-based)
 
 - Main branch: `master`
-- Do not push directly to `master`; use PRs
+- Development buffer branch: `dev`
+- Do not push directly to `master`; all routine changes should enter through `dev`
 - Branch naming:
   - `feature/<desc>`
   - `fix/<desc>`
@@ -167,13 +168,14 @@ Common types:
 
 ### Pull Request Expectations
 
-1. Branch from `master`
+1. Branch from `dev`
 2. Implement and commit with conventional format
-3. Open PR to `master`
+3. Open PR to `dev`
 4. Include what changed, why, and how to verify
 5. Require at least one review
 6. Prefer squash merge for feature branches
-7. Delete source branch after merge
+7. Merge `dev` into `master` only after the `dev` integration state is verified
+8. Delete source branch after merge
 
 ## Documentation Sync Requirements
 
