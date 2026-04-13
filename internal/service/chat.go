@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -121,11 +122,13 @@ type runnerBundleSurface struct {
 // SessionRun holds per-session agent execution state.
 // Each session gets its own context engine, timeline, and run lifecycle.
 type SessionRun struct {
-	sessionID       string
-	stateMu         sync.RWMutex
-	ctxEngine       *agentctx.Engine
-	timeline        *agentctx.TimelineCollector
-	discoveredTools map[string]model.DiscoveredToolRecord
+	sessionID                 string
+	stateMu                   sync.RWMutex
+	ctxEngine                 *agentctx.Engine
+	timeline                  *agentctx.TimelineCollector
+	discoveredTools           map[string]model.DiscoveredToolRecord
+	deferredAnnouncementState *model.DeferredAnnouncementState
+	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
 
 	// Run lifecycle
 	running                      bool
@@ -191,6 +194,8 @@ func (r *SessionRun) clearSessionState() {
 	r.timeline.Clear()
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	r.deferredAnnouncementState = nil
+	r.mcpInstructionsDeltaState = nil
 }
 
 func (r *SessionRun) setStreamingState(state *model.StreamingState) {
@@ -224,9 +229,13 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	}
 	r.streamingState = data.Streaming
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	r.deferredAnnouncementState = nil
+	r.mcpInstructionsDeltaState = nil
 	if data == nil {
 		return
 	}
+	r.deferredAnnouncementState = cloneDeferredAnnouncementState(data.DeferredAnnouncementState)
+	r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState)
 	for _, record := range data.DiscoveredTools {
 		if record.CanonicalName == "" {
 			continue
@@ -251,11 +260,13 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 		HasSessionRun: true,
 		MessageCount:  r.ctxEngine.MessageCount(),
 		SessionData: &model.SessionData{
-			Version:         2,
-			Messages:        r.ctxEngine.ExportMessages(),
-			Display:         r.timeline.Export(),
-			Streaming:       cloneStreamingState(r.streamingState),
-			DiscoveredTools: discovered,
+			Version:                   3,
+			Messages:                  r.ctxEngine.ExportMessages(),
+			Display:                   r.timeline.Export(),
+			Streaming:                 cloneStreamingState(r.streamingState),
+			DiscoveredTools:           discovered,
+			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
+			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
 		},
 	}
 }
@@ -298,12 +309,54 @@ func (r *SessionRun) replaceDiscoveredTools(records []model.DiscoveredToolRecord
 	}
 }
 
+func (r *SessionRun) deferredAnnouncementStateSnapshot() *model.DeferredAnnouncementState {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return cloneDeferredAnnouncementState(r.deferredAnnouncementState)
+}
+
+func (r *SessionRun) setDeferredAnnouncementState(state *model.DeferredAnnouncementState) {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	r.deferredAnnouncementState = cloneDeferredAnnouncementState(state)
+}
+
 func cloneStreamingState(in *model.StreamingState) *model.StreamingState {
 	if in == nil {
 		return nil
 	}
 	cp := *in
 	return &cp
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneDeferredAnnouncementState(in *model.DeferredAnnouncementState) *model.DeferredAnnouncementState {
+	if in == nil {
+		return nil
+	}
+	return &model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: cloneStrings(in.AnnouncedSearchableCanonicalNames),
+	}
+}
+
+func cloneMCPInstructionsDeltaState(in *model.MCPInstructionsDeltaState) *model.MCPInstructionsDeltaState {
+	if in == nil {
+		return nil
+	}
+	return &model.MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  cloneStrings(in.LastAnnouncedSearchableServers),
+		LastAnnouncedPendingServers:     cloneStrings(in.LastAnnouncedPendingServers),
+		LastAnnouncedUnavailableServers: cloneStrings(in.LastAnnouncedUnavailableServers),
+		LastInstructionsFingerprint:     in.LastInstructionsFingerprint,
+	}
 }
 
 type deferredMCPProvider struct {
@@ -344,6 +397,47 @@ func (p *deferredMCPProvider) DeferredMCPState(ctx context.Context) (tools.Defer
 		return tools.DeferredMCPState{}, nil
 	}
 	return tools.ComputeDeferredMCPState(p.bundle.MCPCatalog, discovered, p.permissionContext(sessionID, mode)), nil
+}
+
+func (p *deferredMCPProvider) PrepareDeferredSyntheticMessages(ctx context.Context) (*tools.DeferredSyntheticMessages, error) {
+	state, err := p.DeferredMCPState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		return nil, fmt.Errorf("sessionID missing from context")
+	}
+
+	p.chat.mu.Lock()
+	run, ok := p.chat.sessions[sessionID]
+	p.chat.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	current := tools.NormalizeSearchableCanonicalNames(state.SearchablePoolForMode)
+	prior := run.deferredAnnouncementStateSnapshot()
+	msg, next := tools.BuildDeferredAnnouncementDelta(current, prior)
+
+	needsCommit := prior == nil
+	if !needsCommit && next != nil {
+		needsCommit = !slices.Equal(prior.AnnouncedSearchableCanonicalNames, next.AnnouncedSearchableCanonicalNames)
+	}
+	if msg == nil && !needsCommit {
+		return nil, nil
+	}
+
+	prepared := &tools.DeferredSyntheticMessages{}
+	if msg != nil {
+		prepared.Messages = []*schema.Message{msg}
+	}
+	if needsCommit {
+		prepared.Commit = func() {
+			run.setDeferredAnnouncementState(next)
+		}
+	}
+	return prepared, nil
 }
 
 func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSearchState, error) {
@@ -2076,7 +2170,7 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 	if !ok {
 		return &SessionSnapshot{
 			SessionData: &model.SessionData{
-				Version: 2,
+				Version: 3,
 			},
 		}, nil
 	}

@@ -14,12 +14,19 @@
 
 ## 4. 关键实现细节
 - `SessionData` 新增 `DiscoveredTools []DiscoveredToolRecord`
+- `SessionData` 新增 `DeferredAnnouncementState *DeferredAnnouncementState`
+- `SessionData` 预留 `MCPInstructionsDeltaState *MCPInstructionsDeltaState` 作为 phase-2 的第二份 delta 状态
 - `DiscoveredToolRecord` 固定字段：
   - `CanonicalName`
   - `Server`
   - `Kind`
   - `DiscoveredAt`
-- 旧 payload 缺失 `DiscoveredTools` 时按空集合兼容
+- `DeferredAnnouncementState` 当前固定只记录：
+  - `AnnouncedSearchableCanonicalNames`
+- phase-2 空 state 规范：
+  - `DeferredAnnouncementState.AnnouncedSearchableCanonicalNames` 使用稳定排序后的空切片，不混用 `nil`
+  - `MCPInstructionsDeltaState` 的三组 server 集合也统一使用空切片
+- 旧 payload 缺失这些新增字段时按空状态兼容，不中断 restore
 
 ## 5. 依赖关系
 - 被 `chat.go`、`session_svc.go`、`tool_search.go` 共同消费
@@ -29,3 +36,4 @@
 
 ## 7. 维护建议
 - discovery 状态不要迁回 `PersistedMessage`；`SessionData` 是唯一权威落盘位置
+- deferred delta state 与 discovery state 语义不同，不要合并成同一个字段

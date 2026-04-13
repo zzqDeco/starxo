@@ -3,17 +3,26 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+
+	starxomodel "starxo/internal/model"
 )
+
+type DeferredSyntheticMessages struct {
+	Messages []*schema.Message
+	Commit   func()
+}
 
 type DeferredMCPProvider interface {
 	DeferredMCPState(ctx context.Context) (DeferredMCPState, error)
 	LookupCatalogEntry(name string) (CatalogEntry, bool)
+	PrepareDeferredSyntheticMessages(ctx context.Context) (*DeferredSyntheticMessages, error)
 }
 
 func NewDynamicMCPSurfaceMiddleware(provider DeferredMCPProvider) adk.ChatModelAgentMiddleware {
@@ -94,53 +103,159 @@ type dynamicMCPModelWrapper struct {
 }
 
 func (w *dynamicMCPModelWrapper) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	msgs := injectAnnouncement(input, buildDeferredAnnouncement(w.state))
+	prepared, err := w.catalogProvider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	msgs := injectSyntheticMessages(input, prepared)
 	tools := filterVisibleToolInfos(w.allTools, w.state, w.catalogProvider)
-	return w.base.Generate(ctx, msgs, append(opts, model.WithTools(tools))...)
+	msg, err := w.base.Generate(ctx, msgs, append(opts, model.WithTools(tools))...)
+	if err != nil {
+		return nil, err
+	}
+	if prepared != nil && prepared.Commit != nil {
+		prepared.Commit()
+	}
+	return msg, nil
 }
 
 func (w *dynamicMCPModelWrapper) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	msgs := injectAnnouncement(input, buildDeferredAnnouncement(w.state))
+	prepared, err := w.catalogProvider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	msgs := injectSyntheticMessages(input, prepared)
 	tools := filterVisibleToolInfos(w.allTools, w.state, w.catalogProvider)
-	return w.base.Stream(ctx, msgs, append(opts, model.WithTools(tools))...)
+	stream, err := w.base.Stream(ctx, msgs, append(opts, model.WithTools(tools))...)
+	if err != nil {
+		return nil, err
+	}
+	if prepared != nil && prepared.Commit != nil {
+		prepared.Commit()
+	}
+	return stream, nil
 }
 
 func toolSearchVisible(state DeferredMCPState) bool {
 	return len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0
 }
 
-func buildDeferredAnnouncement(state DeferredMCPState) *schema.Message {
-	if len(state.SearchablePoolForMode) == 0 {
-		return nil
+func NormalizeSearchableCanonicalNames(entries []CatalogEntry) []string {
+	if len(entries) == 0 {
+		return []string{}
 	}
+	names := make([]string, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.CanonicalName == "" {
+			continue
+		}
+		if _, ok := seen[entry.CanonicalName]; ok {
+			continue
+		}
+		seen[entry.CanonicalName] = struct{}{}
+		names = append(names, entry.CanonicalName)
+	}
+	if len(names) == 0 {
+		return []string{}
+	}
+	sort.Strings(names)
+	return names
+}
 
+func BuildDeferredToolsDeltaMessage(mode string, added, removed []string) *schema.Message {
 	var b strings.Builder
-	b.WriteString("<available-deferred-mcp-tools>\n")
-	for _, entry := range state.SearchablePoolForMode {
-		b.WriteString(entry.CanonicalName)
+	b.WriteString("<deferred-tools-delta>\n")
+	b.WriteString("mode: ")
+	b.WriteString(mode)
+	b.WriteString("\n")
+	b.WriteString("added:\n")
+	for _, name := range added {
+		b.WriteString(name)
 		b.WriteString("\n")
 	}
-	b.WriteString("</available-deferred-mcp-tools>")
+	b.WriteString("removed:\n")
+	for _, name := range removed {
+		b.WriteString(name)
+		b.WriteString("\n")
+	}
+	b.WriteString("</deferred-tools-delta>")
 	return schema.UserMessage(b.String())
 }
 
-func injectAnnouncement(input []*schema.Message, msg *schema.Message) []*schema.Message {
-	if msg == nil {
+func CloneNormalizedCanonicalNames(in []string) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func NormalizedAnnouncementState(names []string) *starxomodel.DeferredAnnouncementState {
+	return &starxomodel.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: CloneNormalizedCanonicalNames(names),
+	}
+}
+
+func BuildDeferredAnnouncementDelta(current []string, prior *starxomodel.DeferredAnnouncementState) (*schema.Message, *starxomodel.DeferredAnnouncementState) {
+	next := NormalizedAnnouncementState(current)
+	if prior == nil {
+		if len(current) == 0 {
+			return nil, next
+		}
+		return BuildDeferredToolsDeltaMessage("bootstrap", current, []string{}), next
+	}
+	previous := CloneNormalizedCanonicalNames(prior.AnnouncedSearchableCanonicalNames)
+	added, removed := diffSortedStrings(previous, current)
+	if len(added) == 0 && len(removed) == 0 {
+		return nil, next
+	}
+	return BuildDeferredToolsDeltaMessage("delta", added, removed), next
+}
+
+func injectSyntheticMessages(input []*schema.Message, prepared *DeferredSyntheticMessages) []*schema.Message {
+	if prepared == nil || len(prepared.Messages) == 0 {
 		return input
 	}
 	if len(input) == 0 {
-		return []*schema.Message{msg}
+		return append([]*schema.Message(nil), prepared.Messages...)
 	}
 
-	out := make([]*schema.Message, 0, len(input)+1)
+	out := make([]*schema.Message, 0, len(input)+len(prepared.Messages))
 	if input[0].Role == schema.System {
-		out = append(out, input[0], msg)
+		out = append(out, input[0])
+		out = append(out, prepared.Messages...)
 		out = append(out, input[1:]...)
 		return out
 	}
-	out = append(out, msg)
+	out = append(out, prepared.Messages...)
 	out = append(out, input...)
 	return out
+}
+
+func diffSortedStrings(previous, current []string) (added, removed []string) {
+	i, j := 0, 0
+	for i < len(previous) && j < len(current) {
+		switch {
+		case previous[i] == current[j]:
+			i++
+			j++
+		case previous[i] < current[j]:
+			removed = append(removed, previous[i])
+			i++
+		default:
+			added = append(added, current[j])
+			j++
+		}
+	}
+	for ; i < len(previous); i++ {
+		removed = append(removed, previous[i])
+	}
+	for ; j < len(current); j++ {
+		added = append(added, current[j])
+	}
+	return added, removed
 }
 
 func filterVisibleToolInfos(all []*schema.ToolInfo, state DeferredMCPState, provider DeferredMCPProvider) []*schema.ToolInfo {

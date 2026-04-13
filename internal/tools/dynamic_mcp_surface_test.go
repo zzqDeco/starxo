@@ -2,16 +2,21 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
+	model2 "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+
+	starxomodel "starxo/internal/model"
 )
 
 type fakeDeferredProvider struct {
 	state   DeferredMCPState
 	catalog *ToolCatalog
+	prepare func(context.Context) (*DeferredSyntheticMessages, error)
 }
 
 func (p *fakeDeferredProvider) DeferredMCPState(context.Context) (DeferredMCPState, error) {
@@ -23,6 +28,32 @@ func (p *fakeDeferredProvider) LookupCatalogEntry(name string) (CatalogEntry, bo
 		return CatalogEntry{}, false
 	}
 	return p.catalog.LookupExact(name)
+}
+
+func (p *fakeDeferredProvider) PrepareDeferredSyntheticMessages(ctx context.Context) (*DeferredSyntheticMessages, error) {
+	if p.prepare == nil {
+		return nil, nil
+	}
+	return p.prepare(ctx)
+}
+
+type fakeBaseChatModel struct {
+	generateFn func(context.Context, []*schema.Message, ...model2.Option) (*schema.Message, error)
+	streamFn   func(context.Context, []*schema.Message, ...model2.Option) (*schema.StreamReader[*schema.Message], error)
+}
+
+func (m *fakeBaseChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model2.Option) (*schema.Message, error) {
+	if m.generateFn != nil {
+		return m.generateFn(ctx, input, opts...)
+	}
+	return schema.AssistantMessage("ok", nil), nil
+}
+
+func (m *fakeBaseChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model2.Option) (*schema.StreamReader[*schema.Message], error) {
+	if m.streamFn != nil {
+		return m.streamFn(ctx, input, opts...)
+	}
+	return schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage("ok", nil)}), nil
 }
 
 func TestDynamicMCPSurface_FilterVisibleToolInfos(t *testing.T) {
@@ -52,22 +83,54 @@ func TestDynamicMCPSurface_FilterVisibleToolInfos(t *testing.T) {
 	assertStrings(t, got, []string{"ask_user", "tool_search", loaded.CanonicalName})
 }
 
-func TestDynamicMCPSurface_AnnouncementUsesCanonicalNamesOnly(t *testing.T) {
-	msg := buildDeferredAnnouncement(DeferredMCPState{
-		SearchablePoolForMode: []CatalogEntry{
-			{CanonicalName: "mcp__fs__grep", SearchHint: "ignore me"},
-			{CanonicalName: "mcp__git__status", SearchHint: "also hidden"},
-		},
+func TestDynamicMCPSurface_NormalizeSearchableCanonicalNamesSortsAndDedupes(t *testing.T) {
+	got := NormalizeSearchableCanonicalNames([]CatalogEntry{
+		{CanonicalName: "mcp__git__status"},
+		{CanonicalName: "mcp__fs__grep"},
+		{CanonicalName: "mcp__git__status"},
+		{CanonicalName: ""},
 	})
+	assertStrings(t, got, []string{"mcp__fs__grep", "mcp__git__status"})
+}
+
+func TestDynamicMCPSurface_BuildDeferredAnnouncementDeltaBootstrapUsesCanonicalNamesOnly(t *testing.T) {
+	msg, next := BuildDeferredAnnouncementDelta([]string{"mcp__fs__grep", "mcp__git__status"}, nil)
 	if msg == nil {
 		t.Fatal("expected announcement message")
 	}
 	if !strings.Contains(msg.Content, "mcp__fs__grep") || !strings.Contains(msg.Content, "mcp__git__status") {
 		t.Fatalf("announcement missing canonical names: %q", msg.Content)
 	}
-	if strings.Contains(msg.Content, "ignore me") || strings.Contains(msg.Content, "also hidden") {
-		t.Fatalf("announcement leaked search hints: %q", msg.Content)
+	if !strings.Contains(msg.Content, "mode: bootstrap") {
+		t.Fatalf("expected bootstrap mode, got %q", msg.Content)
 	}
+	if !strings.Contains(msg.Content, "removed:\n</deferred-tools-delta>") {
+		t.Fatalf("expected empty removed section to be preserved, got %q", msg.Content)
+	}
+	if next == nil {
+		t.Fatal("expected next state")
+	}
+	assertStrings(t, next.AnnouncedSearchableCanonicalNames, []string{"mcp__fs__grep", "mcp__git__status"})
+}
+
+func TestDynamicMCPSurface_BuildDeferredAnnouncementDeltaDeltaOnlyWritesChanges(t *testing.T) {
+	msg, next := BuildDeferredAnnouncementDelta(
+		[]string{"mcp__fs__grep", "mcp__git__status"},
+		&starxomodel.DeferredAnnouncementState{AnnouncedSearchableCanonicalNames: []string{"mcp__docker__logs", "mcp__git__status"}},
+	)
+	if msg == nil {
+		t.Fatal("expected delta message")
+	}
+	if !strings.Contains(msg.Content, "mode: delta") {
+		t.Fatalf("expected delta mode, got %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "added:\nmcp__fs__grep\n") {
+		t.Fatalf("expected added canonical, got %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "removed:\nmcp__docker__logs\n") {
+		t.Fatalf("expected removed canonical, got %q", msg.Content)
+	}
+	assertStrings(t, next.AnnouncedSearchableCanonicalNames, []string{"mcp__fs__grep", "mcp__git__status"})
 }
 
 func TestDynamicMCPSurface_EnsureToolCallable(t *testing.T) {
@@ -109,5 +172,61 @@ func TestDynamicMCPSurface_EnsureToolCallable(t *testing.T) {
 	provider.state = DeferredMCPState{}
 	if err := mw.ensureToolCallable(context.Background(), "tool_search"); err == nil || !strings.Contains(err.Error(), "currently searchable") {
 		t.Fatalf("expected hidden tool_search rejection, got %v", err)
+	}
+}
+
+func TestDynamicMCPSurface_GenerateCommitsPreparedStateOnlyOnSuccess(t *testing.T) {
+	var commits int
+	provider := &fakeDeferredProvider{
+		prepare: func(context.Context) (*DeferredSyntheticMessages, error) {
+			return &DeferredSyntheticMessages{
+				Messages: []*schema.Message{schema.UserMessage("<deferred-tools-delta>\nmode: bootstrap\nadded:\na\nremoved:\n</deferred-tools-delta>")},
+				Commit:   func() { commits++ },
+			}, nil
+		},
+	}
+	var captured []*schema.Message
+	wrapper := &dynamicMCPModelWrapper{
+		base: &fakeBaseChatModel{
+			generateFn: func(_ context.Context, input []*schema.Message, _ ...model2.Option) (*schema.Message, error) {
+				captured = input
+				return schema.AssistantMessage("ok", nil), nil
+			},
+		},
+		allTools:        []*schema.ToolInfo{{Name: "ask_user"}},
+		state:           DeferredMCPState{},
+		catalogProvider: provider,
+	}
+
+	msg, err := wrapper.Generate(context.Background(), []*schema.Message{schema.SystemMessage("sys"), schema.UserMessage("hi")})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected response message")
+	}
+	if commits != 1 {
+		t.Fatalf("expected commit once, got %d", commits)
+	}
+	if len(captured) < 2 || captured[1].Role != schema.User {
+		t.Fatalf("expected synthetic user message after system, got %#v", captured)
+	}
+
+	provider.prepare = func(context.Context) (*DeferredSyntheticMessages, error) {
+		return &DeferredSyntheticMessages{
+			Messages: []*schema.Message{schema.UserMessage("<deferred-tools-delta>\nmode: bootstrap\nadded:\na\nremoved:\n</deferred-tools-delta>")},
+			Commit:   func() { commits++ },
+		}, nil
+	}
+	wrapper.base = &fakeBaseChatModel{
+		generateFn: func(_ context.Context, _ []*schema.Message, _ ...model2.Option) (*schema.Message, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	if _, err := wrapper.Generate(context.Background(), []*schema.Message{schema.SystemMessage("sys")}); err == nil {
+		t.Fatal("expected generate error")
+	}
+	if commits != 1 {
+		t.Fatalf("expected failed generate not to commit, got %d", commits)
 	}
 }

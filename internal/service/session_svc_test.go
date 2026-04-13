@@ -136,3 +136,72 @@ func TestSessionServiceSaveSessionByIDPreservesDeferredDiscoveryAcrossModes(t *t
 		t.Fatalf("expected readwrite discovery to remain, got %#v", memory)
 	}
 }
+
+func TestSessionServiceSaveSessionByIDPersistsDeferredAnnouncementState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessionStore.Create("Deferred Delta")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sess.ID)
+	chat.mu.Unlock()
+
+	run.addUserMessage("hello")
+	run.upsertDiscoveredTool(model.DiscoveredToolRecord{
+		CanonicalName: "mcp__alpha__grep",
+		Server:        "alpha",
+		Kind:          tools.ToolKindAction,
+		DiscoveredAt:  1,
+	})
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{"mcp__beta__status", "mcp__alpha__grep"},
+	})
+
+	if err := ss.SaveSessionByID(sess.ID); err != nil {
+		t.Fatalf("save session by id: %v", err)
+	}
+
+	var saved *model.SessionData
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		saved, err = sessionStore.LoadSessionData(sess.ID)
+		if err == nil && saved != nil && saved.DeferredAnnouncementState != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("load session data: %v", err)
+	}
+	if saved == nil || saved.DeferredAnnouncementState == nil {
+		t.Fatal("expected deferred announcement state to be saved")
+	}
+	got := saved.DeferredAnnouncementState.AnnouncedSearchableCanonicalNames
+	want := []string{"mcp__beta__status", "mcp__alpha__grep"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected announcement state: %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected announcement state ordering/value: got %#v want %#v", got, want)
+		}
+	}
+	if len(saved.DiscoveredTools) != 1 || saved.DiscoveredTools[0].CanonicalName != "mcp__alpha__grep" {
+		t.Fatalf("unexpected discovered tools snapshot: %#v", saved.DiscoveredTools)
+	}
+	if len(saved.Messages) != 1 || saved.Messages[0].Content != "hello" {
+		t.Fatalf("unexpected message snapshot: %#v", saved.Messages)
+	}
+}
