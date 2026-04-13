@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -92,12 +93,22 @@ type RunnerBundle struct {
 	CachedSurfaceMetadataByServer map[string]cachedMCPServerSurface
 }
 
-type freshnessTask struct {
-	key                string
-	TargetConfigDigest string
-	err                error
-	fallbackToCurrent  bool
-	done               chan struct{}
+type detachedBundleTaskKind string
+
+const (
+	detachedBundleTaskColdStart detachedBundleTaskKind = "cold-start"
+	detachedBundleTaskFreshness detachedBundleTaskKind = "freshness"
+)
+
+type detachedBundleTask struct {
+	Kind                 detachedBundleTaskKind
+	key                  string
+	TargetConfigDigest   string
+	ExpectedGeneration   uint64
+	ExpectedConfigDigest string
+	err                  error
+	fallbackToCurrent    bool
+	done                 chan struct{}
 }
 
 type runnerBundleSurface struct {
@@ -120,6 +131,7 @@ type SessionRun struct {
 	running                      bool
 	starting                     bool
 	cancelFn                     context.CancelFunc
+	startDone                    chan struct{}
 	runDone                      chan struct{}
 	pendingInterrupt             *PendingInterrupt
 	streamingState               *model.StreamingState
@@ -468,11 +480,13 @@ type ChatService struct {
 
 	installedBundle            *RunnerBundle
 	retiredBundles             []*RunnerBundle
-	freshnessTask              *freshnessTask
+	coldStartTask              *detachedBundleTask
+	freshnessTask              *detachedBundleTask
 	nextGeneration             uint64
 	probeBundleSurfaceFn       func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error)
 	prepareRunnerBundleFn      func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error)
 	prepareBundleFromSurfaceFn func(context.Context, *config.AppConfig, string, *runnerBundleSurface) (*RunnerBundle, error)
+	closeRunnerBundleFn        func(*RunnerBundle)
 
 	// Per-session execution state
 	sessions        map[string]*SessionRun
@@ -606,7 +620,17 @@ func (s *ChatService) closeRunnerBundleLocked(bundle *RunnerBundle) {
 	if bundle == nil {
 		return
 	}
+	if s.closeRunnerBundleFn != nil {
+		s.closeRunnerBundleFn(bundle)
+		return
+	}
 	s.closeMCPHandlesLocked(bundle.MCPHandles)
+}
+
+func (s *ChatService) closeRunnerBundle(bundle *RunnerBundle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeRunnerBundleLocked(bundle)
 }
 
 func (s *ChatService) bundleGenerationReferencedLocked(generation uint64) bool {
@@ -683,6 +707,10 @@ func runnerForKind(bundle *RunnerBundle, kind RunnerKind) *adk.Runner {
 
 func bundleKey(generation uint64, digest string) string {
 	return fmt.Sprintf("%d:%s", generation, digest)
+}
+
+func coldStartTaskKey(targetConfigDigest string) string {
+	return fmt.Sprintf("cold-start:%s", targetConfigDigest)
 }
 
 func cloneCatalogEntries(entries []tools.CatalogEntry) []tools.CatalogEntry {
@@ -802,6 +830,115 @@ func matchingSurfaceCacheEntry(cache map[string]cachedMCPServerSurface, serverNa
 	return entry, true
 }
 
+func bundleSurfaceFreshForPruning(bundle *RunnerBundle, now time.Time, freshnessTTL time.Duration) bool {
+	if bundle == nil {
+		return false
+	}
+	if freshnessTTL <= 0 {
+		return true
+	}
+	return now.Sub(bundle.LastFreshnessCheckAt) < freshnessTTL
+}
+
+func (s *ChatService) detachedTaskContext() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *ChatService) activeDetachedTaskLocked(kind detachedBundleTaskKind) *detachedBundleTask {
+	if kind == detachedBundleTaskColdStart {
+		return s.coldStartTask
+	}
+	return s.freshnessTask
+}
+
+func (s *ChatService) setDetachedTaskLocked(task *detachedBundleTask) {
+	if task == nil {
+		return
+	}
+	if task.Kind == detachedBundleTaskColdStart {
+		s.coldStartTask = task
+		return
+	}
+	s.freshnessTask = task
+}
+
+func (s *ChatService) clearDetachedTaskLocked(task *detachedBundleTask) {
+	if task == nil {
+		return
+	}
+	if task.Kind == detachedBundleTaskColdStart {
+		if s.coldStartTask == task {
+			s.coldStartTask = nil
+		}
+		return
+	}
+	if s.freshnessTask == task {
+		s.freshnessTask = nil
+	}
+}
+
+func (s *ChatService) finalizeStartupLocked(sessionID string) {
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		s.cleanupRetiredBundlesLocked()
+		return
+	}
+	run.starting = false
+	run.cancelFn = nil
+	run.pendingStartBundleGeneration = 0
+	if run.startDone != nil {
+		close(run.startDone)
+		run.startDone = nil
+	}
+	s.cleanupRetiredBundlesLocked()
+}
+
+func (s *ChatService) publishStartupLocked(
+	sessionID string,
+	bundle *RunnerBundle,
+	runnerKind RunnerKind,
+	cancel context.CancelFunc,
+	done chan struct{},
+) (*SessionRun, error) {
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		s.cleanupRetiredBundlesLocked()
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+	if bundle == nil {
+		s.finalizeStartupLocked(sessionID)
+		return nil, fmt.Errorf("runner bundle is required")
+	}
+	if run.running {
+		s.finalizeStartupLocked(sessionID)
+		return nil, fmt.Errorf("agent is already running in this session")
+	}
+	if !run.starting {
+		s.finalizeStartupLocked(sessionID)
+		return nil, fmt.Errorf("session %s startup is no longer active", sessionID)
+	}
+	if run.pendingStartBundleGeneration != bundle.Generation {
+		s.finalizeStartupLocked(sessionID)
+		return nil, fmt.Errorf("session %s startup is no longer active", sessionID)
+	}
+	run.cancelFn = cancel
+	run.running = true
+	run.starting = false
+	run.pendingStartBundleGeneration = 0
+	run.activeBundleGeneration = bundle.Generation
+	run.activeRunnerKind = runnerKind
+	run.runDone = done
+	if run.startDone != nil {
+		close(run.startDone)
+		run.startDone = nil
+	}
+	s.cleanupRetiredBundlesLocked()
+	return run, nil
+}
+
 func (s *ChatService) reservePendingStartLocked(sessionID string, generation uint64) (*SessionRun, error) {
 	if generation == 0 {
 		return nil, fmt.Errorf("runner bundle generation is required")
@@ -821,14 +958,7 @@ func (s *ChatService) reservePendingStartLocked(sessionID string, generation uin
 }
 
 func (s *ChatService) clearPendingStartLocked(sessionID string) {
-	run, ok := s.sessions[sessionID]
-	if !ok {
-		s.cleanupRetiredBundlesLocked()
-		return
-	}
-	run.starting = false
-	run.pendingStartBundleGeneration = 0
-	s.cleanupRetiredBundlesLocked()
+	s.finalizeStartupLocked(sessionID)
 }
 
 func (s *ChatService) reserveInstalledBundleLocked(sessionID string) (*RunnerBundle, error) {
@@ -875,6 +1005,17 @@ func (s *ChatService) GetOrCreateRun(sessionID string) *SessionRun {
 // RemoveSession removes a session's run state from memory.
 func (s *ChatService) RemoveSession(sessionID string) {
 	s.mu.Lock()
+	if run, ok := s.sessions[sessionID]; ok {
+		if run.cancelFn != nil {
+			run.cancelFn()
+		}
+		if run.startDone != nil {
+			close(run.startDone)
+			run.startDone = nil
+		}
+		run.starting = false
+		run.pendingStartBundleGeneration = 0
+	}
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
 	s.cleanupRetiredBundlesLocked()
@@ -1011,14 +1152,25 @@ func (s *ChatService) SendMessage(userMessage string) error {
 
 	sessionID := run.sessionID
 	mode := run.mode
+	baseCtx := s.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	startCtx, startCancel := context.WithCancel(baseCtx)
 	run.starting = true
+	run.cancelFn = startCancel
+	run.startDone = make(chan struct{})
 	s.mu.Unlock()
 
-	bundle, err := s.ensureBundleReadyForNewRun(s.ctx, sessionID)
+	bundle, err := s.ensureBundleReadyForNewRun(startCtx, sessionID)
 	if err != nil {
+		startCancel()
 		s.mu.Lock()
-		s.clearPendingStartLocked(sessionID)
+		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		logger.Error("[CHAT] Failed to prepare runner bundle", err)
 		wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
 			"sessionId": sessionID,
@@ -1026,44 +1178,47 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		})
 		return fmt.Errorf("failed to build runners: %w", err)
 	}
+	if err := startCtx.Err(); err != nil {
+		startCancel()
+		s.mu.Lock()
+		s.finalizeStartupLocked(sessionID)
+		s.mu.Unlock()
+		return nil
+	}
 
 	runnerKind := runnerKindForMode(mode)
 	runner := runnerForKind(bundle, runnerKind)
 	if runner == nil {
+		startCancel()
 		s.mu.Lock()
-		s.clearPendingStartLocked(sessionID)
+		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
 		return fmt.Errorf("runner %s unavailable for bundle generation %d", runnerKind, bundle.Generation)
 	}
 
 	// Create a cancellable context with session identity
-	runCtx, cancel := context.WithCancel(s.ctx)
+	runCtx, cancel := context.WithCancel(baseCtx)
 	runCtx = contextWithSessionID(runCtx, sessionID)
 	s.mu.Lock()
-	run, ok := s.sessions[sessionID]
-	if !ok {
+	if startCtx.Err() != nil {
+		startCancel()
+		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
 		cancel()
-		s.mu.Lock()
-		s.cleanupRetiredBundlesLocked()
-		s.mu.Unlock()
-		return fmt.Errorf("session %s not found", sessionID)
+		return nil
 	}
-	if !run.starting || run.pendingStartBundleGeneration != bundle.Generation {
-		s.clearPendingStartLocked(sessionID)
-		s.mu.Unlock()
-		cancel()
-		return fmt.Errorf("session %s startup is no longer active", sessionID)
-	}
-	run.cancelFn = cancel
-	run.starting = false
-	run.running = true
-	run.pendingStartBundleGeneration = 0
-	run.activeBundleGeneration = bundle.Generation
-	run.activeRunnerKind = runnerKind
 	done := make(chan struct{})
-	run.runDone = done
+	run, err = s.publishStartupLocked(sessionID, bundle, runnerKind, cancel, done)
 	s.mu.Unlock()
+	if err != nil {
+		startCancel()
+		cancel()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
+		return err
+	}
+	startCancel()
 
 	// Prepare messages
 	messages := run.prepareMessages()
@@ -1739,7 +1894,26 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 func (s *ChatService) StopGeneration() error {
 	s.mu.Lock()
 	run := s.activeRun()
-	if run == nil || !run.running {
+	if run == nil {
+		s.mu.Unlock()
+		return nil
+	}
+	if run.starting {
+		if run.cancelFn != nil {
+			run.cancelFn()
+		}
+		done := run.startDone
+		s.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				logger.Warn("[CHAT] StopGeneration timed out during startup", "session", s.activeSessionID)
+			}
+		}
+		return nil
+	}
+	if !run.running {
 		s.mu.Unlock()
 		return nil
 	}
@@ -1765,7 +1939,26 @@ func (s *ChatService) StopGeneration() error {
 func (s *ChatService) StopSessionGeneration(sessionID string) {
 	s.mu.Lock()
 	run, ok := s.sessions[sessionID]
-	if !ok || !run.running {
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	if run.starting {
+		if run.cancelFn != nil {
+			run.cancelFn()
+		}
+		done := run.startDone
+		s.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				logger.Warn("[CHAT] StopSessionGeneration timed out during startup", "session", sessionID)
+			}
+		}
+		return
+	}
+	if !run.running {
 		s.mu.Unlock()
 		return
 	}
@@ -1922,7 +2115,7 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		return nil
 	}
 
-	cfg, _, err := s.currentConfigSnapshot()
+	cfg, currentDigest, err := s.currentConfigSnapshot()
 	if err != nil || cfg == nil {
 		return cloneAndSortDiscoveredTools(records)
 	}
@@ -1936,32 +2129,32 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		catalog *tools.ToolCatalog
 		cache   map[string]cachedMCPServerSurface
 	)
-	if s.installedBundle != nil {
+	if s.installedBundle != nil &&
+		s.installedBundle.ConfigDigest == currentDigest &&
+		bundleSurfaceFreshForPruning(s.installedBundle, s.now(), s.freshnessTTL) {
 		catalog = s.installedBundle.MCPCatalog
 		cache = cloneSurfaceCache(s.installedBundle.CachedSurfaceMetadataByServer)
 	}
 	s.mu.Unlock()
 
-	if catalog == nil {
-		return cloneAndSortDiscoveredTools(records)
-	}
-
 	knownDeferredCanonicalNames := make(map[string]struct{})
-	serverHasTrustedMetadata := make(map[string]bool)
+	serverHasTrustedToolMetadata := make(map[string]bool)
 	trustedServerCanonicalNames := make(map[string]map[string]struct{})
-	for _, entry := range catalog.Entries() {
-		if !entry.IsMcp || !entry.ShouldDefer {
-			continue
+	if catalog != nil {
+		for _, entry := range catalog.Entries() {
+			if !entry.IsMcp || !entry.ShouldDefer {
+				continue
+			}
+			knownDeferredCanonicalNames[entry.CanonicalName] = struct{}{}
+			if entry.Server == "" || entry.IsResourceTool {
+				continue
+			}
+			serverHasTrustedToolMetadata[entry.Server] = true
+			if _, ok := trustedServerCanonicalNames[entry.Server]; !ok {
+				trustedServerCanonicalNames[entry.Server] = make(map[string]struct{})
+			}
+			trustedServerCanonicalNames[entry.Server][entry.CanonicalName] = struct{}{}
 		}
-		knownDeferredCanonicalNames[entry.CanonicalName] = struct{}{}
-		if entry.Server == "" {
-			continue
-		}
-		serverHasTrustedMetadata[entry.Server] = true
-		if _, ok := trustedServerCanonicalNames[entry.Server]; !ok {
-			trustedServerCanonicalNames[entry.Server] = make(map[string]struct{})
-		}
-		trustedServerCanonicalNames[entry.Server][entry.CanonicalName] = struct{}{}
 	}
 	for server := range cache {
 		expectedDigest, ok := configuredServers[server]
@@ -1972,7 +2165,10 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		if !trusted {
 			continue
 		}
-		serverHasTrustedMetadata[server] = true
+		if !trustedCacheEntry.HasToolMetadata {
+			continue
+		}
+		serverHasTrustedToolMetadata[server] = true
 		if _, exists := trustedServerCanonicalNames[server]; !exists {
 			trustedServerCanonicalNames[server] = make(map[string]struct{})
 		}
@@ -1998,7 +2194,7 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 			pruned = append(pruned, record)
 			continue
 		}
-		if record.Server != "" && serverHasTrustedMetadata[record.Server] {
+		if record.Server != "" && serverHasTrustedToolMetadata[record.Server] {
 			if _, ok := trustedServerCanonicalNames[record.Server][record.CanonicalName]; !ok {
 				continue
 			}
@@ -2352,6 +2548,60 @@ func (s *ChatService) updateBundleFreshnessLocked(expectedGeneration uint64, exp
 	return true
 }
 
+func (s *ChatService) finishDetachedTaskLocked(task *detachedBundleTask) {
+	s.clearDetachedTaskLocked(task)
+	close(task.done)
+}
+
+func (s *ChatService) waitDetachedTask(ctx context.Context, task *detachedBundleTask) error {
+	if task == nil {
+		return nil
+	}
+	select {
+	case <-task.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *ChatService) runColdStartTask(task *detachedBundleTask, cfg *config.AppConfig) {
+	var discard *RunnerBundle
+	defer func() {
+		s.mu.Lock()
+		s.finishDetachedTaskLocked(task)
+		s.mu.Unlock()
+		if discard != nil {
+			s.closeRunnerBundle(discard)
+		}
+	}()
+
+	bundle, err := s.prepareRunnerBundle(s.detachedTaskContext(), cfg, task.TargetConfigDigest, nil)
+	if err != nil {
+		task.err = err
+		return
+	}
+
+	s.mu.Lock()
+	_, currentDigest, digestErr := s.currentConfigSnapshot()
+	if digestErr != nil {
+		task.err = digestErr
+		discard = bundle
+		s.mu.Unlock()
+		return
+	}
+	if s.installedBundle == nil && currentDigest == task.TargetConfigDigest {
+		s.installRunnerBundleLocked(bundle)
+		s.mu.Unlock()
+		return
+	}
+	discard = bundle
+	s.mu.Unlock()
+}
+
 func toolInfoSignature(entry tools.CatalogEntry) string {
 	if entry.Tool == nil {
 		return ""
@@ -2463,7 +2713,12 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("session id is required")
 	}
 
+	allowStaleInstalled := false
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		cfg, currentDigest, err := s.currentConfigSnapshot()
 		if err != nil {
 			return nil, err
@@ -2471,157 +2726,150 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 
 		s.mu.Lock()
 		bundle := s.installedBundle
-		if bundle == nil {
-			s.mu.Unlock()
-			newBundle, err := s.prepareRunnerBundle(ctx, cfg, currentDigest, nil)
-			if err != nil {
-				return nil, err
-			}
-
-			s.mu.Lock()
-			if s.installedBundle == nil {
-				currentCfg, latestDigest, digestErr := s.currentConfigSnapshot()
-				if digestErr == nil && latestDigest == currentDigest {
-					_ = currentCfg
-					s.installRunnerBundleLocked(newBundle)
-					s.mu.Unlock()
-					continue
-				}
-			}
-			s.mu.Unlock()
-			s.closeRunnerBundleLocked(newBundle)
-			continue
-		}
-
-		configChanged := currentDigest != bundle.ConfigDigest
-		if !configChanged && (s.freshnessTTL <= 0 || s.now().Sub(bundle.LastFreshnessCheckAt) < s.freshnessTTL) {
-			if _, err := s.reservePendingStartLocked(sessionID, bundle.Generation); err != nil {
+		bundleFresh := bundle != nil && currentDigest == bundle.ConfigDigest &&
+			(s.freshnessTTL <= 0 || s.now().Sub(bundle.LastFreshnessCheckAt) < s.freshnessTTL)
+		if bundle != nil && currentDigest == bundle.ConfigDigest && (bundleFresh || allowStaleInstalled) {
+			if err := ctx.Err(); err != nil {
 				s.mu.Unlock()
 				return nil, err
 			}
+			reserved, err := s.reserveInstalledBundleLocked(sessionID)
 			s.mu.Unlock()
-			return bundle, nil
+			if err != nil {
+				return nil, err
+			}
+			return reserved, nil
+		}
+		allowStaleInstalled = false
+
+		if bundle == nil {
+			task := s.coldStartTask
+			if task == nil {
+				task = &detachedBundleTask{
+					Kind:               detachedBundleTaskColdStart,
+					key:                coldStartTaskKey(currentDigest),
+					TargetConfigDigest: currentDigest,
+					done:               make(chan struct{}),
+				}
+				s.setDetachedTaskLocked(task)
+				s.mu.Unlock()
+				go s.runColdStartTask(task, cfg)
+			} else {
+				s.mu.Unlock()
+			}
+			reuse := currentDigest == task.TargetConfigDigest
+			if err := s.waitDetachedTask(ctx, task); err != nil {
+				return nil, err
+			}
+			if !reuse {
+				continue
+			}
+			if task.err != nil {
+				return nil, task.err
+			}
+			continue
 		}
 
-		if s.freshnessTask != nil {
-			task := s.freshnessTask
-			done := task.done
+		task := s.freshnessTask
+		if task != nil {
 			reuse := currentDigest == task.TargetConfigDigest
 			s.mu.Unlock()
-			<-done
+			if err := s.waitDetachedTask(ctx, task); err != nil {
+				return nil, err
+			}
 			if !reuse {
 				continue
 			}
 			if task.err != nil {
 				if task.fallbackToCurrent {
-					s.mu.Lock()
-					bundle, err := s.reserveInstalledBundleLocked(sessionID)
-					s.mu.Unlock()
-					if err != nil {
-						return nil, err
-					}
-					return bundle, nil
+					allowStaleInstalled = true
+					continue
 				}
 				return nil, task.err
 			}
 			continue
 		}
 
-		key := bundleKey(bundle.Generation, bundle.ConfigDigest)
-		task := &freshnessTask{
-			key:                key,
-			TargetConfigDigest: currentDigest,
-			done:               make(chan struct{}),
+		task = &detachedBundleTask{
+			Kind:                 detachedBundleTaskFreshness,
+			key:                  bundleKey(bundle.Generation, bundle.ConfigDigest),
+			TargetConfigDigest:   currentDigest,
+			ExpectedGeneration:   bundle.Generation,
+			ExpectedConfigDigest: bundle.ConfigDigest,
+			done:                 make(chan struct{}),
 		}
-		s.freshnessTask = task
-		expectedGeneration := bundle.Generation
-		expectedDigest := bundle.ConfigDigest
 		expectedFingerprint := bundle.SurfaceRelevantFingerprint
 		prevCache := cloneSurfaceCache(bundle.CachedSurfaceMetadataByServer)
+		s.setDetachedTaskLocked(task)
 		s.mu.Unlock()
 
-		s.runFreshnessTask(ctx, task, cfg, expectedGeneration, expectedDigest, expectedFingerprint, currentDigest, prevCache)
-		if task.err != nil {
-			if task.fallbackToCurrent {
-				s.mu.Lock()
-				bundle, err := s.reserveInstalledBundleLocked(sessionID)
-				s.mu.Unlock()
-				if err != nil {
-					return nil, err
-				}
-				return bundle, nil
-			}
-			return nil, task.err
-		}
+		go s.runFreshnessTask(task, cfg, expectedFingerprint, prevCache)
 	}
 }
 
-func (s *ChatService) runFreshnessTask(
-	ctx context.Context,
-	task *freshnessTask,
-	cfg *config.AppConfig,
-	expectedGeneration uint64,
-	expectedDigest string,
-	expectedFingerprint string,
-	targetConfigDigest string,
-	prevCache map[string]cachedMCPServerSurface,
-) {
-	finish := func() {
+func (s *ChatService) runFreshnessTask(task *detachedBundleTask, cfg *config.AppConfig, expectedFingerprint string, prevCache map[string]cachedMCPServerSurface) {
+	var discard *RunnerBundle
+	defer func() {
 		s.mu.Lock()
-		if s.freshnessTask == task {
-			s.freshnessTask = nil
-		}
-		close(task.done)
+		s.finishDetachedTaskLocked(task)
 		s.mu.Unlock()
-	}
+		if discard != nil {
+			s.closeRunnerBundle(discard)
+		}
+	}()
 
-	surface, err := s.probeRunnerBundleSurface(ctx, cfg, prevCache)
+	surface, err := s.probeRunnerBundleSurface(s.detachedTaskContext(), cfg, prevCache)
 	if err != nil {
 		logger.Warn("[RUNNER] Freshness probe failed", "error", err)
 		task.err = err
 		task.fallbackToCurrent = true
-		finish()
 		return
 	}
 
-	if targetConfigDigest == expectedDigest && surface.SurfaceRelevantFingerprint == expectedFingerprint {
+	if task.TargetConfigDigest == task.ExpectedConfigDigest && surface.SurfaceRelevantFingerprint == expectedFingerprint {
 		s.closeMCPHandlesLocked(surface.Handles)
 		s.mu.Lock()
-		if s.installedBundle != nil {
-			s.updateBundleFreshnessLocked(expectedGeneration, expectedDigest, s.now())
+		_, currentDigest, digestErr := s.currentConfigSnapshot()
+		if digestErr != nil {
+			task.err = digestErr
+			s.mu.Unlock()
+			return
 		}
-		if s.freshnessTask == task {
-			s.freshnessTask = nil
+		if s.installedBundle != nil &&
+			s.installedBundle.Generation == task.ExpectedGeneration &&
+			s.installedBundle.ConfigDigest == task.ExpectedConfigDigest &&
+			currentDigest == task.TargetConfigDigest {
+			s.updateBundleFreshnessLocked(task.ExpectedGeneration, task.ExpectedConfigDigest, s.now())
 		}
-		close(task.done)
 		s.mu.Unlock()
 		return
 	}
 
-	newBundle, err := s.prepareRunnerBundleFromSurface(ctx, cfg, targetConfigDigest, surface)
+	newBundle, err := s.prepareRunnerBundleFromSurface(s.detachedTaskContext(), cfg, task.TargetConfigDigest, surface)
 	if err != nil {
 		logger.Warn("[RUNNER] Freshness rebuild preparation failed", "error", err)
 		task.err = err
-		finish()
 		return
 	}
 
 	s.mu.Lock()
-	if s.installedBundle != nil && s.installedBundle.Generation == expectedGeneration && s.installedBundle.ConfigDigest == expectedDigest {
-		s.installRunnerBundleLocked(newBundle)
-		if s.freshnessTask == task {
-			s.freshnessTask = nil
-		}
-		close(task.done)
+	_, currentDigest, digestErr := s.currentConfigSnapshot()
+	if digestErr != nil {
+		task.err = digestErr
+		discard = newBundle
 		s.mu.Unlock()
 		return
 	}
-	if s.freshnessTask == task {
-		s.freshnessTask = nil
+	if s.installedBundle != nil &&
+		s.installedBundle.Generation == task.ExpectedGeneration &&
+		s.installedBundle.ConfigDigest == task.ExpectedConfigDigest &&
+		currentDigest == task.TargetConfigDigest {
+		s.installRunnerBundleLocked(newBundle)
+		s.mu.Unlock()
+		return
 	}
-	close(task.done)
+	discard = newBundle
 	s.mu.Unlock()
-	s.closeRunnerBundleLocked(newBundle)
 }
 
 // ---------------------------------------------------------------------------
