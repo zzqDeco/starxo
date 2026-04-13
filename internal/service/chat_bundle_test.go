@@ -234,6 +234,48 @@ func TestEnsureBundleReadyForNewRunSingleflightByInstalledBundleKey(t *testing.T
 	}
 }
 
+func TestPrepareDeferredSyntheticMessagesMissingStateAndEmptyViewInitializesNormalizedEmptyState(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-empty"
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare synthetic messages: %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("expected prepared synthetic state")
+	}
+	if len(prepared.Messages) != 0 {
+		t.Fatalf("expected no bootstrap message for empty view, got %#v", prepared.Messages)
+	}
+	if prepared.Commit == nil {
+		t.Fatal("expected commit for normalized empty state")
+	}
+	if got := run.deferredAnnouncementStateSnapshot(); got != nil {
+		t.Fatalf("expected nil state before successful model establishment, got %#v", got)
+	}
+
+	prepared.Commit()
+
+	got := run.deferredAnnouncementStateSnapshot()
+	if got == nil {
+		t.Fatal("expected normalized empty deferred announcement state")
+	}
+	if got.AnnouncedSearchableCanonicalNames == nil {
+		t.Fatal("expected empty state to use non-nil empty slice")
+	}
+	if len(got.AnnouncedSearchableCanonicalNames) != 0 {
+		t.Fatalf("expected empty announcement state, got %#v", got.AnnouncedSearchableCanonicalNames)
+	}
+}
+
 func TestEnsureBundleReadyForNewRunStaleNoChangeDoesNotRewriteFreshnessOnNewBundle(t *testing.T) {
 	store := newTestConfigStore(t)
 	chat := NewChatService(store)

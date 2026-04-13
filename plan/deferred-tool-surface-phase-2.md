@@ -111,21 +111,23 @@ phase-2 固定遵守以下设计原则：
 
 ### 5.2 Starxo-native state model
 
-新增 session 级 announcement state，建议命名为：
+新增 session 级 announcement state：
 
 - `SessionData.DeferredAnnouncementState`
 - `SessionRun.deferredAnnouncementState`
 
-最少字段：
+字段固定为：
 
 - `AnnouncedSearchableCanonicalNames []string`
-- `AnnouncementGeneration int64`
 
 规则固定为：
 
 - 这份 state 只记录“已经向模型公告过的 searchable deferred canonical names”
+- 持久化前先去重并稳定排序
+- 空 state 固定表示为稳定排序后的空切片，不混用 `nil`
 - 与 `DiscoveredTools` 分离，不混用
 - 会话恢复时从 `SessionData` hydrate
+- 旧 session 缺该字段时按“无 prior announcement state”处理，不报错不中断 restore
 - compaction/reload 后允许基于这份 state 继续生成 delta，而不是退回每轮全量 announcement
 
 ### 5.3 Delta semantics
@@ -147,24 +149,44 @@ phase-2 固定遵守以下设计原则：
 - 后续仅当 `addedNames` 或 `removedNames` 非空时才注入
 - 若无变化，则不注入 deferred tools announcement
 
-消息形式不照搬 `claude-code` attachment，而是 `starxo` synthetic message。建议固定为一个 system-reminder 风格的 synthetic message，内容只暴露 canonical names，不暴露 schema。
+消息形式不照搬 `claude-code` attachment，而是 `starxo` synthetic `schema.UserMessage`。wire 固定为：
+
+```text
+<deferred-tools-delta>
+mode: bootstrap|delta
+added:
+<canonical-name-per-line>
+removed:
+<canonical-name-per-line>
+</deferred-tools-delta>
+```
+
+固定规则：
+
+- bootstrap：当前 searchable 全量写入 `added`，`removed` 为空
+- delta：只写真实变化集合
+- `added` / `removed` 一律稳定排序
+- 固定段落标签必须保留，不省略空段落
 
 ### 5.4 Persistence / rebuild semantics
 
 delta state 必须满足：
 
-- SaveSessionByID 时随 session snapshot 一起落盘
+- SaveSessionByID 时随 session snapshot 一起原子落盘
+- snapshot 中 `DeferredAnnouncementState`、`DiscoveredTools`、timeline / `ctxEngine` / streaming 都来自同一份 session snapshot
 - compact / reload 后可基于 `AnnouncedSearchableCanonicalNames` 重建“之前已公告集合”
-- 如果 state 缺失或损坏，下一轮退化成 bootstrap full snapshot delta，不影响 correctness
+- 若旧 session 缺 state 且当前 view 为空，则本轮不发消息；待本轮模型调用成功建立后写入规范化空 state，避免后续反复 bootstrap
 
 ### 5.5 Execution points
 
 实现入口固定为：
 
 - [`/Users/zhaoziqian/starxo/internal/tools/dynamic_mcp_surface.go`](/Users/zhaoziqian/starxo/internal/tools/dynamic_mcp_surface.go)
-  - 当前 `buildDeferredAnnouncement(...)` 改成 `buildDeferredAnnouncementDelta(...)`
+  - 当前全量 announcement 改成 deferred tools delta synthetic message
+  - searchable canonical names 的规范化与 delta 计算固定收成单点 helper，不允许不同调用点各算各的
 - [`/Users/zhaoziqian/starxo/internal/service/chat.go`](/Users/zhaoziqian/starxo/internal/service/chat.go)
   - session hydrate/save 时带上 announcement state
+  - synthetic message 只在 `Generate(...)` 成功返回消息、或 `Stream(...)` 成功返回 stream reader 后推进 state
 - [`/Users/zhaoziqian/starxo/internal/model/session_data.go`](/Users/zhaoziqian/starxo/internal/model/session_data.go)
   - 新增持久化字段
 

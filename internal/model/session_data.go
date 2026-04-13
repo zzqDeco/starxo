@@ -5,11 +5,28 @@ package model
 // atomically-written file. This eliminates the dual-source split between
 // messages.json (backend) and display.json (frontend).
 type SessionData struct {
-	Version         int                    `json:"version"`                   // format version for future migrations
-	Messages        []PersistedMessage     `json:"messages"`                  // LLM conversation history
-	Display         []DisplayTurn          `json:"display"`                   // frontend-renderable timeline turns
-	Streaming       *StreamingState        `json:"streaming,omitempty"`       // non-nil when interrupted mid-stream
-	DiscoveredTools []DiscoveredToolRecord `json:"discoveredTools,omitempty"` // MCP deferred discovery state
+	Version                   int                        `json:"version"`                             // format version for future migrations
+	Messages                  []PersistedMessage         `json:"messages"`                            // LLM conversation history
+	Display                   []DisplayTurn              `json:"display"`                             // frontend-renderable timeline turns
+	Streaming                 *StreamingState            `json:"streaming,omitempty"`                 // non-nil when interrupted mid-stream
+	DiscoveredTools           []DiscoveredToolRecord     `json:"discoveredTools,omitempty"`           // MCP deferred discovery state
+	DeferredAnnouncementState *DeferredAnnouncementState `json:"deferredAnnouncementState,omitempty"` // persisted deferred tools delta state
+	MCPInstructionsDeltaState *MCPInstructionsDeltaState `json:"mcpInstructionsDeltaState,omitempty"` // persisted MCP instructions summary state
+}
+
+// DeferredAnnouncementState tracks which deferred tool canonical names have
+// already been announced to the model for this session.
+type DeferredAnnouncementState struct {
+	AnnouncedSearchableCanonicalNames []string `json:"announcedSearchableCanonicalNames"`
+}
+
+// MCPInstructionsDeltaState tracks the last MCP server-summary snapshot that
+// was announced to the model for this session.
+type MCPInstructionsDeltaState struct {
+	LastAnnouncedSearchableServers  []string `json:"lastAnnouncedSearchableServers"`
+	LastAnnouncedPendingServers     []string `json:"lastAnnouncedPendingServers"`
+	LastAnnouncedUnavailableServers []string `json:"lastAnnouncedUnavailableServers"`
+	LastInstructionsFingerprint     string   `json:"lastInstructionsFingerprint"`
 }
 
 // DiscoveredToolRecord is the persisted discovery record for a deferred MCP tool.
