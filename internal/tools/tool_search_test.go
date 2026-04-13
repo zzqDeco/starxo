@@ -122,3 +122,34 @@ func TestExecuteToolSearch_KeywordSearchUsesCanonicalMatches(t *testing.T) {
 		t.Fatalf("unexpected discovery record: %#v", records)
 	}
 }
+
+func TestExecuteToolSearch_HiddenNonMCPSampleUsesToolNameEverywhere(t *testing.T) {
+	entry := stubDeferredBuiltinSample("hidden_builtin_sample")
+	entry.Title = "Hidden Builtin Sample"
+	entry.Description = "A hidden sample deferred builtin"
+	entry.SearchHint = "sample builtin"
+
+	exactOutput, exactRecords := ExecuteToolSearch(ToolSearchInput{Query: "hidden_builtin_sample"}, ToolSearchState{
+		SearchablePool: []CatalogEntry{entry},
+	}, time.UnixMilli(333))
+	if len(exactOutput.Matches) != 1 || exactOutput.Matches[0] != "hidden_builtin_sample" {
+		t.Fatalf("expected exact-name to return tool name, got %#v", exactOutput)
+	}
+	if len(exactRecords) != 1 || exactRecords[0].CanonicalName != "hidden_builtin_sample" {
+		t.Fatalf("expected exact-name discovery record to use tool name, got %#v", exactRecords)
+	}
+
+	selectOutput, _ := ExecuteToolSearch(ToolSearchInput{Query: "select:hidden_builtin_sample"}, ToolSearchState{
+		SearchablePool: []CatalogEntry{entry},
+	}, time.UnixMilli(334))
+	if len(selectOutput.Matches) != 1 || selectOutput.Matches[0] != "hidden_builtin_sample" {
+		t.Fatalf("expected select to return tool name, got %#v", selectOutput)
+	}
+
+	keywordOutput, _ := ExecuteToolSearch(ToolSearchInput{Query: "+sample builtin"}, ToolSearchState{
+		SearchablePool: []CatalogEntry{entry},
+	}, time.UnixMilli(335))
+	if len(keywordOutput.Matches) != 1 || keywordOutput.Matches[0] != "hidden_builtin_sample" {
+		t.Fatalf("expected keyword search to return tool name, got %#v", keywordOutput)
+	}
+}

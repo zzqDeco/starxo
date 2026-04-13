@@ -119,6 +119,28 @@ func TestComputeDeferredMCPState_PlanModeOnlyAllowsTrustedReadOnlyTools(t *testi
 	assertCatalogNames(t, state.CurrentLoadedTools, []string{readOnly.CanonicalName})
 }
 
+func TestComputeDeferredMCPState_PlanModeDoesNotFilterHiddenNonMCPSample(t *testing.T) {
+	catalog := NewToolCatalog()
+
+	hiddenSample := stubDeferredBuiltinSample("hidden_builtin_sample")
+	if err := catalog.Register(hiddenSample); err != nil {
+		t.Fatalf("register hidden sample: %v", err)
+	}
+
+	state := ComputeDeferredMCPState(catalog, map[string]model.DiscoveredToolRecord{
+		hiddenSample.CanonicalName: {CanonicalName: hiddenSample.CanonicalName},
+	}, ToolPermissionContext{
+		SessionID: "sess-plan",
+		Mode:      "plan",
+		Servers:   map[string]MCPServerPermissionState{},
+	})
+
+	assertCatalogNames(t, state.SearchablePoolForMode, []string{hiddenSample.CanonicalName})
+	assertCatalogNames(t, state.LoadablePoolForMode, []string{hiddenSample.CanonicalName})
+	assertCatalogNames(t, state.EffectiveDiscovered, []string{hiddenSample.CanonicalName})
+	assertCatalogNames(t, state.CurrentLoadedTools, []string{hiddenSample.CanonicalName})
+}
+
 func assertCatalogNames(t *testing.T, entries []CatalogEntry, want []string) {
 	t.Helper()
 	got := make([]string, 0, len(entries))

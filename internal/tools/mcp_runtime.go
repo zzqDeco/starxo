@@ -230,6 +230,8 @@ func NewMCPActionAdapter(handle *MCPServerHandle, raw *mcp.Tool) (*MCPActionAdap
 		Kind:          ToolKindAction,
 		Title:         firstNonEmpty(raw.Title, annotationTitle(raw.Annotations), raw.Name),
 		Description:   raw.Description,
+		ToolClass:     ToolClassMCPAction,
+		DeferReason:   "mcp_default",
 		ShouldDefer:   true,
 		IsMcp:         true,
 		ReadOnlyHint:  raw.Annotations != nil && raw.Annotations.ReadOnlyHint,

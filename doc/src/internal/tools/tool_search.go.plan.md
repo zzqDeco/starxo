@@ -6,7 +6,7 @@
 - 所属模块: tools
 
 ## 2. 核心职责
-- 实现 Starxo-native 的 `tool_search` backend，服务于 deferred MCP 子集。
+- 实现 Starxo-native 的 `tool_search` backend，服务于 generic deferred framework。
 
 ## 3. 输入与输出
 - 输入来源: `ToolSearchInput`
@@ -24,12 +24,14 @@
 - `matches` 一律返回 canonical name
 - 零命中时才返回 `pending_mcp_servers`
 - 只有新发现 deferred tool 才产生 `DiscoveredToolRecord`
+- 对非 MCP deferred sample，`CanonicalName == tool name`
+- exact-name、`select:`、keyword search 对非 MCP sample 也返回同一个名字
 
 ## 5. 依赖关系
 - 内部依赖: `catalog.go`、`session_data.go`
 
 ## 6. 变更影响面
-- 决定 deferred MCP discovery 的写入边界和模型与工具面的交互稳定性
+- 决定 generic deferred discovery 的写入边界和模型与工具面的交互稳定性
 
 ## 7. 维护建议
 - 若将来扩展 ranking，不要改变 canonical output / no-op 语义

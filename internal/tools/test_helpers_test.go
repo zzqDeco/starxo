@@ -24,8 +24,27 @@ func stubCatalogEntry(name string) CatalogEntry {
 		CanonicalName: name,
 		Source:        ToolSourceMCP,
 		Kind:          ToolKindAction,
+		ToolClass:     ToolClassMCPAction,
+		DeferReason:   "mcp_default",
 		ShouldDefer:   true,
 		IsMcp:         true,
+		PermissionSpec: PermissionSpec{
+			AllowSearch:  true,
+			AllowExecute: true,
+		},
+		Tool: &stubInvokableTool{name: name},
+	}
+}
+
+func stubDeferredBuiltinSample(name string) CatalogEntry {
+	return CatalogEntry{
+		CanonicalName: name,
+		Source:        ToolSourceBuiltin,
+		Kind:          ToolKindAction,
+		ToolClass:     ToolClassBuiltin,
+		DeferReason:   "hidden_sample",
+		ShouldDefer:   true,
+		IsMcp:         false,
 		PermissionSpec: PermissionSpec{
 			AllowSearch:  true,
 			AllowExecute: true,
