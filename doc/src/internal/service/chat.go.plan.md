@@ -86,11 +86,12 @@
   - discovery 仍从 `SessionRun` 按 session 读取
   - 避免 runner 重建时污染正在运行的旧会话
 - deferred synthetic message 的 phase-2 注入规则：
-  - 当前先实现 deferred tools delta
+  - 先注入 deferred tools delta，再按需注入 MCP instructions delta
   - synthetic message 使用 `schema.UserMessage`
   - 注入位置固定为 system 之后、history 之前
+  - 两类 delta 若同一轮都发送，必须在模型调用成功建立后一起原子推进
   - state 只在 `Generate(...)` 成功返回消息或 `Stream(...)` 成功返回 stream reader 后推进
-  - 成功推进时，announcement state 与其他 session state 共用同一份 snapshot 落盘
+  - 成功推进时，两份 delta state 与其他 session state 共用同一份 snapshot 落盘
 - startup 生命周期通过单一 helper 收口：
   - 关闭 `startDone`
   - 清 `starting / cancelFn / pendingStartBundleGeneration`

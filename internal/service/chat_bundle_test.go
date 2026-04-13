@@ -274,6 +274,202 @@ func TestPrepareDeferredSyntheticMessagesMissingStateAndEmptyViewInitializesNorm
 	if len(got.AnnouncedSearchableCanonicalNames) != 0 {
 		t.Fatalf("expected empty announcement state, got %#v", got.AnnouncedSearchableCanonicalNames)
 	}
+	instructions := run.mcpInstructionsDeltaStateSnapshot()
+	if instructions == nil {
+		t.Fatal("expected normalized empty MCP instructions state")
+	}
+	if instructions.LastAnnouncedSearchableServers == nil ||
+		instructions.LastAnnouncedPendingServers == nil ||
+		instructions.LastAnnouncedUnavailableServers == nil {
+		t.Fatalf("expected instructions empty state to use non-nil empty slices, got %#v", instructions)
+	}
+	if len(instructions.LastAnnouncedSearchableServers) != 0 ||
+		len(instructions.LastAnnouncedPendingServers) != 0 ||
+		len(instructions.LastAnnouncedUnavailableServers) != 0 {
+		t.Fatalf("expected empty MCP instructions state, got %#v", instructions)
+	}
+	if instructions.LastInstructionsFingerprint == "" {
+		t.Fatal("expected deterministic empty-summary fingerprint")
+	}
+}
+
+func TestPrepareDeferredSyntheticMessagesOnlyEmitsToolsDeltaWhenServerSummaryUnchanged(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-tools-only"
+
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{
+		{
+			CanonicalName: "mcp__alpha__grep",
+			Server:        "alpha",
+			Kind:          tools.ToolKindAction,
+			ShouldDefer:   true,
+			IsMcp:         true,
+			PermissionSpec: tools.PermissionSpec{
+				AllowSearch:  true,
+				AllowExecute: true,
+			},
+			Tool: &stubTool{name: "mcp__alpha__grep"},
+		},
+		{
+			CanonicalName: "mcp__alpha__status",
+			Server:        "alpha",
+			Kind:          tools.ToolKindAction,
+			ShouldDefer:   true,
+			IsMcp:         true,
+			PermissionSpec: tools.PermissionSpec{
+				AllowSearch:  true,
+				AllowExecute: true,
+			},
+			Tool: &stubTool{name: "mcp__alpha__status"},
+		},
+	} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register %s: %v", entry.CanonicalName, err)
+		}
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{"mcp__alpha__grep"},
+	})
+	run.applySyntheticDeltaStates(nil, false, &model.MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  []string{"alpha"},
+		LastAnnouncedPendingServers:     []string{},
+		LastAnnouncedUnavailableServers: []string{},
+		LastInstructionsFingerprint:     tools.ComputeMCPInstructionsFingerprint([]string{"alpha"}, []string{}, []string{}),
+	}, true)
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare synthetic messages: %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("expected prepared tool delta")
+	}
+	if len(prepared.Messages) != 1 {
+		t.Fatalf("expected only one synthetic message, got %#v", prepared.Messages)
+	}
+	if !strings.Contains(prepared.Messages[0].Content, "<deferred-tools-delta>") {
+		t.Fatalf("expected deferred tools delta only, got %q", prepared.Messages[0].Content)
+	}
+	if strings.Contains(prepared.Messages[0].Content, "<mcp-instructions-delta>") {
+		t.Fatalf("did not expect instructions delta when server summary is unchanged, got %q", prepared.Messages[0].Content)
+	}
+}
+
+func TestPrepareDeferredSyntheticMessagesEmitsToolsThenInstructionsAndCommitsBothStates(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-dual-delta"
+
+	catalog := tools.NewToolCatalog()
+	entry := tools.CatalogEntry{
+		CanonicalName: "mcp__alpha__grep",
+		Server:        "alpha",
+		Kind:          tools.ToolKindAction,
+		ShouldDefer:   true,
+		IsMcp:         true,
+		PermissionSpec: tools.PermissionSpec{
+			AllowSearch:  true,
+			AllowExecute: true,
+		},
+		Tool: &stubTool{name: "mcp__alpha__grep"},
+	}
+	if err := catalog.Register(entry); err != nil {
+		t.Fatalf("register entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare synthetic messages: %v", err)
+	}
+	if prepared == nil || len(prepared.Messages) != 2 {
+		t.Fatalf("expected tools + instructions delta, got %#v", prepared)
+	}
+	if !strings.Contains(prepared.Messages[0].Content, "<deferred-tools-delta>") {
+		t.Fatalf("expected tools delta first, got %q", prepared.Messages[0].Content)
+	}
+	if !strings.Contains(prepared.Messages[1].Content, "<mcp-instructions-delta>") {
+		t.Fatalf("expected instructions delta second, got %q", prepared.Messages[1].Content)
+	}
+
+	prepared.Commit()
+
+	if got := run.deferredAnnouncementStateSnapshot(); got == nil || len(got.AnnouncedSearchableCanonicalNames) != 1 || got.AnnouncedSearchableCanonicalNames[0] != "mcp__alpha__grep" {
+		t.Fatalf("expected deferred announcement state to commit, got %#v", got)
+	}
+	if got := run.mcpInstructionsDeltaStateSnapshot(); got == nil || len(got.LastAnnouncedSearchableServers) != 1 || got.LastAnnouncedSearchableServers[0] != "alpha" {
+		t.Fatalf("expected instructions state to commit, got %#v", got)
+	}
+}
+
+func TestPrepareDeferredSyntheticMessagesIgnoresRawErrorTextChangesWhenReasonClassIsStable(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-error-fingerprint"
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: tools.NewToolCatalog(),
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:      "alpha",
+			State:     tools.MCPServerStateFailed,
+			LastError: errors.New("first transport failure"),
+		}},
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare first synthetic messages: %v", err)
+	}
+	if prepared == nil || len(prepared.Messages) != 1 || !strings.Contains(prepared.Messages[0].Content, "<mcp-instructions-delta>") {
+		t.Fatalf("expected initial instructions snapshot, got %#v", prepared)
+	}
+	prepared.Commit()
+
+	chat.mu.Lock()
+	chat.installedBundle.MCPHandles[0].LastError = errors.New("second transport failure")
+	chat.mu.Unlock()
+
+	prepared, err = provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare second synthetic messages: %v", err)
+	}
+	if prepared != nil {
+		t.Fatalf("expected raw error text change with same failed reason-class not to emit delta, got %#v", prepared.Messages)
+	}
+	if got := run.mcpInstructionsDeltaStateSnapshot(); got == nil || len(got.LastAnnouncedUnavailableServers) != 1 || got.LastAnnouncedUnavailableServers[0] != "alpha:failed" {
+		t.Fatalf("unexpected instructions state after stable reason-class update: %#v", got)
+	}
 }
 
 func TestEnsureBundleReadyForNewRunStaleNoChangeDoesNotRewriteFreshnessOnNewBundle(t *testing.T) {
