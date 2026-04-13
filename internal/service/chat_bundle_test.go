@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1036,8 +1037,15 @@ func TestEnsureBundleReadyForNewRun_FreshnessProbeErrorFallsBackButColdStartDoes
 	chat.installedBundle = current
 	chat.mu.Unlock()
 
+	var probeCalls int32
+	var prepareCalls int32
 	chat.probeBundleSurfaceFn = func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error) {
+		atomic.AddInt32(&probeCalls, 1)
 		return nil, fmt.Errorf("network down")
+	}
+	chat.prepareBundleFromSurfaceFn = func(context.Context, *config.AppConfig, string, *runnerBundleSurface) (*RunnerBundle, error) {
+		atomic.AddInt32(&prepareCalls, 1)
+		return nil, fmt.Errorf("unexpected rebuild")
 	}
 
 	got, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-1")
@@ -1047,6 +1055,12 @@ func TestEnsureBundleReadyForNewRun_FreshnessProbeErrorFallsBackButColdStartDoes
 	if got != current {
 		t.Fatalf("expected fallback to current installed bundle, got %#v", got)
 	}
+	if got := atomic.LoadInt32(&probeCalls); got != 1 {
+		t.Fatalf("expected exactly one probe call, got %d", got)
+	}
+	if got := atomic.LoadInt32(&prepareCalls); got != 0 {
+		t.Fatalf("expected no rebuild preparations on recoverable fallback, got %d", got)
+	}
 
 	chat2 := NewChatService(store)
 	markSessionStarting(chat2, "sess-2")
@@ -1055,6 +1069,193 @@ func TestEnsureBundleReadyForNewRun_FreshnessProbeErrorFallsBackButColdStartDoes
 	}
 	if _, err := chat2.ensureBundleReadyForNewRun(context.Background(), "sess-2"); err == nil {
 		t.Fatal("expected cold-start build failure to remain a hard error")
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_ConfigDriftProbeErrorFallsBackOnce(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-1")
+
+	oldDigest := mustConfigDigest(t, chat)
+	current := &RunnerBundle{
+		Generation:                 4,
+		ConfigDigest:               oldDigest,
+		DefaultRunner:              &adk.Runner{},
+		PlanRunner:                 &adk.Runner{},
+		LastFreshnessCheckAt:       time.Time{},
+		SurfaceRelevantFingerprint: "same-fp",
+	}
+	chat.mu.Lock()
+	chat.installedBundle = current
+	chat.mu.Unlock()
+
+	updateTestLLMModel(t, store, "gpt-5.4")
+
+	var probeCalls int32
+	var prepareCalls int32
+	chat.probeBundleSurfaceFn = func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error) {
+		atomic.AddInt32(&probeCalls, 1)
+		return nil, fmt.Errorf("network down")
+	}
+	chat.prepareBundleFromSurfaceFn = func(context.Context, *config.AppConfig, string, *runnerBundleSurface) (*RunnerBundle, error) {
+		atomic.AddInt32(&prepareCalls, 1)
+		return nil, fmt.Errorf("unexpected rebuild")
+	}
+
+	got, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("config drift recoverable fallback should return installed bundle: %v", err)
+	}
+	if got != current {
+		t.Fatalf("expected fallback to current installed bundle, got %#v", got)
+	}
+	if got := atomic.LoadInt32(&probeCalls); got != 1 {
+		t.Fatalf("expected exactly one freshness probe under fallback, got %d", got)
+	}
+	if got := atomic.LoadInt32(&prepareCalls); got != 0 {
+		t.Fatalf("expected no rebuild preparations under recoverable fallback, got %d", got)
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_FallbackDoesNotCrossConfigBoundary(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-1")
+
+	oldDigest := mustConfigDigest(t, chat)
+	current := &RunnerBundle{
+		Generation:                 9,
+		ConfigDigest:               oldDigest,
+		DefaultRunner:              &adk.Runner{},
+		PlanRunner:                 &adk.Runner{},
+		LastFreshnessCheckAt:       time.Time{},
+		SurfaceRelevantFingerprint: "same-fp",
+	}
+	chat.mu.Lock()
+	chat.installedBundle = current
+	chat.mu.Unlock()
+
+	updateTestLLMModel(t, store, "gpt-5.4")
+	midDigest := mustConfigDigest(t, chat)
+
+	firstProbeEntered := make(chan struct{}, 1)
+	releaseFirstProbe := make(chan struct{})
+	var probeCalls int32
+	var prepareCalls int32
+	chat.probeBundleSurfaceFn = func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error) {
+		call := atomic.AddInt32(&probeCalls, 1)
+		if call == 1 {
+			firstProbeEntered <- struct{}{}
+			<-releaseFirstProbe
+			return nil, fmt.Errorf("network down")
+		}
+		return &runnerBundleSurface{
+			ActionCatalog:                 tools.NewToolCatalog(),
+			CachedSurfaceMetadataByServer: map[string]cachedMCPServerSurface{},
+			SurfaceRelevantFingerprint:    "different-fp",
+		}, nil
+	}
+	chat.prepareBundleFromSurfaceFn = func(_ context.Context, _ *config.AppConfig, digest string, _ *runnerBundleSurface) (*RunnerBundle, error) {
+		atomic.AddInt32(&prepareCalls, 1)
+		return &RunnerBundle{
+			ConfigDigest:  digest,
+			DefaultRunner: &adk.Runner{},
+			PlanRunner:    &adk.Runner{},
+		}, nil
+	}
+
+	resultCh := make(chan *RunnerBundle, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		bundle, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-1")
+		resultCh <- bundle
+		errCh <- err
+	}()
+
+	<-firstProbeEntered
+	updateTestLLMModel(t, store, "gpt-5.4-mini")
+	newDigest := mustConfigDigest(t, chat)
+	close(releaseFirstProbe)
+
+	bundle := <-resultCh
+	if err := <-errCh; err != nil {
+		t.Fatalf("expected request to re-evaluate under new config: %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("expected rebuilt bundle after config boundary change")
+	}
+	if bundle.ConfigDigest != newDigest {
+		t.Fatalf("expected final bundle digest %q, got %q (mid digest was %q)", newDigest, bundle.ConfigDigest, midDigest)
+	}
+	if bundle == current {
+		t.Fatal("expected old fallback result to be rejected across config boundary")
+	}
+	if got := atomic.LoadInt32(&probeCalls); got != 2 {
+		t.Fatalf("expected old fallback result to trigger a second probe under new config, got %d", got)
+	}
+	if got := atomic.LoadInt32(&prepareCalls); got != 1 {
+		t.Fatalf("expected exactly one rebuild preparation for the new config, got %d", got)
+	}
+}
+
+func TestEnsureBundleReadyForNewRun_FallbackHardFailsWhenInstalledBundleDisappears(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	markSessionStarting(chat, "sess-1")
+
+	digest := mustConfigDigest(t, chat)
+	current := &RunnerBundle{
+		Generation:                 5,
+		ConfigDigest:               digest,
+		DefaultRunner:              &adk.Runner{},
+		PlanRunner:                 &adk.Runner{},
+		LastFreshnessCheckAt:       time.Time{},
+		SurfaceRelevantFingerprint: "same-fp",
+	}
+	chat.mu.Lock()
+	chat.installedBundle = current
+	chat.mu.Unlock()
+
+	firstProbeEntered := make(chan struct{}, 1)
+	releaseFirstProbe := make(chan struct{})
+	var probeCalls int32
+	var prepareCalls int32
+	chat.probeBundleSurfaceFn = func(context.Context, *config.AppConfig, map[string]cachedMCPServerSurface) (*runnerBundleSurface, error) {
+		atomic.AddInt32(&probeCalls, 1)
+		firstProbeEntered <- struct{}{}
+		<-releaseFirstProbe
+		return nil, fmt.Errorf("network down")
+	}
+	chat.prepareBundleFromSurfaceFn = func(context.Context, *config.AppConfig, string, *runnerBundleSurface) (*RunnerBundle, error) {
+		atomic.AddInt32(&prepareCalls, 1)
+		return nil, fmt.Errorf("unexpected rebuild")
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := chat.ensureBundleReadyForNewRun(context.Background(), "sess-1")
+		errCh <- err
+	}()
+
+	<-firstProbeEntered
+	chat.mu.Lock()
+	chat.installedBundle = nil
+	chat.mu.Unlock()
+	close(releaseFirstProbe)
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected hard error when installed bundle disappears before fallback reserve")
+	}
+	if !strings.Contains(err.Error(), "current installed bundle is unavailable after freshness fallback") {
+		t.Fatalf("expected hard fallback error, got %v", err)
+	}
+	if got := atomic.LoadInt32(&probeCalls); got != 1 {
+		t.Fatalf("expected exactly one probe before hard failure, got %d", got)
+	}
+	if got := atomic.LoadInt32(&prepareCalls); got != 0 {
+		t.Fatalf("expected no rebuild preparation when fallback hard-fails, got %d", got)
 	}
 }
 

@@ -28,6 +28,8 @@
 - freshness check 采用 detached probe + singleflight + transactional swap：
   - `currentConfigDigest != installedBundle.ConfigDigest` 的优先级高于 TTL 和 fingerprint no-change
   - `freshnessTask` 绑定 `TargetConfigDigest`
+  - recoverable freshness fallback 只有在重读后的 `currentConfigDigest == task.TargetConfigDigest` 时才允许接受
+  - fallback reserve 继续复用现有 startup reserve 单点逻辑，不额外引入第二套 pending-start 写入路径
   - 锁内只判定和登记 task
   - 网络 IO 全在锁外
   - 只有 surface-relevant fingerprint 变化才 rebuild
