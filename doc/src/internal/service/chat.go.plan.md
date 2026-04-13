@@ -72,6 +72,10 @@
   - 等待中的请求若发现自己的 config digest 已变化，必须在 task 完成后重新进入判定循环
   - recoverable fallback 也必须先重读 current config digest；只有 `currentConfigDigest == task.TargetConfigDigest` 时才允许接受
   - fallback reserve 继续复用 `reserveInstalledBundleLocked(sessionID)`，不单独写 `pendingStartBundleGeneration`
+  - installed bundle 的直接接受路径只有两条：
+    - `currentDigest == installedBundle.ConfigDigest && bundleFresh` 的正常 fast path
+    - 刚等待完成的 freshness task 报告 `fallbackToCurrent=true` 且 target digest 仍匹配时的 recoverable fallback path
+  - fallback 重判时若当前已无 installed bundle，会直接 hard fail，不继续同一轮探测循环
   - probe 无变化时只在 generation + digest 仍匹配时回写 freshness 时间戳
   - probe 有变化时锁外 prepare 新 bundle，锁内 install；旧 bundle 进入 retire
   - probe / refresh 网络错误不阻断当前消息；等待中的 caller 在 digest 仍匹配时可回退到当前 installed bundle，否则必须按新 config 重新判定

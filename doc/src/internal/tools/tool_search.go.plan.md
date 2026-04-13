@@ -20,6 +20,7 @@
   - 关键词搜索
   - `+term` 必选词
 - exact-name 对 canonical 和 aliases 做大小写无关匹配
+- 命中当前已加载工具时直接返回 canonical name，不再重复写 discovery
 - `matches` 一律返回 canonical name
 - 零命中时才返回 `pending_mcp_servers`
 - 只有新发现 deferred tool 才产生 `DiscoveredToolRecord`

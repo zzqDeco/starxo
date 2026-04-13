@@ -20,6 +20,11 @@
 - action tool adapter 对外暴露 canonical name，对内调用 remote name
 - service 层复用 cached metadata 时必须额外校验 server config identity：
   - 只有 `server name + ConfigIdentityDigest` 同时匹配当前 config 时才可信
+  - `ConfigIdentityDigest` 采用确定性计算：
+    - 字段固定为 `Name / Transport / Command / Args / URL / Env / Enabled`
+    - `Args` 保持原顺序
+    - `Env` 先按 key 排序
+    - `nil` slice / map 统一按空数组、空对象参与计算
   - 同名但 command / url / env / transport 等 identity 变化时，旧 cache 不能复用
   - `HasToolMetadata == false` 的 cache 只能当作未知信息，不能用于 pruning 删除或证明 canonical 已不存在
 
