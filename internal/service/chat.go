@@ -2713,7 +2713,6 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("session id is required")
 	}
 
-	allowStaleInstalled := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -2728,7 +2727,7 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 		bundle := s.installedBundle
 		bundleFresh := bundle != nil && currentDigest == bundle.ConfigDigest &&
 			(s.freshnessTTL <= 0 || s.now().Sub(bundle.LastFreshnessCheckAt) < s.freshnessTTL)
-		if bundle != nil && currentDigest == bundle.ConfigDigest && (bundleFresh || allowStaleInstalled) {
+		if bundle != nil && currentDigest == bundle.ConfigDigest && bundleFresh {
 			if err := ctx.Err(); err != nil {
 				s.mu.Unlock()
 				return nil, err
@@ -2740,7 +2739,6 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 			}
 			return reserved, nil
 		}
-		allowStaleInstalled = false
 
 		if bundle == nil {
 			task := s.coldStartTask
@@ -2772,18 +2770,34 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 
 		task := s.freshnessTask
 		if task != nil {
-			reuse := currentDigest == task.TargetConfigDigest
 			s.mu.Unlock()
 			if err := s.waitDetachedTask(ctx, task); err != nil {
 				return nil, err
 			}
-			if !reuse {
+			_, latestDigest, err := s.currentConfigSnapshot()
+			if err != nil {
+				return nil, err
+			}
+			if latestDigest != task.TargetConfigDigest {
 				continue
 			}
 			if task.err != nil {
 				if task.fallbackToCurrent {
-					allowStaleInstalled = true
-					continue
+					s.mu.Lock()
+					if err := ctx.Err(); err != nil {
+						s.mu.Unlock()
+						return nil, err
+					}
+					if s.installedBundle == nil {
+						s.mu.Unlock()
+						return nil, fmt.Errorf("current installed bundle is unavailable after freshness fallback")
+					}
+					reserved, err := s.reserveInstalledBundleLocked(sessionID)
+					s.mu.Unlock()
+					if err != nil {
+						return nil, err
+					}
+					return reserved, nil
 				}
 				return nil, task.err
 			}

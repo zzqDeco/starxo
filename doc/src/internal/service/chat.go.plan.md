@@ -70,9 +70,11 @@
   - `currentConfigDigest != installedBundle.ConfigDigest` 时必须直接进入 rebuild-required 路径，不能走 TTL/no-change shortcut
   - `freshnessTask` 绑定 `TargetConfigDigest`；只有 digest 相同的请求才能复用
   - 等待中的请求若发现自己的 config digest 已变化，必须在 task 完成后重新进入判定循环
+  - recoverable fallback 也必须先重读 current config digest；只有 `currentConfigDigest == task.TargetConfigDigest` 时才允许接受
+  - fallback reserve 继续复用 `reserveInstalledBundleLocked(sessionID)`，不单独写 `pendingStartBundleGeneration`
   - probe 无变化时只在 generation + digest 仍匹配时回写 freshness 时间戳
   - probe 有变化时锁外 prepare 新 bundle，锁内 install；旧 bundle 进入 retire
-  - probe / refresh 网络错误不阻断当前消息；等待中的 caller 在重判后可继续使用当前 installed bundle
+  - probe / refresh 网络错误不阻断当前消息；等待中的 caller 在 digest 仍匹配时可回退到当前 installed bundle，否则必须按新 config 重新判定
 - deferred MCP provider 绑定在 runner generation 上：
   - catalog / handles 固定到该代 runner
   - discovery 仍从 `SessionRun` 按 session 读取
