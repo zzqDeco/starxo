@@ -277,6 +277,7 @@ delta state 必须满足：
 - `tool_search`：永不 deferred
 - MCP tools：默认 deferred，除非显式 `alwaysLoad`
 - 其他工具：按 `shouldDefer` 判断
+- `shouldDefer == false && alwaysLoad == false`：不进入 deferred activation；本阶段不额外重定义其直接暴露策略
 
 ### 7.3 Catalog changes
 
@@ -304,12 +305,15 @@ delta state 必须满足：
 - MCP canonical name 规则不变
 - 对非 MCP deferred tools，名称直接使用 tool name
 - exact-name / `select:` / partial-hit 语义不回退
+- deferred searchable/loadable pool 只包含 `shouldDefer == true && alwaysLoad == false` 的 entries
+- provider 传给 `tool_search` 的 `CurrentLoaded` 只包含 loaded deferred entries，不直接复用全部 current loaded tools
 
 ### 7.5 Acceptance
 
 完成后必须满足：
 
 - `alwaysLoad` 真正成为统一的 opt-out 规则
+- `alwaysLoad` 保持正常 visible/direct-call 可用，但不再出现在 `tool_search` 或 `deferred-tools-delta`
 - hidden/test-only 的非 MCP deferred sample 也能被 `tool_search` 激活
 - plan mode 对只读约束仍只影响 MCP deferred pool，不误伤非 MCP builtin tools
 - prompt / runtime wording 不再错误宣称“只有 deferred MCP tools”

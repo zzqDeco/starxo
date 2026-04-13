@@ -472,6 +472,177 @@ func TestPrepareDeferredSyntheticMessagesIgnoresRawErrorTextChangesWhenReasonCla
 	}
 }
 
+func TestDeferredMCPProviderToolSearchStateUsesLoadedDeferredOnly(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-search-state"
+
+	deferredLoaded := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	alwaysLoaded := stubToolSearchCatalogEntry("mcp__alpha__resource_index", "alpha")
+	alwaysLoaded.AlwaysLoad = true
+	nonDeferred := stubToolSearchCatalogEntry("mcp__alpha__direct", "alpha")
+	nonDeferred.ShouldDefer = false
+
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{deferredLoaded, alwaysLoaded, nonDeferred} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register %s: %v", entry.CanonicalName, err)
+		}
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.discoveredTools[deferredLoaded.CanonicalName] = model.DiscoveredToolRecord{CanonicalName: deferredLoaded.CanonicalName}
+	run.discoveredTools[nonDeferred.CanonicalName] = model.DiscoveredToolRecord{CanonicalName: nonDeferred.CanonicalName}
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+
+	state, err := provider.ToolSearchState(ctx)
+	if err != nil {
+		t.Fatalf("tool search state: %v", err)
+	}
+	if len(state.CurrentLoaded) != 1 || state.CurrentLoaded[0].CanonicalName != deferredLoaded.CanonicalName {
+		t.Fatalf("expected provider current loaded to include only loaded deferred entry, got %#v", state.CurrentLoaded)
+	}
+
+	exactLoaded, exactLoadedRecords := tools.ExecuteToolSearch(tools.ToolSearchInput{Query: deferredLoaded.CanonicalName}, state, time.UnixMilli(100))
+	if len(exactLoaded.Matches) != 1 || exactLoaded.Matches[0] != deferredLoaded.CanonicalName {
+		t.Fatalf("expected loaded deferred exact-name match, got %#v", exactLoaded)
+	}
+	if len(exactLoadedRecords) != 0 {
+		t.Fatalf("expected loaded deferred exact-name not to rediscover, got %#v", exactLoadedRecords)
+	}
+
+	selectLoaded, selectLoadedRecords := tools.ExecuteToolSearch(tools.ToolSearchInput{Query: "select:" + deferredLoaded.CanonicalName}, state, time.UnixMilli(101))
+	if len(selectLoaded.Matches) != 1 || selectLoaded.Matches[0] != deferredLoaded.CanonicalName {
+		t.Fatalf("expected loaded deferred select match, got %#v", selectLoaded)
+	}
+	if len(selectLoadedRecords) != 0 {
+		t.Fatalf("expected loaded deferred select not to rediscover, got %#v", selectLoadedRecords)
+	}
+
+	for _, query := range []string{
+		alwaysLoaded.CanonicalName,
+		"select:" + alwaysLoaded.CanonicalName,
+		nonDeferred.CanonicalName,
+		"select:" + nonDeferred.CanonicalName,
+		"+resource index",
+		"+direct",
+	} {
+		output, records := tools.ExecuteToolSearch(tools.ToolSearchInput{Query: query}, state, time.UnixMilli(102))
+		if len(output.Matches) != 0 {
+			t.Fatalf("expected query %q to exclude non-deferred tool_search results, got %#v", query, output)
+		}
+		if len(records) != 0 {
+			t.Fatalf("expected query %q not to write discovery, got %#v", query, records)
+		}
+	}
+}
+
+func TestDeferredUnknownToolHandlerReturnsSharedToolSearchUnavailableMessage(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-tool-search-hidden"
+
+	alwaysLoaded := stubToolSearchCatalogEntry("mcp__alpha__resource_index", "alpha")
+	alwaysLoaded.AlwaysLoad = true
+	nonDeferred := stubToolSearchCatalogEntry("mcp__alpha__direct", "alpha")
+	nonDeferred.ShouldDefer = false
+
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{alwaysLoaded, nonDeferred} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register %s: %v", entry.CanonicalName, err)
+		}
+	}
+
+	chat.mu.Lock()
+	chat.getOrCreateRun(sessionID)
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	handler := newDeferredUnknownToolHandler(provider)
+	ctx := contextWithSessionID(context.Background(), sessionID)
+
+	got, err := handler(ctx, "tool_search", "")
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if got != tools.ToolSearchUnavailableNoDeferredMessage {
+		t.Fatalf("expected shared tool_search unavailable message %q, got %q", tools.ToolSearchUnavailableNoDeferredMessage, got)
+	}
+}
+
+func TestPrepareDeferredSyntheticMessagesRemovesLegacyAlwaysLoadedAnnouncementState(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-legacy-announcement"
+
+	alwaysLoaded := stubToolSearchCatalogEntry("mcp__alpha__resource_index", "alpha")
+	alwaysLoaded.AlwaysLoad = true
+
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(alwaysLoaded); err != nil {
+		t.Fatalf("register always-loaded entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{alwaysLoaded.CanonicalName},
+	})
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare synthetic messages: %v", err)
+	}
+	if prepared == nil || len(prepared.Messages) != 1 {
+		t.Fatalf("expected removed-only tools delta, got %#v", prepared)
+	}
+	if !strings.Contains(prepared.Messages[0].Content, "<deferred-tools-delta>") {
+		t.Fatalf("expected deferred tools delta, got %q", prepared.Messages[0].Content)
+	}
+	if !strings.Contains(prepared.Messages[0].Content, "added:\nremoved:\n"+alwaysLoaded.CanonicalName+"\n") {
+		t.Fatalf("expected removed-only legacy cleanup delta, got %q", prepared.Messages[0].Content)
+	}
+
+	prepared.Commit()
+
+	got := run.deferredAnnouncementStateSnapshot()
+	if got == nil {
+		t.Fatal("expected normalized deferred announcement state after cleanup commit")
+	}
+	if len(got.AnnouncedSearchableCanonicalNames) != 0 {
+		t.Fatalf("expected state to converge to empty searchable set, got %#v", got.AnnouncedSearchableCanonicalNames)
+	}
+}
+
 func TestEnsureBundleReadyForNewRunStaleNoChangeDoesNotRewriteFreshnessOnNewBundle(t *testing.T) {
 	store := newTestConfigStore(t)
 	chat := NewChatService(store)

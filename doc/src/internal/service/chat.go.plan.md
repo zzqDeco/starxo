@@ -85,6 +85,8 @@
   - catalog / handles 固定到该代 runner
   - discovery 仍从 `SessionRun` 按 session 读取
   - 避免 runner 重建时污染正在运行的旧会话
+  - provider 构造给 `tool_search` 的 `CurrentLoaded` 固定使用 `state.EffectiveDiscovered`，也就是 loaded deferred only，而不是全部 `CurrentLoadedTools`
+  - unknown-tool/fallback handler 与 middleware 复用同一条 `tool_search unavailable` 文案来源，避免多处手写漂移
 - deferred synthetic message 的 phase-2 注入规则：
   - 先注入 deferred tools delta，再按需注入 MCP instructions delta
   - synthetic message 使用 `schema.UserMessage`
@@ -109,6 +111,7 @@
     - 只有 current config 对应、且 fresh bundle 的已知 metadata 明确证明 canonical 已不存在或已不再 deferred 时才删除
     - 其余情况一律保留
   - 剪枝结果同时写回内存和磁盘
+- 旧 session 若仍持有包含 always-loaded canonical name 的 `DeferredAnnouncementState`，下一轮会通过 `removed`-only 的 deferred tools delta 自动收敛到新规则，不需要额外 migration 脚本
 
 ## 5. 依赖关系
 - 内部依赖:

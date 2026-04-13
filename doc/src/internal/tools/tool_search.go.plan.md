@@ -20,12 +20,14 @@
   - 关键词搜索
   - `+term` 必选词
 - exact-name 对 canonical 和 aliases 做大小写无关匹配
-- 命中当前已加载工具时直接返回 canonical name，不再重复写 discovery
+- provider 传入的 `CurrentLoaded` 语义固定为 loaded deferred only，不直接复用全部 current loaded tools
+- 命中当前已加载 deferred tool 时直接返回 canonical name，不再重复写 discovery
 - `matches` 一律返回 canonical name
 - 零命中时才返回 `pending_mcp_servers`
 - 只有新发现 deferred tool 才产生 `DiscoveredToolRecord`
 - 对非 MCP deferred sample，`CanonicalName == tool name`
 - exact-name、`select:`、keyword search 对非 MCP sample 也返回同一个名字
+- `AlwaysLoad == true` 和 `ShouldDefer == false` 的 entry 不应通过 `tool_search` 暴露；它们的可见性由正常工具面决定，不走 deferred activation
 
 ## 5. 依赖关系
 - 内部依赖: `catalog.go`、`session_data.go`

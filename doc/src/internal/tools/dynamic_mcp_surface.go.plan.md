@@ -27,11 +27,14 @@
   - canonical names 稳定排序输出
 - `WrapInvokableToolCall(...)` / `WrapStreamableToolCall(...)`：
   - `tool_search` 仅在 searchable pool 非空或 pending server 存在时可调用
+  - 只有 always-loaded / non-deferred entry 且无 pending server 时，visible tool list 中 `tool_search` 必须隐藏
+  - 被强行调用时，`tool_search` 的 unavailable 文案来自共享常量/单点 helper，不能在不同路径手写漂移
   - 已在 current loaded tools 内的 deferred tool 会直接放行，不会再误导模型先去 `tool_search`
   - 未加载但当前可搜索的 deferred tool 被调用时返回“先用 tool_search”
   - catalog 中存在但当前 mode / permission / runtime 下不可搜索的 tool 会直接返回 unavailable，不再误导去搜
   - announcement、tool_search、visible tool list、execution gating 共用同一份 deferred state
   - 2C 起 runtime wording 改成 generic deferred wording，只有 MCP instructions 仍保持 MCP-specific
+- `deferred-tools-delta` 的输入就是修正后的 `SearchablePoolForMode`，因此 always-loaded / non-deferred entry 不会进入 announcement
 
 ## 5. 依赖关系
 - 内部依赖: `deferred_state.go`

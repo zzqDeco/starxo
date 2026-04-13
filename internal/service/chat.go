@@ -486,7 +486,7 @@ func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSe
 	}
 	return tools.ToolSearchState{
 		SearchablePool:   state.SearchablePoolForMode,
-		CurrentLoaded:    state.CurrentLoadedTools,
+		CurrentLoaded:    state.EffectiveDiscovered,
 		PendingMCPServer: state.PendingMCPServers,
 	}, nil
 }
@@ -581,7 +581,7 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 			if len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0 {
 				return "", nil
 			}
-			return "tool_search is unavailable because no deferred tools are currently searchable", nil
+			return tools.ToolSearchUnavailableNoDeferredMessage, nil
 		}
 
 		if entry, ok := provider.LookupCatalogEntry(name); ok {
