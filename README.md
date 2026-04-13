@@ -195,6 +195,16 @@ All persistent data is stored under `~/.starxo/`:
 
 ## Documentation
 
-- **Technical Docs**: `doc/` — Project-level docs + per-file technical specs
-- **Roadmap**: `plan/` — Future update directions
-- **Dev Guide**: `CLAUDE.md` — Architecture overview + engineering conventions
+- **Docs Guide**: `doc/README.md` — Documentation structure and sync rules
+- **Technical Docs**: `doc/src/` — Per-file technical notes for the current codebase
+- **Project Docs**: `doc/` — Overview, research, and non-file-specific technical documents
+- **Implementation Plans**: `plan/` — Active change plans
+- **Contributor Workflow**: `AGENTS.md` — Primary branch / PR / doc sync rules
+- **Additional Agent Notes**: `CLAUDE.md` — Supplemental architecture and coding guidance
+
+## Development Workflow
+
+- `master` is the trunk branch.
+- `dev` is the development buffer branch.
+- Topic branches should be created from `dev` and merged into `dev` first.
+- `dev` is merged into `master` after integration is verified.
