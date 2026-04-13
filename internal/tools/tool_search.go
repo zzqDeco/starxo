@@ -15,6 +15,8 @@ import (
 const (
 	defaultToolSearchLimit = 12
 	maxToolSearchLimit     = 20
+
+	ToolSearchUnavailableNoDeferredMessage = "tool_search is unavailable because no deferred tools are currently searchable"
 )
 
 type ToolSearchInput struct {

@@ -81,25 +81,6 @@ func TestExecuteToolSearch_ZeroMatchesIncludesPendingServers(t *testing.T) {
 	}
 }
 
-func TestExecuteToolSearch_AlwaysLoadedExactMatchDoesNotWriteDiscovery(t *testing.T) {
-	entry := stubCatalogEntry("mcp__meta__resource_index")
-	entry.AlwaysLoad = true
-
-	output, records := ExecuteToolSearch(ToolSearchInput{Query: entry.CanonicalName}, ToolSearchState{
-		CurrentLoaded: []CatalogEntry{entry},
-		SearchablePool: []CatalogEntry{
-			entry,
-		},
-	}, time.Now())
-
-	if len(output.Matches) != 1 || output.Matches[0] != entry.CanonicalName {
-		t.Fatalf("expected always-loaded canonical match, got %#v", output)
-	}
-	if len(records) != 0 {
-		t.Fatalf("expected no discovery records for always-loaded tool, got %#v", records)
-	}
-}
-
 func TestExecuteToolSearch_KeywordSearchUsesCanonicalMatches(t *testing.T) {
 	entry := stubCatalogEntry("mcp__repo__open_issue")
 	entry.Title = "Open Issue"

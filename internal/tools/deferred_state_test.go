@@ -22,6 +22,10 @@ func TestComputeDeferredMCPState_DefaultModeRespectsSearchableAndLoadablePools(t
 	alwaysLoaded.Server = "alpha"
 	alwaysLoaded.AlwaysLoad = true
 
+	nonDeferred := stubCatalogEntry("mcp__alpha__direct")
+	nonDeferred.Server = "alpha"
+	nonDeferred.ShouldDefer = false
+
 	resource := CatalogEntry{
 		CanonicalName:   ReadMCPResourceName,
 		Source:          ToolSourceMCP,
@@ -38,7 +42,7 @@ func TestComputeDeferredMCPState_DefaultModeRespectsSearchableAndLoadablePools(t
 		Tool: &stubInvokableTool{name: ReadMCPResourceName},
 	}
 
-	for _, entry := range []CatalogEntry{connected, pendingCached, pendingNoCache, alwaysLoaded, resource} {
+	for _, entry := range []CatalogEntry{connected, pendingCached, pendingNoCache, alwaysLoaded, nonDeferred, resource} {
 		if err := catalog.Register(entry); err != nil {
 			t.Fatalf("register %s: %v", entry.CanonicalName, err)
 		}
@@ -48,6 +52,7 @@ func TestComputeDeferredMCPState_DefaultModeRespectsSearchableAndLoadablePools(t
 		connected.CanonicalName:      {CanonicalName: connected.CanonicalName},
 		pendingCached.CanonicalName:  {CanonicalName: pendingCached.CanonicalName},
 		pendingNoCache.CanonicalName: {CanonicalName: pendingNoCache.CanonicalName},
+		nonDeferred.CanonicalName:    {CanonicalName: nonDeferred.CanonicalName},
 	}, ToolPermissionContext{
 		SessionID: "sess-1",
 		Mode:      "default",
@@ -59,13 +64,11 @@ func TestComputeDeferredMCPState_DefaultModeRespectsSearchableAndLoadablePools(t
 	})
 
 	assertCatalogNames(t, state.SearchablePoolForMode, []string{
-		alwaysLoaded.CanonicalName,
 		connected.CanonicalName,
 		pendingCached.CanonicalName,
 		ReadMCPResourceName,
 	})
 	assertCatalogNames(t, state.LoadablePoolForMode, []string{
-		alwaysLoaded.CanonicalName,
 		connected.CanonicalName,
 		ReadMCPResourceName,
 	})
@@ -77,6 +80,12 @@ func TestComputeDeferredMCPState_DefaultModeRespectsSearchableAndLoadablePools(t
 		connected.CanonicalName,
 	})
 	assertStrings(t, state.PendingMCPServers, []string{"beta", "gamma"})
+	if _, ok := state.SearchDecisions[alwaysLoaded.CanonicalName]; !ok {
+		t.Fatalf("expected always-loaded entry to retain search decision coverage")
+	}
+	if _, ok := state.LoadDecisions[nonDeferred.CanonicalName]; !ok {
+		t.Fatalf("expected non-deferred entry to retain load decision coverage")
+	}
 }
 
 func TestComputeDeferredMCPState_PlanModeOnlyAllowsTrustedReadOnlyTools(t *testing.T) {

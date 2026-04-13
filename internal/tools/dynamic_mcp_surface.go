@@ -87,7 +87,7 @@ func (m *dynamicMCPSurfaceMiddleware) ensureToolCallable(ctx context.Context, to
 		if toolSearchVisible(state) {
 			return nil
 		}
-		return fmt.Errorf("tool_search is unavailable because no deferred tools are currently searchable")
+		return fmt.Errorf(ToolSearchUnavailableNoDeferredMessage)
 	}
 	entry, ok := m.provider.LookupCatalogEntry(toolName)
 	if !ok {

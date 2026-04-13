@@ -19,7 +19,12 @@
   - `EffectiveDiscovered`
   - `CurrentLoadedTools`
   - `PendingMCPServers`
+- `SearchablePoolForMode` / `LoadablePoolForMode` 只属于真正 deferred 的 entries：`ShouldDefer == true && !AlwaysLoad`
 - `effectiveDiscovered = discoveredTools ∩ current catalog ∩ loadablePoolForMode`
+- `CurrentLoadedTools` 仍表示“当前直接可用的已加载集合”：
+  - 已加载 deferred entries
+  - 全部 `AlwaysLoad == true` entries
+- `ShouldDefer == false && AlwaysLoad == false` 的 entry 在这一层只被排除出 deferred activation，不在本文件额外定义其直接暴露策略
 - `ReadOnlyTrusted` / MCP read-only gate 仍只作用于 MCP deferred pool；非 MCP hidden/test-only sample 不在这套 gate 内
 
 ## 5. 依赖关系
@@ -28,6 +33,7 @@
 ## 6. 变更影响面
 - announcement、tool_search、WrapModel、tool execution gating 都必须共享这一层结果
 - 2C 之后这一层不再是 MCP-only 特例
+- `SearchDecisions` / `LoadDecisions` 仍需对所有 catalog entry 保持全量覆盖，不能因 pool 收紧而被顺手裁掉
 
 ## 7. 维护建议
 - 若 helper 输出字段变化，需同步检查 ChatService provider、middleware 和测试

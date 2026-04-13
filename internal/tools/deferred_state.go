@@ -38,15 +38,17 @@ func ComputeDeferredMCPState(
 	}
 
 	for _, entry := range allEntries {
+		isDeferredEntry := entry.ShouldDefer && !entry.AlwaysLoad
+
 		searchDecision := CanSearchCatalogEntry(entry, permCtx)
 		searchDecisions[entry.CanonicalName] = searchDecision
-		if searchDecision.Allowed {
+		if isDeferredEntry && searchDecision.Allowed {
 			searchable = append(searchable, entry)
 		}
 
 		loadDecision := CanLoadCatalogEntry(entry, permCtx)
 		loadDecisions[entry.CanonicalName] = loadDecision
-		if loadDecision.Allowed {
+		if isDeferredEntry && loadDecision.Allowed {
 			loadable = append(loadable, entry)
 		}
 	}
