@@ -56,6 +56,10 @@
 - 日志格式变更会影响日志解析工具和运维监控
 - 领域日志函数被 `callbacks.go` 中的全局回调和各服务组件调用
 - 日志文件路径变更会影响日志收集和排查流程
+- phase-2 observability 新增两类 debug 日志：
+  - deferred surface computed
+  - deferred surface committed
+  这两类日志只记录规范化后的 pool / preview / fingerprint / reason-class 信息，不记录原始错误文本、用户消息内容或非规范化 tool metadata
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

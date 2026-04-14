@@ -21,6 +21,7 @@
   - 只有 `Generate(...)` 成功返回消息或 `Stream(...)` 成功返回 reader 后才执行 state commit
 - searchable canonical names 的规范化、delta 计算、wire formatting 都收成单点 helper
 - MCP server-summary 的规范化、reason-class 分类、fingerprint 计算也收成单点 helper
+- `ToolSearchVisible(...)` 提升为共享 helper，供 middleware、debug view 和 provider visibility 统一复用
 - `deferred-tools-delta` wire 固定为：
   - `mode: bootstrap|delta`
   - `added:` / `removed:` 两段始终保留
@@ -35,6 +36,7 @@
   - announcement、tool_search、visible tool list、execution gating 共用同一份 deferred state
   - 2C 起 runtime wording 改成 generic deferred wording，只有 MCP instructions 仍保持 MCP-specific
 - `deferred-tools-delta` 的输入就是修正后的 `SearchablePoolForMode`，因此 always-loaded / non-deferred entry 不会进入 announcement
+- dev-only non-MCP deferred sample 只会影响 tools delta / visible filtering / `tool_search`，不会触发 `mcp-instructions-delta`
 
 ## 5. 依赖关系
 - 内部依赖: `deferred_state.go`

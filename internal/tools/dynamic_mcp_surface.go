@@ -84,7 +84,7 @@ func (m *dynamicMCPSurfaceMiddleware) ensureToolCallable(ctx context.Context, to
 		return err
 	}
 	if toolName == "tool_search" {
-		if toolSearchVisible(state) {
+		if ToolSearchVisible(state) {
 			return nil
 		}
 		return fmt.Errorf(ToolSearchUnavailableNoDeferredMessage)
@@ -146,7 +146,7 @@ func (w *dynamicMCPModelWrapper) Stream(ctx context.Context, input []*schema.Mes
 	return stream, nil
 }
 
-func toolSearchVisible(state DeferredMCPState) bool {
+func ToolSearchVisible(state DeferredMCPState) bool {
 	return len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0
 }
 
@@ -394,7 +394,7 @@ func filterVisibleToolInfos(all []*schema.ToolInfo, state DeferredMCPState, prov
 			continue
 		}
 		if info.Name == "tool_search" {
-			if toolSearchVisible(state) {
+			if ToolSearchVisible(state) {
 				visible = append(visible, info)
 			}
 			continue

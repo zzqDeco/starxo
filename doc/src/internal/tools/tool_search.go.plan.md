@@ -28,6 +28,8 @@
 - 对非 MCP deferred sample，`CanonicalName == tool name`
 - exact-name、`select:`、keyword search 对非 MCP sample 也返回同一个名字
 - `AlwaysLoad == true` 和 `ShouldDefer == false` 的 entry 不应通过 `tool_search` 暴露；它们的可见性由正常工具面决定，不走 deferred activation
+- `ToolSearchUnavailableNoDeferredMessage` 是共享 contract，unknown-tool fallback 与 middleware 都复用同一来源
+- dev-only experimental sample 走和其它非 MCP deferred builtin 相同的名字语义：`CanonicalName == tool name`
 
 ## 5. 依赖关系
 - 内部依赖: `catalog.go`、`session_data.go`

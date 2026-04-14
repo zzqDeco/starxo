@@ -234,6 +234,36 @@ export namespace model {
 	        this.lastUsedAt = source["lastUsedAt"];
 	    }
 	}
+	export class DeferredAnnouncementState {
+	    announcedSearchableCanonicalNames: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DeferredAnnouncementState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.announcedSearchableCanonicalNames = source["announcedSearchableCanonicalNames"];
+	    }
+	}
+	export class DiscoveredToolRecord {
+	    canonicalName: string;
+	    server: string;
+	    kind: string;
+	    discoveredAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiscoveredToolRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.canonicalName = source["canonicalName"];
+	        this.server = source["server"];
+	        this.kind = source["kind"];
+	        this.discoveredAt = source["discoveredAt"];
+	    }
+	}
 	export class DisplayEvent {
 	    id: string;
 	    type: string;
@@ -303,6 +333,24 @@ export namespace model {
 		    }
 		    return a;
 		}
+	}
+	export class MCPInstructionsDeltaState {
+	    lastAnnouncedSearchableServers: string[];
+	    lastAnnouncedPendingServers: string[];
+	    lastAnnouncedUnavailableServers: string[];
+	    lastInstructionsFingerprint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPInstructionsDeltaState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.lastAnnouncedSearchableServers = source["lastAnnouncedSearchableServers"];
+	        this.lastAnnouncedPendingServers = source["lastAnnouncedPendingServers"];
+	        this.lastAnnouncedUnavailableServers = source["lastAnnouncedUnavailableServers"];
+	        this.lastInstructionsFingerprint = source["lastInstructionsFingerprint"];
+	    }
 	}
 	export class PersistedToolCallFunction {
 	    name: string;
@@ -435,6 +483,9 @@ export namespace model {
 	    messages: PersistedMessage[];
 	    display: DisplayTurn[];
 	    streaming?: StreamingState;
+	    discoveredTools?: DiscoveredToolRecord[];
+	    deferredAnnouncementState?: DeferredAnnouncementState;
+	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionData(source);
@@ -446,6 +497,9 @@ export namespace model {
 	        this.messages = this.convertValues(source["messages"], PersistedMessage);
 	        this.display = this.convertValues(source["display"], DisplayTurn);
 	        this.streaming = this.convertValues(source["streaming"], StreamingState);
+	        this.discoveredTools = this.convertValues(source["discoveredTools"], DiscoveredToolRecord);
+	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
+	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -499,6 +553,104 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	
 	    }
+	}
+	export class DeferredAnnouncementPreview {
+	    Mode: string;
+	    Added: string[];
+	    Removed: string[];
+	    WillEmit: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeferredAnnouncementPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Mode = source["Mode"];
+	        this.Added = source["Added"];
+	        this.Removed = source["Removed"];
+	        this.WillEmit = source["WillEmit"];
+	    }
+	}
+	export class DeferredInstructionsSummary {
+	    SearchableServers: string[];
+	    PendingServers: string[];
+	    UnavailableServers: string[];
+	    Fingerprint: string;
+	    WillEmit: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeferredInstructionsSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.SearchableServers = source["SearchableServers"];
+	        this.PendingServers = source["PendingServers"];
+	        this.UnavailableServers = source["UnavailableServers"];
+	        this.Fingerprint = source["Fingerprint"];
+	        this.WillEmit = source["WillEmit"];
+	    }
+	}
+	export class DeferredSurfaceDebug {
+	    CurrentConfigDigest: string;
+	    BundleConfigDigest: string;
+	    BundleGeneration: number;
+	    SearchablePoolCanonicalNames: string[];
+	    LoadablePoolCanonicalNames: string[];
+	    EffectiveDiscoveredCanonicalNames: string[];
+	    CurrentLoadedCanonicalNames: string[];
+	    ToolSearchCurrentLoadedCanonicalNames: string[];
+	    PendingMCPServers: string[];
+	    ToolSearchVisible: boolean;
+	    AnnouncementState: model.DeferredAnnouncementState;
+	    AnnouncementPreview: DeferredAnnouncementPreview;
+	    InstructionsState: model.MCPInstructionsDeltaState;
+	    InstructionsSummary: DeferredInstructionsSummary;
+	    ConfigSnapshotError: string;
+	    BuildWarnings: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DeferredSurfaceDebug(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.CurrentConfigDigest = source["CurrentConfigDigest"];
+	        this.BundleConfigDigest = source["BundleConfigDigest"];
+	        this.BundleGeneration = source["BundleGeneration"];
+	        this.SearchablePoolCanonicalNames = source["SearchablePoolCanonicalNames"];
+	        this.LoadablePoolCanonicalNames = source["LoadablePoolCanonicalNames"];
+	        this.EffectiveDiscoveredCanonicalNames = source["EffectiveDiscoveredCanonicalNames"];
+	        this.CurrentLoadedCanonicalNames = source["CurrentLoadedCanonicalNames"];
+	        this.ToolSearchCurrentLoadedCanonicalNames = source["ToolSearchCurrentLoadedCanonicalNames"];
+	        this.PendingMCPServers = source["PendingMCPServers"];
+	        this.ToolSearchVisible = source["ToolSearchVisible"];
+	        this.AnnouncementState = this.convertValues(source["AnnouncementState"], model.DeferredAnnouncementState);
+	        this.AnnouncementPreview = this.convertValues(source["AnnouncementPreview"], DeferredAnnouncementPreview);
+	        this.InstructionsState = this.convertValues(source["InstructionsState"], model.MCPInstructionsDeltaState);
+	        this.InstructionsSummary = this.convertValues(source["InstructionsSummary"], DeferredInstructionsSummary);
+	        this.ConfigSnapshotError = source["ConfigSnapshotError"];
+	        this.BuildWarnings = source["BuildWarnings"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class EnrichedSession {
 	    id: string;
@@ -652,6 +804,42 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	
 	    }
+	}
+	export class SessionSnapshot {
+	    SessionData?: model.SessionData;
+	    MessageCount: number;
+	    HasSessionRun: boolean;
+	    DeferredSurfaceDebug?: DeferredSurfaceDebug;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionSnapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.SessionData = this.convertValues(source["SessionData"], model.SessionData);
+	        this.MessageCount = source["MessageCount"];
+	        this.HasSessionRun = source["HasSessionRun"];
+	        this.DeferredSurfaceDebug = this.convertValues(source["DeferredSurfaceDebug"], DeferredSurfaceDebug);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

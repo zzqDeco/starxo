@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -146,9 +145,10 @@ type SessionRun struct {
 }
 
 type SessionSnapshot struct {
-	SessionData   *model.SessionData
-	MessageCount  int
-	HasSessionRun bool
+	SessionData          *model.SessionData
+	MessageCount         int
+	HasSessionRun        bool
+	DeferredSurfaceDebug *DeferredSurfaceDebug
 }
 
 func (r *SessionRun) addUserMessage(content string) {
@@ -439,41 +439,63 @@ func (p *deferredMCPProvider) PrepareDeferredSyntheticMessages(ctx context.Conte
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 
-	current := tools.NormalizeSearchableCanonicalNames(state.SearchablePoolForMode)
-	prior := run.deferredAnnouncementStateSnapshot()
-	msg, next := tools.BuildDeferredAnnouncementDelta(current, prior)
-
-	needsAnnouncementCommit := prior == nil
-	if !needsAnnouncementCommit && next != nil {
-		needsAnnouncementCommit = !slices.Equal(prior.AnnouncedSearchableCanonicalNames, next.AnnouncedSearchableCanonicalNames)
+	currentDigest := ""
+	configSnapshotError := ""
+	if _, digest, err := p.chat.currentConfigSnapshot(); err != nil {
+		configSnapshotError = err.Error()
+	} else {
+		currentDigest = digest
 	}
 
-	summary := tools.NormalizeMCPInstructionsSummary(state, permCtx)
-	priorInstructions := run.mcpInstructionsDeltaStateSnapshot()
-	instructionsMsg, nextInstructions := tools.BuildMCPInstructionsDeltaMessage(summary, priorInstructions)
-	needsInstructionsCommit := priorInstructions == nil
-	if !needsInstructionsCommit && nextInstructions != nil {
-		needsInstructionsCommit =
-			priorInstructions.LastInstructionsFingerprint != nextInstructions.LastInstructionsFingerprint ||
-				!slices.Equal(priorInstructions.LastAnnouncedSearchableServers, nextInstructions.LastAnnouncedSearchableServers) ||
-				!slices.Equal(priorInstructions.LastAnnouncedPendingServers, nextInstructions.LastAnnouncedPendingServers) ||
-				!slices.Equal(priorInstructions.LastAnnouncedUnavailableServers, nextInstructions.LastAnnouncedUnavailableServers)
+	bundleConfigDigest := ""
+	var bundleGeneration uint64
+	if p.bundle != nil {
+		bundleConfigDigest = p.bundle.ConfigDigest
+		bundleGeneration = p.bundle.Generation
 	}
 
-	if msg == nil && instructionsMsg == nil && !needsAnnouncementCommit && !needsInstructionsCommit {
+	computation := buildDeferredSurfaceComputation(deferredSurfaceDebugInput{
+		CurrentConfigDigest: currentDigest,
+		BundleConfigDigest:  bundleConfigDigest,
+		BundleGeneration:    bundleGeneration,
+		State:               state,
+		PermissionContext:   permCtx,
+		AnnouncementState:   run.deferredAnnouncementStateSnapshot(),
+		InstructionsState:   run.mcpInstructionsDeltaStateSnapshot(),
+		ConfigSnapshotError: configSnapshotError,
+	})
+	logDeferredSurfaceComputed(sessionID, mode, computation.Debug)
+
+	if computation.AnnouncementMessage == nil &&
+		computation.InstructionsMessage == nil &&
+		!computation.UpdateAnnouncement &&
+		!computation.UpdateInstructions {
 		return nil, nil
 	}
 
 	prepared := &tools.DeferredSyntheticMessages{}
-	if msg != nil {
-		prepared.Messages = append(prepared.Messages, msg)
+	if computation.AnnouncementMessage != nil {
+		prepared.Messages = append(prepared.Messages, computation.AnnouncementMessage)
 	}
-	if instructionsMsg != nil {
-		prepared.Messages = append(prepared.Messages, instructionsMsg)
+	if computation.InstructionsMessage != nil {
+		prepared.Messages = append(prepared.Messages, computation.InstructionsMessage)
 	}
-	if needsAnnouncementCommit || needsInstructionsCommit {
+	if computation.UpdateAnnouncement || computation.UpdateInstructions {
 		prepared.Commit = func() {
-			run.applySyntheticDeltaStates(next, needsAnnouncementCommit, nextInstructions, needsInstructionsCommit)
+			run.applySyntheticDeltaStates(
+				computation.AnnouncementNext,
+				computation.UpdateAnnouncement,
+				computation.InstructionsNext,
+				computation.UpdateInstructions,
+			)
+			logDeferredSurfaceCommitted(
+				sessionID,
+				mode,
+				computation.AnnouncementNext,
+				computation.UpdateAnnouncement,
+				computation.InstructionsNext,
+				computation.UpdateInstructions,
+			)
 		}
 	}
 	return prepared, nil
@@ -610,6 +632,7 @@ type ChatService struct {
 	checkpointStore compose.CheckPointStore
 	now             func() time.Time
 	freshnessTTL    time.Duration
+	runtimeOptions  ChatRuntimeOptions
 
 	installedBundle            *RunnerBundle
 	retiredBundles             []*RunnerBundle
@@ -633,13 +656,18 @@ type ChatService struct {
 }
 
 // NewChatService creates a new ChatService.
-func NewChatService(store *config.Store) *ChatService {
+func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatService {
+	runtimeOptions := ChatRuntimeOptions{}
+	if len(opts) > 0 {
+		runtimeOptions = opts[0]
+	}
 	return &ChatService{
 		store:           store,
 		checkpointStore: checkpoint.NewInMemoryStore(),
 		sessions:        make(map[string]*SessionRun),
 		now:             time.Now,
 		freshnessTTL:    defaultBundleFreshnessTTL,
+		runtimeOptions:  runtimeOptions,
 	}
 }
 
@@ -2207,13 +2235,25 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
 	if !ok {
+		debug, err := s.buildDeferredSurfaceDebug(sessionID, true)
+		if err != nil {
+			return nil, err
+		}
 		return &SessionSnapshot{
 			SessionData: &model.SessionData{
 				Version: 3,
 			},
+			DeferredSurfaceDebug: debug,
 		}, nil
 	}
-	return run.snapshot(), nil
+
+	snapshot := run.snapshot()
+	debug, err := s.buildDeferredSurfaceDebug(sessionID, true)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.DeferredSurfaceDebug = debug
+	return snapshot, nil
 }
 
 func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
@@ -2244,6 +2284,10 @@ func (s *ChatService) ReplaceDiscoveredTools(sessionID string, records []model.D
 }
 
 func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	records = s.pruneExperimentalDeferredDiscoveries(records)
 	if len(records) == 0 {
 		return nil
 	}
@@ -2335,6 +2379,23 @@ func (s *ChatService) PruneDiscoveredToolsForSave(_ string, records []model.Disc
 		pruned = append(pruned, record)
 	}
 	return cloneAndSortDiscoveredTools(pruned)
+}
+
+func (s *ChatService) pruneExperimentalDeferredDiscoveries(records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	if s.runtimeOptionsSnapshot().DevDeferredBuiltinSampleEnabled {
+		return records
+	}
+	pruned := make([]model.DiscoveredToolRecord, 0, len(records))
+	for _, record := range records {
+		if record.CanonicalName == tools.DevDeferredBuiltinSampleCanonicalName {
+			continue
+		}
+		pruned = append(pruned, record)
+	}
+	return pruned
 }
 
 func cloneAndSortDiscoveredTools(records []model.DiscoveredToolRecord) []model.DiscoveredToolRecord {
@@ -2599,6 +2660,18 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		if err := topLevelCatalog.Register(wrapped); err != nil {
 			s.closeMCPHandlesLocked(surface.Handles)
 			return nil, fmt.Errorf("failed to register MCP resource tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
+	if s.runtimeOptionsSnapshot().DevDeferredBuiltinSampleEnabled {
+		sampleEntry, err := tools.NewDevDeferredBuiltinSampleEntry()
+		if err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to build dev deferred builtin sample: %w", err)
+		}
+		sampleEntry.Tool = tools.WrapMCPToolWithPermissionCheck(sampleEntry, provider)
+		if err := topLevelCatalog.Register(sampleEntry); err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to register dev deferred builtin sample: %w", err)
 		}
 	}
 	bundle.MCPCatalog = topLevelCatalog

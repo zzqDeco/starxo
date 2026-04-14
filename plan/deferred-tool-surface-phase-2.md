@@ -404,3 +404,33 @@ phase-2 结束的判断标准是：
 2. MCP runtime state 变化对模型是可见的，并且是增量可重建的。
 3. deferred framework 不再是 MCP-only 特例，而是统一的 `alwaysLoad / shouldDefer` 规则。
 4. 以上三点都在 `dev` 上稳定通过自动测试和最小手工 smoke 后，再进入 `master`。
+
+## 12. Phase-2 收口 / Observability
+
+当 phase-2A / 2B / 2C 主链落地后，下一步不强推真实生产非 MCP rollout，而是先补 phase-2 的可观测性和排障面：
+
+- 新增 `DeferredSurfaceDebug` best-effort runtime debug view：
+  - 由纯 helper 统一生成
+  - 同时供 debug 日志、`SessionSnapshot.DeferredSurfaceDebug`、Wails debug API 复用
+  - 不允许通过 debug/export 路径触发 synthetic message commit
+- `DeferredSurfaceDebug` 只做 runtime 排障，不参与持久化：
+  - `SessionData` 继续是原子保存的权威状态
+  - debug view 允许和 `SessionData` 存在 best-effort 时间差，文档必须显式说明不是强一致快照
+- `ConfigSnapshotError` 采用部分退化语义：
+  - config 字段失效时写零值 + 显式错误
+  - bundle / pool / preview / visibility 仍尽量按可得信息填充
+- 新增 dev-only Wails debug API：
+  - `STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API=1`
+  - 启动时读取并锁存，不支持热切换
+  - 默认关闭；关闭时固定返回 `deferred surface debug API is disabled`
+- 新增 dev-only experimental deferred builtin sample：
+  - `STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE=1`
+  - 启动时读取并锁存，不支持热切换
+  - 用固定 canonical name `dev_deferred_builtin_sample`
+  - 默认生产 registry 不注册
+  - 只影响 `deferred-tools-delta` / `tool_search` / visible filtering
+  - 不触发 `mcp-instructions-delta`
+- sample 关闭后的 state 收敛固定为：
+  - announcement state：下一轮 removed-only delta 自动清理
+  - discovered state：save/export 时按固定 canonical name 显式 prune
+  - 不使用隐式规则推断 sample 身份

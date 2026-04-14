@@ -30,6 +30,7 @@
     - MCP runtime 变化会收到 `mcp-instructions-delta`
     - tool loading / unknown-tool / execution gating 的 wording 改成 generic deferred wording
     - MCP instructions 仍保持 MCP-specific wording
+  - dev-only experimental deferred builtin sample 不需要额外 prompt 特判；它复用现有 generic deferred wording，仅在开发态被注册
 - Wails 绑定方法: 无
 - 事件发射: 无
 

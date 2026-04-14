@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -640,6 +642,385 @@ func TestPrepareDeferredSyntheticMessagesRemovesLegacyAlwaysLoadedAnnouncementSt
 	}
 	if len(got.AnnouncedSearchableCanonicalNames) != 0 {
 		t.Fatalf("expected state to converge to empty searchable set, got %#v", got.AnnouncedSearchableCanonicalNames)
+	}
+}
+
+func TestDeferredSurfaceDebugPathsDoNotAdvanceState(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store, ChatRuntimeOptions{DeferredSurfaceDebugAPIEnabled: true})
+	sessionID := "sess-debug-no-side-effect"
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+
+	snapshot, err := chat.ExportSessionSnapshot(sessionID)
+	if err != nil {
+		t.Fatalf("export session snapshot: %v", err)
+	}
+	if snapshot == nil || snapshot.DeferredSurfaceDebug == nil {
+		t.Fatalf("expected deferred surface debug in snapshot, got %#v", snapshot)
+	}
+	debug, err := chat.GetDeferredSurfaceDebug(sessionID)
+	if err != nil {
+		t.Fatalf("get deferred surface debug: %v", err)
+	}
+	if debug == nil {
+		t.Fatal("expected debug payload")
+	}
+	if got := run.deferredAnnouncementStateSnapshot(); got != nil {
+		t.Fatalf("expected debug reads not to initialize announcement state, got %#v", got)
+	}
+	if got := run.mcpInstructionsDeltaStateSnapshot(); got != nil {
+		t.Fatalf("expected debug reads not to initialize instructions state, got %#v", got)
+	}
+}
+
+func TestExportSessionSnapshotMissingSessionReturnsEmptyDebugWarning(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+
+	snapshot, err := chat.ExportSessionSnapshot("missing-session")
+	if err != nil {
+		t.Fatalf("export session snapshot: %v", err)
+	}
+	if snapshot == nil || snapshot.DeferredSurfaceDebug == nil {
+		t.Fatalf("expected deferred surface debug for missing session, got %#v", snapshot)
+	}
+	debug := snapshot.DeferredSurfaceDebug
+	if got := debug.BuildWarnings; !reflect.DeepEqual(got, []string{"session not found"}) {
+		t.Fatalf("expected session not found warning, got %#v", got)
+	}
+	if debug.SearchablePoolCanonicalNames == nil ||
+		debug.LoadablePoolCanonicalNames == nil ||
+		debug.EffectiveDiscoveredCanonicalNames == nil ||
+		debug.CurrentLoadedCanonicalNames == nil ||
+		debug.ToolSearchCurrentLoadedCanonicalNames == nil ||
+		debug.PendingMCPServers == nil {
+		t.Fatalf("expected normalized empty slices, got %#v", debug)
+	}
+	if debug.ToolSearchVisible {
+		t.Fatalf("expected tool_search hidden for missing session debug, got %#v", debug)
+	}
+}
+
+func TestGetDeferredSurfaceDebugHonorsFixedGatingAndMissingSessionErrors(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	sessionID := "sess-debug-gating"
+
+	if _, err := chat.GetDeferredSurfaceDebug(sessionID); err == nil || err.Error() != DeferredSurfaceDebugAPIDisabledMessage {
+		t.Fatalf("expected disabled debug API error %q, got %v", DeferredSurfaceDebugAPIDisabledMessage, err)
+	}
+
+	chat.runtimeOptions = ChatRuntimeOptions{DeferredSurfaceDebugAPIEnabled: true}
+	if _, err := chat.GetDeferredSurfaceDebug("missing-session"); err == nil || err.Error() != deferredSurfaceSessionNotFoundMessage {
+		t.Fatalf("expected missing session error %q, got %v", deferredSurfaceSessionNotFoundMessage, err)
+	}
+}
+
+func TestDeferredSurfaceDebugPartiallyDegradesWhenConfigSnapshotUnavailable(t *testing.T) {
+	chat := NewChatService(nil, ChatRuntimeOptions{DeferredSurfaceDebugAPIEnabled: true})
+	sessionID := "sess-config-unavailable"
+
+	sample, err := tools.NewDevDeferredBuiltinSampleEntry()
+	if err != nil {
+		t.Fatalf("new sample entry: %v", err)
+	}
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(sample); err != nil {
+		t.Fatalf("register sample: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.discoveredTools[sample.CanonicalName] = model.DiscoveredToolRecord{
+		CanonicalName: sample.CanonicalName,
+		Kind:          sample.Kind,
+		DiscoveredAt:  123,
+	}
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{sample.CanonicalName},
+	})
+	chat.installedBundle = &RunnerBundle{
+		Generation:    42,
+		ConfigDigest:  "bundle-digest",
+		MCPCatalog:    catalog,
+		DefaultRunner: &adk.Runner{},
+		PlanRunner:    &adk.Runner{},
+	}
+	chat.mu.Unlock()
+
+	debug, err := chat.GetDeferredSurfaceDebug(sessionID)
+	if err != nil {
+		t.Fatalf("get deferred surface debug: %v", err)
+	}
+	if debug.ConfigSnapshotError == "" {
+		t.Fatalf("expected config snapshot error, got %#v", debug)
+	}
+	if debug.CurrentConfigDigest != "" {
+		t.Fatalf("expected current config digest to degrade to zero value, got %#v", debug)
+	}
+	if debug.BundleConfigDigest != "bundle-digest" || debug.BundleGeneration != 42 {
+		t.Fatalf("expected bundle fields to survive partial degradation, got %#v", debug)
+	}
+	if !reflect.DeepEqual(debug.SearchablePoolCanonicalNames, []string{sample.CanonicalName}) {
+		t.Fatalf("expected searchable pool to survive partial degradation, got %#v", debug.SearchablePoolCanonicalNames)
+	}
+	if !debug.ToolSearchVisible {
+		t.Fatalf("expected tool_search visibility to survive partial degradation, got %#v", debug)
+	}
+}
+
+func TestDeferredSurfaceDebugParityUnderQuiescentState(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store, ChatRuntimeOptions{DeferredSurfaceDebugAPIEnabled: true})
+	sessionID := "sess-debug-parity"
+
+	catalog := tools.NewToolCatalog()
+	entry := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	if err := catalog.Register(entry); err != nil {
+		t.Fatalf("register entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.discoveredTools[entry.CanonicalName] = model.DiscoveredToolRecord{
+		CanonicalName: entry.CanonicalName,
+		Server:        entry.Server,
+		Kind:          entry.Kind,
+		DiscoveredAt:  456,
+	}
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{entry.CanonicalName},
+	})
+	run.applySyntheticDeltaStates(nil, false, &model.MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  []string{"alpha"},
+		LastAnnouncedPendingServers:     []string{},
+		LastAnnouncedUnavailableServers: []string{},
+		LastInstructionsFingerprint:     tools.ComputeMCPInstructionsFingerprint([]string{"alpha"}, []string{}, []string{}),
+	}, true)
+	chat.installedBundle = &RunnerBundle{
+		Generation:   7,
+		ConfigDigest: "bundle-debug",
+		MCPCatalog:   catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	snapshot, err := chat.ExportSessionSnapshot(sessionID)
+	if err != nil {
+		t.Fatalf("export session snapshot: %v", err)
+	}
+	debug, err := chat.GetDeferredSurfaceDebug(sessionID)
+	if err != nil {
+		t.Fatalf("get deferred surface debug: %v", err)
+	}
+	if snapshot == nil || snapshot.DeferredSurfaceDebug == nil {
+		t.Fatalf("expected deferred surface debug in snapshot, got %#v", snapshot)
+	}
+	if !reflect.DeepEqual(*snapshot.DeferredSurfaceDebug, *debug) {
+		t.Fatalf("expected snapshot/API debug parity under quiescent state:\nsnapshot=%#v\napi=%#v", snapshot.DeferredSurfaceDebug, debug)
+	}
+}
+
+func TestDeferredSurfaceDebugReadsDoNotMutatePopulatedState(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store, ChatRuntimeOptions{DeferredSurfaceDebugAPIEnabled: true})
+	sessionID := "sess-debug-state-stable"
+
+	catalog := tools.NewToolCatalog()
+	entry := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	if err := catalog.Register(entry); err != nil {
+		t.Fatalf("register entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.discoveredTools[entry.CanonicalName] = model.DiscoveredToolRecord{
+		CanonicalName: entry.CanonicalName,
+		Server:        entry.Server,
+		Kind:          entry.Kind,
+		DiscoveredAt:  1234,
+	}
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{entry.CanonicalName},
+	})
+	run.applySyntheticDeltaStates(nil, false, &model.MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  []string{"alpha"},
+		LastAnnouncedPendingServers:     []string{},
+		LastAnnouncedUnavailableServers: []string{},
+		LastInstructionsFingerprint:     tools.ComputeMCPInstructionsFingerprint([]string{"alpha"}, []string{}, []string{}),
+	}, true)
+	chat.installedBundle = &RunnerBundle{
+		Generation:   9,
+		ConfigDigest: "bundle-stable",
+		MCPCatalog:   catalog,
+		MCPHandles: []*tools.MCPServerHandle{{
+			Name:              "alpha",
+			State:             tools.MCPServerStateConnected,
+			ToolMetadataReady: true,
+		}},
+	}
+	chat.mu.Unlock()
+
+	beforeAnnouncement := run.deferredAnnouncementStateSnapshot()
+	beforeInstructions := run.mcpInstructionsDeltaStateSnapshot()
+	beforeDiscovered := run.discoveredToolsSnapshot()
+
+	if _, err := chat.ExportSessionSnapshot(sessionID); err != nil {
+		t.Fatalf("export session snapshot: %v", err)
+	}
+	if _, err := chat.GetDeferredSurfaceDebug(sessionID); err != nil {
+		t.Fatalf("get deferred surface debug: %v", err)
+	}
+
+	if got := run.deferredAnnouncementStateSnapshot(); !reflect.DeepEqual(got, beforeAnnouncement) {
+		t.Fatalf("expected announcement state to remain unchanged, got %#v want %#v", got, beforeAnnouncement)
+	}
+	if got := run.mcpInstructionsDeltaStateSnapshot(); !reflect.DeepEqual(got, beforeInstructions) {
+		t.Fatalf("expected instructions state to remain unchanged, got %#v want %#v", got, beforeInstructions)
+	}
+	if got := run.discoveredToolsSnapshot(); !reflect.DeepEqual(got, beforeDiscovered) {
+		t.Fatalf("expected discovered tools to remain unchanged, got %#v want %#v", got, beforeDiscovered)
+	}
+}
+
+func TestRuntimeOptionsAreLatchedAtStartup(t *testing.T) {
+	t.Setenv("STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API", "1")
+	t.Setenv("STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE", "1")
+
+	store := newTestConfigStore(t)
+	chat := NewChatService(store, RuntimeOptionsFromEnv(os.Getenv))
+	sessionID := "sess-runtime-latch"
+
+	chat.mu.Lock()
+	chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+
+	t.Setenv("STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API", "0")
+	t.Setenv("STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE", "0")
+
+	if _, err := chat.GetDeferredSurfaceDebug(sessionID); err != nil {
+		t.Fatalf("expected cached debug API enablement to ignore later env changes, got %v", err)
+	}
+	records := chat.pruneExperimentalDeferredDiscoveries([]model.DiscoveredToolRecord{{
+		CanonicalName: tools.DevDeferredBuiltinSampleCanonicalName,
+	}})
+	if len(records) != 1 || records[0].CanonicalName != tools.DevDeferredBuiltinSampleCanonicalName {
+		t.Fatalf("expected cached sample enablement to ignore later env changes, got %#v", records)
+	}
+}
+
+func TestBuildDeferredSurfaceComputationNormalizesWarnings(t *testing.T) {
+	computation := buildDeferredSurfaceComputation(deferredSurfaceDebugInput{
+		BuildWarnings: []string{"session not found", "alpha", "session not found"},
+	})
+	if got := computation.Debug.BuildWarnings; !reflect.DeepEqual(got, []string{"alpha", "session not found"}) {
+		t.Fatalf("expected warnings to be deduped and sorted, got %#v", got)
+	}
+}
+
+func TestPrepareDeferredSyntheticMessagesDevDeferredSampleAffectsOnlyToolsDelta(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	sessionID := "sess-dev-sample-tools-only"
+
+	sample, err := tools.NewDevDeferredBuiltinSampleEntry()
+	if err != nil {
+		t.Fatalf("new sample entry: %v", err)
+	}
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(sample); err != nil {
+		t.Fatalf("register sample: %v", err)
+	}
+
+	chat.mu.Lock()
+	chat.getOrCreateRun(sessionID)
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: catalog,
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare synthetic messages: %v", err)
+	}
+	if prepared == nil || len(prepared.Messages) != 1 {
+		t.Fatalf("expected only tools delta for non-MCP sample, got %#v", prepared)
+	}
+	if !strings.Contains(prepared.Messages[0].Content, "<deferred-tools-delta>") {
+		t.Fatalf("expected tools delta, got %q", prepared.Messages[0].Content)
+	}
+	if strings.Contains(prepared.Messages[0].Content, "<mcp-instructions-delta>") {
+		t.Fatalf("did not expect instructions delta for non-MCP sample, got %q", prepared.Messages[0].Content)
+	}
+}
+
+func TestPruneDiscoveredToolsForSaveCleansOnlyDevDeferredBuiltinSample(t *testing.T) {
+	chat := NewChatService(nil)
+
+	otherDeferred := model.DiscoveredToolRecord{CanonicalName: "hidden_builtin_sample"}
+	pruned := chat.PruneDiscoveredToolsForSave("sess-1", []model.DiscoveredToolRecord{
+		{CanonicalName: tools.DevDeferredBuiltinSampleCanonicalName},
+		otherDeferred,
+	})
+	if len(pruned) != 1 || pruned[0].CanonicalName != otherDeferred.CanonicalName {
+		t.Fatalf("expected only dev-only sample to be cleaned, got %#v", pruned)
+	}
+}
+
+func TestDisabledDevDeferredSampleConvergesAnnouncementAndDiscoveryState(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	sessionID := "sess-dev-sample-cleanup"
+
+	otherDeferred := model.DiscoveredToolRecord{CanonicalName: "hidden_builtin_sample"}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.setDeferredAnnouncementState(&model.DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: []string{tools.DevDeferredBuiltinSampleCanonicalName},
+	})
+	run.discoveredTools[tools.DevDeferredBuiltinSampleCanonicalName] = model.DiscoveredToolRecord{
+		CanonicalName: tools.DevDeferredBuiltinSampleCanonicalName,
+		DiscoveredAt:  789,
+	}
+	run.discoveredTools[otherDeferred.CanonicalName] = otherDeferred
+	chat.installedBundle = &RunnerBundle{
+		MCPCatalog: tools.NewToolCatalog(),
+	}
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat, bundle: chat.installedBundle}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	prepared, err := provider.PrepareDeferredSyntheticMessages(ctx)
+	if err != nil {
+		t.Fatalf("prepare synthetic messages: %v", err)
+	}
+	if prepared == nil || len(prepared.Messages) != 1 {
+		t.Fatalf("expected removed-only tools delta, got %#v", prepared)
+	}
+	if !strings.Contains(prepared.Messages[0].Content, "removed:\n"+tools.DevDeferredBuiltinSampleCanonicalName+"\n") {
+		t.Fatalf("expected sample cleanup delta, got %q", prepared.Messages[0].Content)
+	}
+	prepared.Commit()
+
+	pruned := chat.PruneDiscoveredToolsForSave(sessionID, []model.DiscoveredToolRecord{
+		{CanonicalName: tools.DevDeferredBuiltinSampleCanonicalName},
+		otherDeferred,
+	})
+	if len(pruned) != 1 || pruned[0].CanonicalName != otherDeferred.CanonicalName {
+		t.Fatalf("expected discovered sample cleanup to use fixed canonical name only, got %#v", pruned)
+	}
+	if got := run.deferredAnnouncementStateSnapshot(); got == nil || len(got.AnnouncedSearchableCanonicalNames) != 0 {
+		t.Fatalf("expected announcement state to converge after cleanup, got %#v", got)
 	}
 }
 
