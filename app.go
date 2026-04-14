@@ -31,16 +31,18 @@ func NewApp() *App {
 	store, _ := config.NewStore()
 	sessionStore, _ := storage.NewSessionStore()
 	containerStore, _ := storage.NewContainerStore()
+	runtimeOptions := service.RuntimeOptionsFromEnv(os.Getenv)
 
 	sandboxSvc := service.NewSandboxService(store, containerStore)
 	containerSvc := service.NewContainerService(containerStore, sandboxSvc)
 	sessionSvc := service.NewSessionService(sessionStore, containerStore)
+	chatSvc := service.NewChatService(store, runtimeOptions)
 
 	return &App{
 		store:            store,
 		sessionStore:     sessionStore,
 		containerStore:   containerStore,
-		chatService:      service.NewChatService(store),
+		chatService:      chatSvc,
 		sandboxService:   sandboxSvc,
 		fileService:      service.NewFileService(sandboxSvc),
 		settingsService:  service.NewSettingsService(store),

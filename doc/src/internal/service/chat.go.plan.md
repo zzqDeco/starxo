@@ -13,6 +13,7 @@
 - 构建并装配 deferred MCP surface：MCP action/resource catalog、`tool_search`、permission gate、per-model-call late binding、announcement 注入。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
+- 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
 
 ## 3. 输入与输出
 - 输入来源:
@@ -94,6 +95,19 @@
   - 两类 delta 若同一轮都发送，必须在模型调用成功建立后一起原子推进
   - state 只在 `Generate(...)` 成功返回消息或 `Stream(...)` 成功返回 stream reader 后推进
   - 成功推进时，两份 delta state 与其他 session state 共用同一份 snapshot 落盘
+- `DeferredSurfaceDebug` 组装规则：
+  - 只基于 run snapshot + bundle/config snapshot 的拷贝结果计算
+  - 明确是 best-effort runtime debug view，不与 `SessionData` 承诺强一致时刻
+  - `ExportSessionSnapshot(sessionID)` 找不到 session 时返回规范化空 debug 结构并附带 `session not found` warning
+  - Wails debug API 关闭时固定报 `deferred surface debug API is disabled`；找不到 session 时固定报 `session not found`
+- runtime feature flags：
+  - `STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API`
+  - `STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE`
+  - 两者都只在启动时读取一次并缓存，不支持热切换
+- dev-only deferred builtin sample：
+  - 通过固定 canonical name `dev_deferred_builtin_sample` 注册到 top-level catalog
+  - 默认生产不注册
+  - 关闭 sample 后，announcement state 通过 removed-only delta 收敛，discovered state 在 save/export 时显式 prune
 - startup 生命周期通过单一 helper 收口：
   - 关闭 `startDone`
   - 清 `starting / cancelFn / pendingStartBundleGeneration`
@@ -133,5 +147,6 @@
 
 ## 7. 维护建议
 - 任何新的 deferred MCP 规则都应先落到 shared helper 或 provider，不要在 announcement / tool_search / execution gate 各算一份。
+- debug / snapshot / Wails 调试入口都必须复用同一个纯 helper，不要为不同入口复制一份 surface 计算逻辑。
 - 若修改 MCP runner 重建逻辑，必须同时验证“旧 runner 继续可用、旧 handles 延迟回收”。
 - 若修改 discovery 持久化格式，需同步更新 `session_data.go`、`session_svc.go`、`tool_search.go` 和相关测试。

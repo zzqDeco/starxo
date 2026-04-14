@@ -28,6 +28,7 @@
   - `MCPInstructionsDeltaState` 的三组 server 集合也统一使用空切片
   - `MCPInstructionsDeltaState.LastInstructionsFingerprint` 固定为规范化空 summary 的确定性 fingerprint
 - 旧 payload 缺失这些新增字段时按空状态兼容，不中断 restore
+- `DeferredSurfaceDebug` 不进入 `SessionData` 持久化；它只存在于 `SessionSnapshot` / debug API 的 best-effort runtime 视图中
 
 ## 5. 依赖关系
 - 被 `chat.go`、`session_svc.go`、`tool_search.go` 共同消费

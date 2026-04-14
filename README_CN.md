@@ -177,6 +177,19 @@ npm run dev
 | `mcp` | MCP 服务器配置（命令、参数、环境变量、传输方式） |
 | `agent` | Agent 配置（模式选择、系统提示词、工作目录） |
 
+### Deferred Surface 开发态开关
+
+以下环境变量仅用于开发和排障：
+
+- `STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API=1`
+  - 打开 Wails deferred surface 调试接口
+  - 启动时锁存；修改后需要重启应用
+- `STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE=1`
+  - 注册 `dev_deferred_builtin_sample` 顶层 deferred builtin 实验样本
+  - 启动时锁存；修改后需要重启应用
+
+这两个开关默认关闭，不作为生产环境的用户配置入口。
+
 ## 数据存储
 
 所有持久化数据存储于 `~/.starxo/` 目录：

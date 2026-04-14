@@ -177,6 +177,19 @@ App configuration is stored at `~/.starxo/config.json`:
 | `mcp` | MCP server settings (command, args, env vars, transport) |
 | `agent` | Agent settings (mode, system prompt, workspace directory) |
 
+### Dev-Only Deferred Surface Flags
+
+These environment variables are for development and debugging only:
+
+- `STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API=1`
+  - Enables the Wails deferred-surface debug API
+  - Startup-latched: restart the app after changing it
+- `STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE=1`
+  - Registers the `dev_deferred_builtin_sample` top-level deferred builtin sample
+  - Startup-latched: restart the app after changing it
+
+Both flags are disabled by default and are not intended as production-facing controls.
+
 ## Data Storage
 
 All persistent data is stored under `~/.starxo/`:
