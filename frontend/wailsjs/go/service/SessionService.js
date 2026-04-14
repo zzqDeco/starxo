@@ -62,6 +62,10 @@ export function SaveCurrentSession() {
   return window['go']['service']['SessionService']['SaveCurrentSession']();
 }
 
+export function SaveSessionByID(arg1) {
+  return window['go']['service']['SessionService']['SaveSessionByID'](arg1);
+}
+
 export function SetChatService(arg1) {
   return window['go']['service']['SessionService']['SetChatService'](arg1);
 }
