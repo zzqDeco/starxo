@@ -676,16 +676,61 @@ func TestDeferredSurfaceDebugPathsDoNotAdvanceState(t *testing.T) {
 	}
 }
 
-func TestExportSessionSnapshotMissingSessionReturnsEmptyDebugWarning(t *testing.T) {
+func TestExportDeferredSurfaceDebugForSnapshotShortCircuitsWhenDisabled(t *testing.T) {
 	store := newTestConfigStore(t)
 	chat := NewChatService(store)
+
+	debug, err := chat.exportDeferredSurfaceDebugForSnapshot("missing-session")
+	if err != nil {
+		t.Fatalf("snapshot debug helper: %v", err)
+	}
+	if debug != nil {
+		t.Fatalf("expected disabled snapshot debug helper to short-circuit to nil, got %#v", debug)
+	}
+}
+
+func TestExportSessionSnapshotOmitsDeferredSurfaceDebugWhenDisabled(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	sessionID := "sess-debug-disabled"
+
+	chat.mu.Lock()
+	chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+
+	snapshot, err := chat.ExportSessionSnapshot(sessionID)
+	if err != nil {
+		t.Fatalf("export existing session snapshot: %v", err)
+	}
+	if snapshot == nil {
+		t.Fatal("expected snapshot")
+	}
+	if snapshot.DeferredSurfaceDebug != nil {
+		t.Fatalf("expected deferred surface debug to be omitted when disabled, got %#v", snapshot.DeferredSurfaceDebug)
+	}
+
+	missingSnapshot, err := chat.ExportSessionSnapshot("missing-session")
+	if err != nil {
+		t.Fatalf("export missing session snapshot: %v", err)
+	}
+	if missingSnapshot == nil {
+		t.Fatal("expected missing-session snapshot")
+	}
+	if missingSnapshot.DeferredSurfaceDebug != nil {
+		t.Fatalf("expected missing-session deferred surface debug to be omitted when disabled, got %#v", missingSnapshot.DeferredSurfaceDebug)
+	}
+}
+
+func TestExportSessionSnapshotMissingSessionReturnsEmptyDebugWarningWhenEnabled(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store, ChatRuntimeOptions{DeferredSurfaceDebugAPIEnabled: true})
 
 	snapshot, err := chat.ExportSessionSnapshot("missing-session")
 	if err != nil {
 		t.Fatalf("export session snapshot: %v", err)
 	}
 	if snapshot == nil || snapshot.DeferredSurfaceDebug == nil {
-		t.Fatalf("expected deferred surface debug for missing session, got %#v", snapshot)
+		t.Fatalf("expected deferred surface debug for missing session when enabled, got %#v", snapshot)
 	}
 	debug := snapshot.DeferredSurfaceDebug
 	if got := debug.BuildWarnings; !reflect.DeepEqual(got, []string{"session not found"}) {
