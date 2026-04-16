@@ -98,8 +98,11 @@
 - `DeferredSurfaceDebug` 组装规则：
   - 只基于 run snapshot + bundle/config snapshot 的拷贝结果计算
   - 明确是 best-effort runtime debug view，不与 `SessionData` 承诺强一致时刻
-  - `ExportSessionSnapshot(sessionID)` 找不到 session 时返回规范化空 debug 结构并附带 `session not found` warning
+  - `ExportSessionSnapshot(sessionID)` 只有在 `STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API=1` 时才会附带 `DeferredSurfaceDebug`
+  - snapshot 路径的 gating 固定在 debug helper 最前面；关闭时直接短路返回 `nil`，不做任何 debug 计算
+  - debug 开启时，`ExportSessionSnapshot(sessionID)` 找不到 session 仍返回规范化空 debug 结构并附带 `session not found` warning
   - Wails debug API 关闭时固定报 `deferred surface debug API is disabled`；找不到 session 时固定报 `session not found`
+  - snapshot/API debug parity 只在 debug flag 开启时成立；关闭时 snapshot 不带 debug 字段，而 explicit debug API 继续固定报错
 - runtime feature flags：
   - `STARXO_ENABLE_DEFERRED_SURFACE_DEBUG_API`
   - `STARXO_ENABLE_DEV_DEFERRED_BUILTIN_SAMPLE`

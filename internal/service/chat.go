@@ -2230,12 +2230,19 @@ func (s *ChatService) SessionStreamingState(sessionID string) *model.StreamingSt
 
 // ExportSessionSnapshot exports a single consistent snapshot for the given session.
 // The snapshot is copied under the session's state lock; disk IO must happen elsewhere.
+func (s *ChatService) exportDeferredSurfaceDebugForSnapshot(sessionID string) (*DeferredSurfaceDebug, error) {
+	if !s.runtimeOptionsSnapshot().DeferredSurfaceDebugAPIEnabled {
+		return nil, nil
+	}
+	return s.buildDeferredSurfaceDebug(sessionID, true)
+}
+
 func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot, error) {
 	s.mu.Lock()
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
 	if !ok {
-		debug, err := s.buildDeferredSurfaceDebug(sessionID, true)
+		debug, err := s.exportDeferredSurfaceDebugForSnapshot(sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -2248,7 +2255,7 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 	}
 
 	snapshot := run.snapshot()
-	debug, err := s.buildDeferredSurfaceDebug(sessionID, true)
+	debug, err := s.exportDeferredSurfaceDebugForSnapshot(sessionID)
 	if err != nil {
 		return nil, err
 	}
