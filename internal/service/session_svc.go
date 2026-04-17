@@ -192,7 +192,7 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 		// Only load from disk if the session is NOT currently running
 		// (a running session already has up-to-date state in its SessionRun)
 		if !s.chatService.IsSessionRunning(sessionID) {
-			s.chatService.RestoreSessionData(sessionID, sessionData)
+			s.chatService.restoreNormalizedSessionData(sessionID, sessionData)
 		}
 	}
 
@@ -205,7 +205,7 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 	switchEvt := SessionSwitchedEvent{
 		Session:     *sess,
 		ContainerID: sess.ActiveContainerID,
-		Mode:        "default",
+		Mode:        model.ModeDefault,
 	}
 	if s.chatService != nil {
 		running, currentAgent, mode, interrupt := s.chatService.GetSessionRunSnapshot(sessionID)
@@ -442,6 +442,11 @@ func (s *SessionService) saveSessionByIDBlocking(sessionID string) error {
 	return s.saveSessionByIDBlockingLocked(sessionID)
 }
 
+// SaveSessionByIDBlocking persists a session snapshot synchronously.
+func (s *SessionService) SaveSessionByIDBlocking(sessionID string) error {
+	return s.saveSessionByIDBlocking(sessionID)
+}
+
 func (s *SessionService) saveSessionByIDBlockingLocked(sessionID string) error {
 	if sessionID == "" || s.chatService == nil {
 		return nil
@@ -520,7 +525,7 @@ func (s *SessionService) EnsureDefaultSession() error {
 		return nil // non-fatal, just start with empty history
 	}
 	if s.chatService != nil && sessionData != nil {
-		s.chatService.RestoreSessionData(mostRecent.ID, sessionData)
+		s.chatService.restoreNormalizedSessionData(mostRecent.ID, sessionData)
 	}
 
 	return nil

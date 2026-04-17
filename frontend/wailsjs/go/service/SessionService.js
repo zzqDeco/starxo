@@ -66,6 +66,10 @@ export function SaveSessionByID(arg1) {
   return window['go']['service']['SessionService']['SaveSessionByID'](arg1);
 }
 
+export function SaveSessionByIDBlocking(arg1) {
+  return window['go']['service']['SessionService']['SaveSessionByIDBlocking'](arg1);
+}
+
 export function SetChatService(arg1) {
   return window['go']['service']['SessionService']['SetChatService'](arg1);
 }

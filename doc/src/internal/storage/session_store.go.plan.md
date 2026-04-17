@@ -28,7 +28,7 @@
   - `(s *SessionStore) SaveMessages(sessionID string, messages []model.PersistedMessage) error` — 保存对话消息
   - `(s *SessionStore) LoadMessages(sessionID string) ([]model.PersistedMessage, error)` — 加载对话消息
   - `(s *SessionStore) SaveSessionData(sessionID string, data *model.SessionData) error` — 原子保存统一会话数据（先写 tmp 再 rename），同时写出 `messages.json` 用于向后兼容
-  - `(s *SessionStore) LoadSessionData(sessionID string) (*model.SessionData, error)` — 加载统一会话数据，优先读取 `session_data.json`，若不存在则自动从旧版 `messages.json` + `display.json` 组装 `SessionData` 对象
+  - `(s *SessionStore) LoadSessionData(sessionID string) (*model.SessionData, error)` — 加载统一会话数据，优先读取 `session_data.json`，若不存在则自动从旧版 `messages.json` + `display.json` 组装 `SessionData` 对象，并统一做 v4 normalize
   - `(s *SessionStore) SaveDisplayData(sessionID string, data string) error` — 保存前端展示数据（旧版接口，保留兼容）
   - `(s *SessionStore) LoadDisplayData(sessionID string) (string, error)` — 加载前端展示数据（旧版接口，保留兼容）
 - 未导出函数:
@@ -40,6 +40,7 @@
 ## 5. 依赖关系
 - 内部依赖:
   - `starxo/internal/model` (Session, PersistedMessage, SessionData, DisplayTurn, DisplayEvent 类型)
+  - `starxo/internal/logger` (load-path normalize warnings)
 - 外部依赖:
   - `encoding/json` (JSON 序列化)
   - `fmt` (错误格式化)
@@ -56,9 +57,12 @@
 - 修改 `Create` 方法的 ID 生成策略可能导致 ID 冲突风险变化
 - `SaveSessionData`/`LoadSessionData` 的格式变更会影响前端会话恢复
 - `SaveSessionData` 使用原子写入（tmp+rename），Windows 上先 remove 旧文件再 rename（`os.Rename` 不支持覆盖）
-- `LoadSessionData` 的向后兼容逻辑确保旧版 `messages.json` + `display.json` 数据可被自动迁移
+- `LoadSessionData` 的向后兼容逻辑确保旧版 `messages.json` + `display.json` 数据可被自动迁移，并在内存里统一呈现为 v4 schema
 - 该存储层被 `service.SessionService` 使用，接口变更需同步更新服务层
 - `List` 方法遍历目录结构，会话数量过多时可能有性能问题
+- `LoadSessionData` 继续保持 `nil-on-empty` contract：
+  - 三个持久化文件都不存在时返回 `nil, nil`
+  - 不在 storage 层伪造空 `SessionData`
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
@@ -67,4 +71,5 @@
 - `List` 方法对损坏的会话数据采用静默跳过策略 (`continue`)，可考虑添加日志记录。
 - `SaveSessionData` 的原子写入依赖文件系统的 rename 语义，Windows 上需 remove+rename 两步操作，非崩溃安全（极端情况下可能丢失数据）。
 - `LoadSessionData` 的向后兼容逻辑（从 messages.json + display.json 组装）在所有旧会话迁移完成后可考虑移除。
+- normalize warning 只在 storage load 路径打一次；后续 restore 路径不要重复记录同一批 warning。
 - 存储目录名 `.starxo` 与 `config.Store` 共享，应保持一致。

@@ -352,6 +352,36 @@ export namespace model {
 	        this.lastInstructionsFingerprint = source["lastInstructionsFingerprint"];
 	    }
 	}
+	export class PendingPlanApproval {
+	    requestedAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PendingPlanApproval(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requestedAt = source["requestedAt"];
+	    }
+	}
+	export class PendingPlanAttachment {
+	    kind: string;
+	    markdown: string;
+	    feedback?: string;
+	    createdAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PendingPlanAttachment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.markdown = source["markdown"];
+	        this.feedback = source["feedback"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
 	export class PersistedToolCallFunction {
 	    name: string;
 	    arguments: string;
@@ -438,6 +468,20 @@ export namespace model {
 	}
 	
 	
+	export class PlanDocument {
+	    markdown: string;
+	    updatedAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanDocument(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.markdown = source["markdown"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class Session {
 	    id: string;
 	    title: string;
@@ -486,6 +530,10 @@ export namespace model {
 	    discoveredTools?: DiscoveredToolRecord[];
 	    deferredAnnouncementState?: DeferredAnnouncementState;
 	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
+	    mode?: string;
+	    planDocument?: PlanDocument;
+	    pendingPlanApproval?: PendingPlanApproval;
+	    pendingPlanAttachment?: PendingPlanAttachment;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionData(source);
@@ -500,6 +548,10 @@ export namespace model {
 	        this.discoveredTools = this.convertValues(source["discoveredTools"], DiscoveredToolRecord);
 	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
 	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
+	        this.mode = source["mode"];
+	        this.planDocument = this.convertValues(source["planDocument"], PlanDocument);
+	        this.pendingPlanApproval = this.convertValues(source["pendingPlanApproval"], PendingPlanApproval);
+	        this.pendingPlanAttachment = this.convertValues(source["pendingPlanAttachment"], PendingPlanAttachment);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
