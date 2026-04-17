@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"starxo/internal/logger"
 	"starxo/internal/model"
 
 	"github.com/google/uuid"
@@ -271,11 +272,11 @@ func (s *SessionStore) LoadSessionData(sessionID string) (*model.SessionData, er
 		if err := json.Unmarshal(data, &sd); err != nil {
 			return nil, fmt.Errorf("unmarshal session data: %w", err)
 		}
-		return &sd, nil
+		return normalizeLoadedSessionData(sessionID, &sd), nil
 	}
 
 	// Fallback: reconstruct from legacy files
-	sd := &model.SessionData{Version: 1}
+	sd := &model.SessionData{Version: model.SessionDataVersion}
 
 	// Load messages.json
 	msgPath := filepath.Join(s.baseDir, sessionID, "messages.json")
@@ -298,7 +299,18 @@ func (s *SessionStore) LoadSessionData(sessionID string) (*model.SessionData, er
 	if sd.Messages == nil && sd.Display == nil {
 		return nil, nil
 	}
-	return sd, nil
+	return normalizeLoadedSessionData(sessionID, sd), nil
+}
+
+func normalizeLoadedSessionData(sessionID string, data *model.SessionData) *model.SessionData {
+	normalized, warnings := model.NormalizeSessionData(data)
+	for _, warning := range warnings {
+		logger.Warn("[SESSION_STORE] Normalized session data on load",
+			"session", sessionID,
+			"warning", warning,
+		)
+	}
+	return normalized
 }
 
 // saveSession writes a session.json to disk (caller must hold lock).
