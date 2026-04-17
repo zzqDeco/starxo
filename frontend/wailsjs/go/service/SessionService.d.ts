@@ -36,6 +36,8 @@ export function SaveCurrentSession():Promise<void>;
 
 export function SaveSessionByID(arg1:string):Promise<void>;
 
+export function SaveSessionByIDBlocking(arg1:string):Promise<void>;
+
 export function SetChatService(arg1:service.ChatService):Promise<void>;
 
 export function SetContext(arg1:context.Context):Promise<void>;

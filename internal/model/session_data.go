@@ -1,5 +1,15 @@
 package model
 
+const (
+	SessionDataVersion = 4
+
+	ModeDefault = "default"
+	ModePlan    = "plan"
+
+	PendingPlanAttachmentKindApproved = "approved"
+	PendingPlanAttachmentKindRejected = "rejected"
+)
+
 // SessionData is the unified on-disk format that combines LLM conversation
 // history (messages) and frontend display data (timeline turns) into a single
 // atomically-written file. This eliminates the dual-source split between
@@ -12,6 +22,29 @@ type SessionData struct {
 	DiscoveredTools           []DiscoveredToolRecord     `json:"discoveredTools,omitempty"`           // MCP deferred discovery state
 	DeferredAnnouncementState *DeferredAnnouncementState `json:"deferredAnnouncementState,omitempty"` // persisted deferred tools delta state
 	MCPInstructionsDeltaState *MCPInstructionsDeltaState `json:"mcpInstructionsDeltaState,omitempty"` // persisted MCP instructions summary state
+	Mode                      string                     `json:"mode,omitempty"`                      // persisted session mode
+	PlanDocument              *PlanDocument              `json:"planDocument,omitempty"`              // persisted plan document
+	PendingPlanApproval       *PendingPlanApproval       `json:"pendingPlanApproval,omitempty"`       // persisted approval gate state
+	PendingPlanAttachment     *PendingPlanAttachment     `json:"pendingPlanAttachment,omitempty"`     // persisted continuation attachment
+}
+
+// PlanDocument is the persisted plan artifact for plan mode v2.
+type PlanDocument struct {
+	Markdown  string `json:"markdown"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// PendingPlanApproval marks that a plan is waiting for explicit approval.
+type PendingPlanApproval struct {
+	RequestedAt int64 `json:"requestedAt"`
+}
+
+// PendingPlanAttachment is a one-shot continuation attachment persisted across reloads.
+type PendingPlanAttachment struct {
+	Kind      string `json:"kind"`
+	Markdown  string `json:"markdown"`
+	Feedback  string `json:"feedback,omitempty"`
+	CreatedAt int64  `json:"createdAt"`
 }
 
 // DeferredAnnouncementState tracks which deferred tool canonical names have
@@ -68,4 +101,161 @@ type DisplayEvent struct {
 type StreamingState struct {
 	PartialContent string `json:"partialContent,omitempty"`
 	AgentName      string `json:"agentName,omitempty"`
+}
+
+const (
+	SessionDataWarningInvalidMode                  = "invalid session mode; downgraded to default"
+	SessionDataWarningInvalidPendingAttachmentKind = "invalid pending plan attachment kind; dropped attachment"
+)
+
+// DefaultSessionData returns the canonical zero-value session data for v4.
+func DefaultSessionData() *SessionData {
+	return &SessionData{
+		Version: SessionDataVersion,
+		Mode:    ModeDefault,
+	}
+}
+
+// NormalizeSessionData applies v4 defaults and downgrade rules to session data.
+// It always returns a copy so callers cannot accidentally alias plan-mode state.
+func NormalizeSessionData(data *SessionData) (*SessionData, []string) {
+	if data == nil {
+		return nil, nil
+	}
+
+	normalized := &SessionData{
+		Version:                   SessionDataVersion,
+		Messages:                  clonePersistedMessages(data.Messages),
+		Display:                   cloneDisplayTurns(data.Display),
+		Streaming:                 CloneStreamingState(data.Streaming),
+		DiscoveredTools:           cloneDiscoveredToolRecords(data.DiscoveredTools),
+		DeferredAnnouncementState: cloneDeferredAnnouncementState(data.DeferredAnnouncementState),
+		MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState),
+		Mode:                      data.Mode,
+		PlanDocument:              ClonePlanDocument(data.PlanDocument),
+		PendingPlanApproval:       ClonePendingPlanApproval(data.PendingPlanApproval),
+		PendingPlanAttachment:     ClonePendingPlanAttachment(data.PendingPlanAttachment),
+	}
+
+	warnings := make([]string, 0, 2)
+	switch normalized.Mode {
+	case "", ModeDefault:
+		normalized.Mode = ModeDefault
+	case ModePlan:
+	default:
+		normalized.Mode = ModeDefault
+		warnings = append(warnings, SessionDataWarningInvalidMode)
+	}
+
+	if normalized.PendingPlanAttachment != nil {
+		switch normalized.PendingPlanAttachment.Kind {
+		case PendingPlanAttachmentKindApproved, PendingPlanAttachmentKindRejected:
+		default:
+			normalized.PendingPlanAttachment = nil
+			warnings = append(warnings, SessionDataWarningInvalidPendingAttachmentKind)
+		}
+	}
+
+	return normalized, warnings
+}
+
+func ClonePlanDocument(in *PlanDocument) *PlanDocument {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
+}
+
+func ClonePendingPlanApproval(in *PendingPlanApproval) *PendingPlanApproval {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
+}
+
+func ClonePendingPlanAttachment(in *PendingPlanAttachment) *PendingPlanAttachment {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
+}
+
+func CloneStreamingState(in *StreamingState) *StreamingState {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
+}
+
+func clonePersistedMessages(in []PersistedMessage) []PersistedMessage {
+	if in == nil {
+		return nil
+	}
+	out := make([]PersistedMessage, len(in))
+	for i := range in {
+		out[i] = in[i]
+		if in[i].ToolCalls != nil {
+			out[i].ToolCalls = make([]PersistedToolCall, len(in[i].ToolCalls))
+			copy(out[i].ToolCalls, in[i].ToolCalls)
+		}
+	}
+	return out
+}
+
+func cloneDisplayTurns(in []DisplayTurn) []DisplayTurn {
+	if in == nil {
+		return nil
+	}
+	out := make([]DisplayTurn, len(in))
+	for i := range in {
+		out[i] = in[i]
+		if in[i].Events != nil {
+			out[i].Events = make([]DisplayEvent, len(in[i].Events))
+			copy(out[i].Events, in[i].Events)
+		}
+	}
+	return out
+}
+
+func cloneDiscoveredToolRecords(in []DiscoveredToolRecord) []DiscoveredToolRecord {
+	if in == nil {
+		return nil
+	}
+	out := make([]DiscoveredToolRecord, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneDeferredAnnouncementState(in *DeferredAnnouncementState) *DeferredAnnouncementState {
+	if in == nil {
+		return nil
+	}
+	return &DeferredAnnouncementState{
+		AnnouncedSearchableCanonicalNames: cloneStrings(in.AnnouncedSearchableCanonicalNames),
+	}
+}
+
+func cloneMCPInstructionsDeltaState(in *MCPInstructionsDeltaState) *MCPInstructionsDeltaState {
+	if in == nil {
+		return nil
+	}
+	return &MCPInstructionsDeltaState{
+		LastAnnouncedSearchableServers:  cloneStrings(in.LastAnnouncedSearchableServers),
+		LastAnnouncedPendingServers:     cloneStrings(in.LastAnnouncedPendingServers),
+		LastAnnouncedUnavailableServers: cloneStrings(in.LastAnnouncedUnavailableServers),
+		LastInstructionsFingerprint:     in.LastInstructionsFingerprint,
+	}
+}
+
+func cloneStrings(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }

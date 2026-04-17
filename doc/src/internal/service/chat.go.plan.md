@@ -33,6 +33,33 @@
   - `discoveredTools map[string]model.DiscoveredToolRecord`
   - `deferredAnnouncementState`
   - `mcpInstructionsDeltaState`
+  - `mode`
+  - `planDocument`
+  - `pendingPlanApproval`
+  - `pendingPlanAttachment`
+- `SessionData.Mode` 是 persisted truth source：
+  - `SessionRun.importSessionData(...)` restore 时把 `SessionData.Mode` hydrate 回 `run.mode`
+  - `SessionRun.snapshot()` 导出 v4 `SessionData` 时带上 `Mode` 和三类 plan state
+  - existing session snapshot、missing-session snapshot 都统一返回 v4 视图
+- `RestoreSessionData(...)` 的 normalize / logging 责任分两条路径：
+  - direct-call 输入由 `ChatService` 自己 normalize + log
+  - startup / session switch 这种 store-load 路径直接走 `restoreNormalizedSessionData(...)`
+  - 同一条调用链只记一次 normalize warning
+- `SetMode()` / `GetMode()` 仍然是 active-session scoped API：
+  - `SetMode(...)` 只改当前 active session
+  - `GetMode()` 只读当前 active session
+  - 本期不新增 per-session mode API
+- `SetMode()` 成功变更 mode 后：
+  - 先在 `chat.mu` 下更新 runtime mode
+  - 解锁后再调用 `SessionService.SaveSessionByID(...)`
+  - 仅在 mode 实际变更时调度 async save
+  - 不提供 blocking durability
+- `ClearHistory()`：
+  - 清空消息/显示/streaming/deferred state 与 plan state
+  - 不重置当前 mode
+  - 解锁后 best-effort 调度 async save
+  - 不删除、不重写 workspace 里的 `plan.md`
+  - 允许出现“persisted state 已清空但 plan.md 仍存在”的临时 artifact/state 分离
 - `SessionRun` 额外记录：
   - `activeBundleGeneration`
   - `activeRunnerKind`

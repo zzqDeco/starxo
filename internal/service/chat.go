@@ -128,6 +128,9 @@ type SessionRun struct {
 	discoveredTools           map[string]model.DiscoveredToolRecord
 	deferredAnnouncementState *model.DeferredAnnouncementState
 	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
+	planDocument              *model.PlanDocument
+	pendingPlanApproval       *model.PendingPlanApproval
+	pendingPlanAttachment     *model.PendingPlanAttachment
 
 	// Run lifecycle
 	running                      bool
@@ -196,6 +199,9 @@ func (r *SessionRun) clearSessionState() {
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
+	r.planDocument = nil
+	r.pendingPlanApproval = nil
+	r.pendingPlanAttachment = nil
 }
 
 func (r *SessionRun) setStreamingState(state *model.StreamingState) {
@@ -227,15 +233,24 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	} else {
 		r.timeline.Clear()
 	}
-	r.streamingState = data.Streaming
+	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
+	r.planDocument = nil
+	r.pendingPlanApproval = nil
+	r.pendingPlanAttachment = nil
+	r.mode = model.ModeDefault
 	if data == nil {
 		return
 	}
+	r.streamingState = model.CloneStreamingState(data.Streaming)
+	r.mode = data.Mode
 	r.deferredAnnouncementState = cloneDeferredAnnouncementState(data.DeferredAnnouncementState)
 	r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState)
+	r.planDocument = model.ClonePlanDocument(data.PlanDocument)
+	r.pendingPlanApproval = model.ClonePendingPlanApproval(data.PendingPlanApproval)
+	r.pendingPlanAttachment = model.ClonePendingPlanAttachment(data.PendingPlanAttachment)
 	for _, record := range data.DiscoveredTools {
 		if record.CanonicalName == "" {
 			continue
@@ -260,13 +275,17 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 		HasSessionRun: true,
 		MessageCount:  r.ctxEngine.MessageCount(),
 		SessionData: &model.SessionData{
-			Version:                   3,
+			Version:                   model.SessionDataVersion,
 			Messages:                  r.ctxEngine.ExportMessages(),
 			Display:                   r.timeline.Export(),
 			Streaming:                 cloneStreamingState(r.streamingState),
 			DiscoveredTools:           discovered,
 			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
+			Mode:                      r.mode,
+			PlanDocument:              model.ClonePlanDocument(r.planDocument),
+			PendingPlanApproval:       model.ClonePendingPlanApproval(r.pendingPlanApproval),
+			PendingPlanAttachment:     model.ClonePendingPlanAttachment(r.pendingPlanAttachment),
 		},
 	}
 }
@@ -735,7 +754,7 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		ctxEngine:       agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
 		timeline:        agentctx.NewTimelineCollector(),
 		discoveredTools: make(map[string]model.DiscoveredToolRecord),
-		mode:            "default",
+		mode:            model.ModeDefault,
 	}
 	s.sessions[sessionID] = run
 	return run
@@ -850,7 +869,7 @@ func (s *ChatService) findBundleByGenerationLocked(generation uint64) *RunnerBun
 }
 
 func runnerKindForMode(mode string) RunnerKind {
-	if mode == "plan" {
+	if mode == model.ModePlan {
 		return RunnerKindPlan
 	}
 	return RunnerKindDefault
@@ -1189,23 +1208,41 @@ func (s *ChatService) RemoveSession(sessionID string) {
 // SetMode switches the active session between "default" and "plan" mode.
 func (s *ChatService) SetMode(mode string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
-	if mode != "default" && mode != "plan" {
+	if mode != model.ModeDefault && mode != model.ModePlan {
+		s.mu.Unlock()
 		return fmt.Errorf("invalid mode: %s (must be 'default' or 'plan')", mode)
 	}
 
 	run := s.activeRun()
 	if run == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
 
+	if run.mode == mode {
+		s.mu.Unlock()
+		return nil
+	}
+
 	run.mode = mode
-	logger.Info("[CHAT] Mode changed", "mode", mode, "session", s.activeSessionID)
-	wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
-		Mode:      mode,
-		SessionID: s.activeSessionID,
-	})
+	sessionID := s.activeSessionID
+	sessionSvc := s.sessionService
+	ctx := s.ctx
+	s.mu.Unlock()
+
+	logger.Info("[CHAT] Mode changed", "mode", mode, "session", sessionID)
+	if ctx != nil {
+		wailsruntime.EventsEmit(ctx, "agent:mode_changed", ModeChangedEvent{
+			Mode:      mode,
+			SessionID: sessionID,
+		})
+	}
+	if sessionSvc != nil && sessionID != "" {
+		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
+			logger.Warn("[CHAT] Failed to schedule mode save", "session", sessionID, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -1215,7 +1252,7 @@ func (s *ChatService) GetMode() string {
 	defer s.mu.Unlock()
 	run := s.activeRun()
 	if run == nil {
-		return "default"
+		return model.ModeDefault
 	}
 	return run.mode
 }
@@ -1299,14 +1336,14 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	// Auto-escalate to plan mode for complex tasks when currently in default mode.
 	// This keeps default mode flexible while enforcing strict orchestration once
 	// plan mode is entered.
-	if run.mode == "default" && shouldAutoPlanMode(userMessage) {
-		run.mode = "plan"
+	if run.mode == model.ModeDefault && shouldAutoPlanMode(userMessage) {
+		run.mode = model.ModePlan
 		logger.Info("[CHAT] Auto-switched to plan mode",
 			"session", s.activeSessionID,
 			"reason", "complexity_trigger",
 		)
 		wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
-			Mode:      "plan",
+			Mode:      model.ModePlan,
 			SessionID: s.activeSessionID,
 		})
 	}
@@ -2147,10 +2184,10 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 // ClearHistory resets the conversation history for the active session.
 func (s *ChatService) ClearHistory() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	run := s.activeRun()
 	if run == nil {
+		s.mu.Unlock()
 		return nil
 	}
 
@@ -2158,7 +2195,16 @@ func (s *ChatService) ClearHistory() error {
 	run.pendingInterrupt = nil
 	s.invalidateRunners()
 	s.cleanupRetiredBundlesLocked()
+	sessionID := s.activeSessionID
+	sessionSvc := s.sessionService
+	s.mu.Unlock()
+
 	tools.ClearTodos()
+	if sessionSvc != nil && sessionID != "" {
+		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
+			logger.Warn("[CHAT] Failed to schedule clear-history save", "session", sessionID, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -2247,9 +2293,7 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 			return nil, err
 		}
 		return &SessionSnapshot{
-			SessionData: &model.SessionData{
-				Version: 3,
-			},
+			SessionData:          model.DefaultSessionData(),
 			DeferredSurfaceDebug: debug,
 		}, nil
 	}
@@ -2263,11 +2307,27 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 	return snapshot, nil
 }
 
-func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
+func logSessionDataNormalizeWarnings(sessionID, source string, warnings []string) {
+	for _, warning := range warnings {
+		logger.Warn("[CHAT] Normalized session data",
+			"session", sessionID,
+			"source", source,
+			"warning", warning,
+		)
+	}
+}
+
+func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model.SessionData) {
 	s.mu.Lock()
 	run := s.getOrCreateRun(sessionID)
 	s.mu.Unlock()
 	run.importSessionData(data)
+}
+
+func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
+	normalized, warnings := model.NormalizeSessionData(data)
+	logSessionDataNormalizeWarnings(sessionID, "direct_restore", warnings)
+	s.restoreNormalizedSessionData(sessionID, normalized)
 }
 
 func (s *ChatService) AddDiscoveredTool(sessionID string, record model.DiscoveredToolRecord) bool {
@@ -2434,7 +2494,7 @@ func (s *ChatService) GetSessionRunSnapshot(sessionID string) (running bool, cur
 	defer s.mu.Unlock()
 	run, ok := s.sessions[sessionID]
 	if !ok {
-		return false, "", "default", nil
+		return false, "", model.ModeDefault, nil
 	}
 	running = run.running
 	currentAgent = run.currentAgent
