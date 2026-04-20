@@ -27,7 +27,7 @@ const showResponsiveDock = ref(false)
 const showPalette = ref(false)
 
 useKeybinds([
-  { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = true }, allowInInput: true },
+  { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = !showPalette.value }, allowInInput: true },
   { combo: { key: 'n', meta: true }, handler: async () => {
       try { await sessionStore.createSession() }
       catch (e) { feedback.error(t('feedback.actions.createSession'), e) }

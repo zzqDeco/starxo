@@ -55,7 +55,9 @@ export function useKeybinds(bindings: Keybind[]) {
 
 export function isMac(): boolean {
   if (typeof navigator === 'undefined') return false
-  return /Mac|iPhone|iPad/.test(navigator.platform)
+  const uaData = (navigator as any).userAgentData
+  if (uaData?.platform === 'macOS') return true
+  return /Mac|iPhone|iPad/.test(navigator.platform ?? '')
 }
 
 export function comboLabel(combo: KeyCombo): string {
