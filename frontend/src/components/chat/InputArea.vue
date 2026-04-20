@@ -170,12 +170,38 @@ const attachedFileName = computed(() => {
 .input-shell {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--elev-2);
+  position: relative;
+  transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
+}
+
+.input-shell::after {
+  content: "";
+  position: absolute;
+  left: var(--space-md);
+  right: var(--space-md);
+  bottom: 0;
+  height: 1px;
+  background: var(--accent-cyan);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  transition: transform var(--transition-ui), opacity var(--transition-ui);
+  pointer-events: none;
+}
+
+.input-shell:focus-within {
+  border-color: var(--accent-cyan-dim);
+}
+
+.input-shell:focus-within::after {
+  transform: scaleX(1);
+  opacity: 0.7;
 }
 
 .chat-input {
@@ -191,17 +217,22 @@ const attachedFileName = computed(() => {
 
 .chat-input :deep(textarea) {
   font-family: var(--font-sans) !important;
-  font-size: 13px !important;
-  line-height: 1.5 !important;
-  padding: 8px 0 !important;
+  font-size: var(--fs-sm) !important;
+  line-height: var(--lh-normal) !important;
+  padding: var(--space-sm) 0 !important;
   background: transparent !important;
   border: none !important;
   resize: none !important;
 }
 
+.chat-input :deep(textarea::placeholder) {
+  color: var(--text-faint) !important;
+}
+
 .attach-btn {
   color: var(--text-muted) !important;
   flex-shrink: 0;
+  transition: color var(--transition-ui) !important;
 }
 
 .attach-btn:hover {
@@ -211,6 +242,11 @@ const attachedFileName = computed(() => {
 .send-btn {
   flex-shrink: 0;
   box-shadow: 0 2px 10px rgba(34, 211, 238, 0.24);
+  transition: opacity var(--transition-ui), transform var(--transition-ui);
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
 }
 
 .stop-btn {

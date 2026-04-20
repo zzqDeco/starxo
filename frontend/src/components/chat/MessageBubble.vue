@@ -309,7 +309,13 @@ function copyContent() {
           <NIcon size="14"><HardwareChip /></NIcon>
         </div>
         <span class="msg-time">{{ timeStr }}</span>
-        <button class="copy-btn" @click="copyContent" :title="t('message.copy')">
+        <button
+          class="copy-btn"
+          type="button"
+          @click="copyContent"
+          :title="t('message.copy')"
+          :aria-label="t('message.copy')"
+        >
           <NIcon size="12"><Clipboard /></NIcon>
         </button>
       </div>
@@ -434,30 +440,31 @@ function copyContent() {
   font-size: 12px;
 }
 
-/* User */
+/* User — de-bubbled: flat text with a 3px cyan bar on the right */
 .user-bubble {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  max-width: 75%;
+  max-width: 92%;
 }
 
 .user-content {
-  background: var(--gradient-user-bubble);
+  background: transparent;
   color: var(--text-primary);
-  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
-  padding: 10px 16px;
-  font-size: 13.5px;
-  line-height: 1.6;
+  border-right: 3px solid var(--accent-cyan);
+  padding: 2px 14px 2px 16px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
   white-space: pre-wrap;
   word-break: break-word;
-  box-shadow: 0 2px 8px rgba(30, 58, 95, 0.3);
+  text-align: right;
 }
 
 /* Assistant */
 .assistant-bubble {
-  max-width: 90%;
+  max-width: 100%;
   min-width: 200px;
+  width: 100%;
 }
 
 .assistant-header {
@@ -503,17 +510,24 @@ function copyContent() {
   border: none;
   color: var(--text-faint);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 3px 6px;
   border-radius: 4px;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-ui), background var(--transition-ui), opacity var(--transition-ui);
   display: flex;
   align-items: center;
   margin-left: auto;
+  opacity: 0.6;
+}
+
+.assistant-bubble:hover .copy-btn,
+.copy-btn:focus-visible {
+  opacity: 1;
 }
 
 .copy-btn:hover {
   color: var(--text-secondary);
   background: var(--bg-hover);
+  opacity: 1;
 }
 
 /* Timeline container */

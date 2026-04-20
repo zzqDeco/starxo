@@ -4,17 +4,23 @@ import { NButton, NInput, NCard } from 'naive-ui'
 import { useChatStore } from '@/stores/chatStore'
 import { ResumeWithAnswer, ResumeWithChoice, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
+import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 
 const answers = ref<string[]>([])
 const selectedIndex = ref(-1)
+const focusedChoiceIndex = ref(0)
 const isSubmitting = ref(false)
 
 const interrupt = computed(() => chatStore.pendingInterrupt)
 const isFollowUp = computed(() => interrupt.value?.type === 'followup')
 const isChoice = computed(() => interrupt.value?.type === 'choice')
+
+const dialogRef = ref<HTMLElement | null>(null)
+const trapActive = computed(() => !!interrupt.value)
+useFocusTrap(dialogRef, trapActive)
 
 // Initialize per-question answer slots when interrupt changes
 watch(interrupt, (val) => {
@@ -86,10 +92,64 @@ function handleKeydown(e: KeyboardEvent) {
     submitAnswer()
   }
 }
+
+function handleDialogKeydown(e: KeyboardEvent) {
+  if (!interrupt.value) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    handleCancel()
+    return
+  }
+  if (!isChoice.value) return
+  const opts = interrupt.value.options || []
+  if (opts.length === 0) return
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+    e.preventDefault()
+    focusedChoiceIndex.value = (focusedChoiceIndex.value + 1) % opts.length
+    return
+  }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+    e.preventDefault()
+    focusedChoiceIndex.value = (focusedChoiceIndex.value - 1 + opts.length) % opts.length
+    return
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    if (focusedChoiceIndex.value >= 0 && focusedChoiceIndex.value < opts.length) {
+      submitChoice(focusedChoiceIndex.value)
+    }
+    return
+  }
+  if (/^[1-9]$/.test(e.key)) {
+    const idx = parseInt(e.key, 10) - 1
+    if (idx < opts.length) {
+      e.preventDefault()
+      submitChoice(idx)
+    }
+  }
+}
+
+watch(interrupt, (val) => {
+  if (val?.type === 'choice') {
+    focusedChoiceIndex.value = 0
+  } else {
+    focusedChoiceIndex.value = -1
+  }
+})
 </script>
 
 <template>
-  <div v-if="interrupt" class="interrupt-backdrop" @click.self="handleCancel">
+  <div
+    v-if="interrupt"
+    ref="dialogRef"
+    class="interrupt-backdrop"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="isChoice ? t('interrupt.chooseOption') : t('interrupt.agentNeedsInfo')"
+    tabindex="-1"
+    @click.self="handleCancel"
+    @keydown="handleDialogKeydown"
+  >
     <NCard class="interrupt-card" :bordered="false">
       <!-- Follow-up Questions -->
       <template v-if="isFollowUp">
@@ -152,9 +212,16 @@ function handleKeydown(e: KeyboardEvent) {
             v-for="(opt, i) in interrupt!.options"
             :key="i"
             class="option-card"
-            :class="{ selected: selectedIndex === i, submitting: isSubmitting }"
+            :class="{
+              selected: selectedIndex === i,
+              focused: focusedChoiceIndex === i,
+              submitting: isSubmitting,
+            }"
             @click="submitChoice(i)"
+            @mouseenter="focusedChoiceIndex = i"
             :disabled="isSubmitting"
+            :aria-keyshortcuts="String(i + 1)"
+            type="button"
           >
             <span class="option-index">{{ i + 1 }}</span>
             <div class="option-content">
@@ -335,9 +402,19 @@ function handleKeydown(e: KeyboardEvent) {
   transform: translateX(4px);
 }
 
+.option-card.focused:not(:disabled) {
+  border-color: var(--accent-cyan-dim);
+  background: var(--bg-elevated);
+}
+
 .option-card.selected {
   border-color: var(--accent-cyan);
   background: rgba(34, 211, 238, 0.08);
+}
+
+.option-card:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
 }
 
 .option-card:disabled {

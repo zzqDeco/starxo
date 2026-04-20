@@ -187,7 +187,14 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-else class="messages-list">
+      <div
+        v-else
+        class="messages-list"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        :aria-busy="chatStore.isStreaming"
+      >
         <MessageBubble
           v-for="msg in chatStore.visibleMessages"
           :key="msg.id"
@@ -235,32 +242,33 @@ onUnmounted(() => {
   height: 100%;
   background: var(--bg-base);
   position: relative;
-  --chat-content-max-width: 920px;
-  --chat-content-padding: 24px;
+  --chat-content-max-width: 760px;
+  --chat-content-padding: var(--space-xl);
 }
 
 .mode-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px var(--chat-content-padding) 0;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--chat-content-padding) 0;
   max-width: var(--chat-content-max-width);
   width: 100%;
   margin: 0 auto;
 }
 
 .mode-label {
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   color: var(--text-faint);
-  font-family: var(--font-mono);
-  letter-spacing: 0.2px;
+  font-family: var(--font-brand);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
 }
 
 .messages-area {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 0;
+  padding: var(--space-lg) 0;
 }
 
 .messages-list {
@@ -269,7 +277,7 @@ onUnmounted(() => {
   padding: 0 var(--chat-content-padding);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-lg);
 }
 
 .empty-state {
@@ -298,37 +306,41 @@ onUnmounted(() => {
 }
 
 .empty-title {
-  font-size: 24px;
-  font-weight: 700;
+  font-family: var(--font-brand);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
   color: var(--text-primary);
-  margin: 0 0 8px 0;
+  letter-spacing: 0.5px;
+  margin: 0 0 var(--space-sm) 0;
 }
 
 .empty-subtitle {
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--text-muted);
-  margin: 0 0 32px 0;
-  max-width: 400px;
+  margin: 0 0 var(--space-2xl) 0;
+  max-width: 420px;
 }
 
 .empty-hints {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-md);
   justify-content: center;
-  max-width: 600px;
+  max-width: 620px;
 }
 
 .hint-card {
-  padding: 10px 16px;
+  padding: var(--space-md) var(--space-lg);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-family: var(--font-sans);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: border-color var(--transition-ui), color var(--transition-ui),
+    background var(--transition-ui), transform var(--transition-ui),
+    box-shadow var(--transition-ui);
 }
 
 .hint-card:hover {
@@ -336,7 +348,7 @@ onUnmounted(() => {
   color: var(--text-primary);
   background: var(--bg-elevated);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.1);
+  box-shadow: var(--shadow-cyan);
 }
 
 .scroll-to-bottom {
