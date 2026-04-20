@@ -23,6 +23,11 @@ const extension = computed(() => {
   return idx > -1 ? props.path.slice(idx + 1).toLowerCase() : ''
 })
 
+const breadcrumb = computed(() => {
+  if (!props.path) return []
+  return props.path.replace(/\\/g, '/').split('/').filter(Boolean)
+})
+
 function languageForExt(ext: string): string {
   const map: Record<string, string> = {
     ts: 'typescript',
@@ -98,7 +103,15 @@ function formatSize(bytes: number): string {
   <section class="code-preview">
     <div class="code-header">
       <div class="code-meta">
-        <div class="code-path" :title="path">{{ path || t('codePreview.noFileSelected') }}</div>
+        <div v-if="breadcrumb.length > 0" class="code-breadcrumb" :title="path">
+          <template v-for="(seg, i) in breadcrumb" :key="i">
+            <span class="crumb-sep" v-if="i > 0">/</span>
+            <span :class="['crumb-seg', { leaf: i === breadcrumb.length - 1 }]">{{ seg }}</span>
+          </template>
+        </div>
+        <div v-else class="code-breadcrumb code-breadcrumb-empty">
+          {{ t('codePreview.noFileSelected') }}
+        </div>
         <div class="code-stats">
           <span>{{ extension || 'text' }}</span>
           <span>·</span>
@@ -167,6 +180,37 @@ function formatSize(bytes: number): string {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.code-breadcrumb {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.code-breadcrumb-empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.crumb-sep {
+  color: var(--text-faint);
+  margin: 0 2px;
+}
+
+.crumb-seg {
+  color: var(--text-muted);
+}
+
+.crumb-seg.leaf {
+  color: var(--accent-cyan);
+  font-weight: var(--fw-medium);
 }
 
 .code-stats {
