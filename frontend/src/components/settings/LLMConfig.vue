@@ -74,17 +74,27 @@ async function testLLM() {
 <template>
   <div class="config-form">
     <NForm
-      label-placement="left"
-      label-width="110"
+      label-placement="top"
       size="small"
+      class="stacked-form"
     >
-      <NFormItem :label="t('settings.llm.provider')">
-        <NSelect
-          :value="settingsStore.settings.llm.type"
-          :options="providerOptions"
-          @update:value="onProviderChange"
-        />
-      </NFormItem>
+      <div class="u-form-grid-2col">
+        <NFormItem :label="t('settings.llm.provider')">
+          <NSelect
+            :value="settingsStore.settings.llm.type"
+            :options="providerOptions"
+            @update:value="onProviderChange"
+          />
+        </NFormItem>
+
+        <NFormItem :label="t('settings.llm.model')">
+          <NInput
+            v-model:value="settingsStore.settings.llm.model"
+            :placeholder="t('settings.llm.modelPlaceholder')"
+            class="mono-input"
+          />
+        </NFormItem>
+      </div>
 
       <NFormItem :label="t('settings.llm.baseURL')">
         <NInput
@@ -100,14 +110,6 @@ async function testLLM() {
           type="password"
           show-password-on="click"
           :placeholder="t('settings.llm.apiKeyPlaceholder')"
-          class="mono-input"
-        />
-      </NFormItem>
-
-      <NFormItem :label="t('settings.llm.model')">
-        <NInput
-          v-model:value="settingsStore.settings.llm.model"
-          :placeholder="t('settings.llm.modelPlaceholder')"
           class="mono-input"
         />
       </NFormItem>
