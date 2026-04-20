@@ -289,7 +289,7 @@ const toolStatus = computed<ToolStatus>(() => {
 const statusLabel = computed(() => {
   if (toolStatus.value === 'running') return t('taskRail.running')
   if (toolStatus.value === 'error') return t('taskRail.failed')
-  return t('status.done')
+  return t('taskRail.done')
 })
 </script>
 
@@ -606,9 +606,9 @@ const statusLabel = computed(() => {
 }
 
 .tool-status-pill.status-error {
-  color: var(--accent-rose, #f87171);
-  background: color-mix(in srgb, var(--accent-rose, #f87171) 10%, transparent);
-  border-color: color-mix(in srgb, var(--accent-rose, #f87171) 22%, transparent);
+  color: var(--accent-rose, #f43f5e);
+  background: color-mix(in srgb, var(--accent-rose, #f43f5e) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-rose, #f43f5e) 22%, transparent);
 }
 
 .tool-status-pill.status-running {
