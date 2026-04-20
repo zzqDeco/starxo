@@ -94,12 +94,17 @@ onBeforeUnmount(() => {
         </header>
 
         <div class="settings-body">
-          <nav class="settings-nav" aria-label="Settings sections">
+          <nav class="settings-nav" role="tablist" aria-label="Settings sections">
             <button
               v-for="tab in tabs"
               :key="tab.name"
+              :id="`settings-tab-${tab.name}`"
               :class="['settings-nav-item', { active: activeTab === tab.name }]"
               type="button"
+              role="tab"
+              :aria-selected="activeTab === tab.name"
+              :aria-controls="`settings-pane-${tab.name}`"
+              :tabindex="activeTab === tab.name ? 0 : -1"
               @click="activeTab = tab.name"
             >
               <NIcon size="16"><component :is="tab.icon" /></NIcon>
@@ -107,7 +112,13 @@ onBeforeUnmount(() => {
             </button>
           </nav>
 
-          <section class="settings-pane">
+          <section
+            class="settings-pane"
+            role="tabpanel"
+            :id="`settings-pane-${activeTab}`"
+            :aria-labelledby="`settings-tab-${activeTab}`"
+            tabindex="0"
+          >
             <Transition name="fade-fast" mode="out-in">
               <SSHConfigForm v-if="activeTab === 'ssh'" key="ssh" />
               <DockerConfigForm v-else-if="activeTab === 'docker'" key="docker" />

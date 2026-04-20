@@ -1,7 +1,6 @@
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NTag, NProgress, NInput } from 'naive-ui'
-// Note: NPopconfirm replaced by type-to-confirm destroy dialog below
 import { Refresh, Play, Stop, Trash, Server, Add, RadioButtonOn, RadioButtonOff, Close } from '@vicons/ionicons5'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useContainerStore } from '@/stores/containerStore'
@@ -27,11 +26,13 @@ useFocusTrap(destroyDialogRef, destroyActive)
 function openDestroy(container: ContainerInfo) {
   destroyTarget.value = container
   destroyInput.value = ''
+  if (typeof document !== 'undefined') document.body.style.overflow = 'hidden'
 }
 
 function closeDestroy() {
   destroyTarget.value = null
   destroyInput.value = ''
+  if (typeof document !== 'undefined') document.body.style.overflow = ''
 }
 
 const destroyName = computed(() => {
@@ -61,6 +62,10 @@ function onDestroyKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   containerStore.loadContainers().catch((e) => feedback.error(t('containers.title'), e))
+})
+
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') document.body.style.overflow = ''
 })
 
 function statusType(status: string): 'success' | 'warning' | 'error' | 'default' {
@@ -314,15 +319,10 @@ function sessionTitle(sessionID: string): string {
                 <NButton quaternary size="tiny" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Refresh /></NIcon></template>
                 </NButton>
-                <NPopconfirm @positive-click="destroyContainer(c.id)">
-                  <template #trigger>
-                    <NButton quaternary size="tiny" type="error" :loading="containerStore.isActionPending(`destroy:${c.id}`)" :disabled="panelBusy">
-                      <template #icon><NIcon size="14"><Trash /></NIcon></template>
-                      {{ t('containers.destroy') }}
-                    </NButton>
-                  </template>
-                  {{ t('containers.destroyConfirm') }}
-                </NPopconfirm>
+                <NButton quaternary size="tiny" type="error" :loading="containerStore.isActionPending(`destroy:${c.id}`)" :disabled="panelBusy" @click="openDestroy(c)">
+                  <template #icon><NIcon size="14"><Trash /></NIcon></template>
+                  {{ t('containers.destroy') }}
+                </NButton>
               </div>
             </div>
           </NCollapseItem>
@@ -347,6 +347,7 @@ function sessionTitle(sessionID: string): string {
             role="alertdialog"
             aria-modal="true"
             :aria-label="t('containers.destroyConfirmTitle')"
+            aria-describedby="destroy-warning-text"
             tabindex="-1"
             @keydown="onDestroyKeydown"
           >
@@ -358,7 +359,7 @@ function sessionTitle(sessionID: string): string {
               </NButton>
             </header>
             <div class="destroy-body">
-              <p class="destroy-warning">{{ t('containers.destroyWarning') }}</p>
+              <p id="destroy-warning-text" class="destroy-warning">{{ t('containers.destroyWarning') }}</p>
               <p class="destroy-prompt">
                 {{ t('containers.destroyTypeToConfirm') }}
                 <code class="destroy-name">{{ destroyName }}</code>
@@ -486,6 +487,7 @@ function sessionTitle(sessionID: string): string {
 .container-card.status-running::before { background: var(--accent-emerald); }
 .container-card.status-stopped::before { background: var(--accent-amber); }
 .container-card.status-destroyed::before { background: var(--accent-rose); }
+.container-card.status-unknown::before { background: var(--text-faint); }
 
 .container-card:hover {
   border-color: var(--accent-cyan-dim);

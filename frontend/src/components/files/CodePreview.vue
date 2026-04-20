@@ -173,15 +173,6 @@ function formatSize(bytes: number): string {
   flex-direction: column;
 }
 
-.code-path {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .code-breadcrumb {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
