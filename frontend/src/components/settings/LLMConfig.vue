@@ -115,15 +115,15 @@ async function testLLM() {
       <NFormItem :label="t('settings.llm.headers')">
         <div class="headers-list">
           <div v-for="(_, key) in (settingsStore.settings.llm.headers || {})" :key="key" class="header-row">
-            <NInput :value="String(key)" :placeholder="t('settings.llm.headerName')" size="small" readonly class="mono-input" style="width: 40%;" />
-            <NInput :value="settingsStore.settings.llm.headers![String(key)]" :placeholder="t('settings.llm.headerValue')" size="small" class="mono-input" style="width: 50%;" @update:value="(v: string) => updateHeader(String(key), v)" />
+            <NInput :value="String(key)" :placeholder="t('settings.llm.headerName')" size="small" readonly class="mono-input header-key-input" />
+            <NInput :value="settingsStore.settings.llm.headers![String(key)]" :placeholder="t('settings.llm.headerValue')" size="small" class="mono-input header-value-input" @update:value="(v: string) => updateHeader(String(key), v)" />
             <NButton quaternary circle size="tiny" @click="removeHeader(String(key))">
               <template #icon><NIcon size="14"><CloseOutline /></NIcon></template>
             </NButton>
           </div>
           <div class="header-row">
-            <NInput v-model:value="newHeaderKey" :placeholder="t('settings.llm.headerName')" size="small" class="mono-input" style="width: 40%;" />
-            <NInput v-model:value="newHeaderValue" :placeholder="t('settings.llm.headerValue')" size="small" class="mono-input" style="width: 50%;" />
+            <NInput v-model:value="newHeaderKey" :placeholder="t('settings.llm.headerName')" size="small" class="mono-input header-key-input" />
+            <NInput v-model:value="newHeaderValue" :placeholder="t('settings.llm.headerValue')" size="small" class="mono-input header-value-input" />
             <NButton quaternary circle size="tiny" @click="addHeader" :disabled="!newHeaderKey">
               <template #icon><NIcon size="14"><Add /></NIcon></template>
             </NButton>
@@ -176,5 +176,13 @@ async function testLLM() {
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
+}
+
+.header-key-input {
+  width: 40%;
+}
+
+.header-value-input {
+  width: 50%;
 }
 </style>

@@ -18,6 +18,9 @@ const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const containerStore = useContainerStore()
 
+// Keep palette / radius values in sync with `:root` in src/style.css.
+// Naive UI resolves theme values at component setup, so CSS custom properties
+// cannot be used here — the source of truth stays in style.css and we mirror.
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#22d3ee',
@@ -39,31 +42,37 @@ const themeOverrides: GlobalThemeOverrides = {
     textColor2: '#c8c9d6',
     textColor3: '#8b8da3',
     placeholderColor: '#5a5c72',
-    fontFamily: '"Nunito", "Segoe UI", system-ui, sans-serif'
+    fontFamily: '"Nunito", "Segoe UI", system-ui, sans-serif',
+    fontFamilyMono: '"JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace'
   },
   Button: {
     borderRadiusMedium: '8px',
     borderRadiusSmall: '6px',
+    fontWeight: '500'
   },
   Input: {
-    borderRadius: '8px',
+    borderRadius: '8px'
   },
   Card: {
-    borderRadius: '12px',
+    borderRadius: '12px'
   },
   Modal: {
-    borderRadius: '16px',
+    borderRadius: '16px'
   },
   Tag: {
-    borderRadius: '6px',
+    borderRadius: '6px'
   },
   Dropdown: {
     borderRadius: '8px',
     optionColorHover: '#1e2140',
-    color: '#1a1d33',
+    color: '#1a1d33'
   },
   Collapse: {
-    titleFontSize: '13px',
+    titleFontSize: '13px'
+  },
+  Tabs: {
+    tabFontWeight: '500',
+    tabFontWeightActive: '600'
   }
 }
 

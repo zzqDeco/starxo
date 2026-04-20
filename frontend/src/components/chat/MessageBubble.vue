@@ -240,12 +240,12 @@ function segmentStatusLabel(seg: EventSegment): string {
 
 // ---------- Agent helpers ----------
 function agentColor(name: string): string {
-  if (!name) return '#8b8da3'
-  if (name.includes('orchestrator')) return '#22d3ee'
-  if (name.includes('writer') || name.includes('code_w')) return '#38bdf8'
-  if (name.includes('executor') || name.includes('code_e')) return '#a78bfa'
-  if (name.includes('file')) return '#34d399'
-  return '#f59e0b'
+  if (!name) return 'var(--text-muted)'
+  if (name.includes('orchestrator')) return 'var(--agent-orchestrator)'
+  if (name.includes('writer') || name.includes('code_w')) return 'var(--agent-code-writer)'
+  if (name.includes('executor') || name.includes('code_e')) return 'var(--agent-code-executor)'
+  if (name.includes('file')) return 'var(--agent-file-manager)'
+  return 'var(--agent-default)'
 }
 
 function agentLabel(name: string): string {
@@ -443,8 +443,8 @@ function copyContent() {
 }
 
 .user-content {
-  background: linear-gradient(135deg, #1a2744, #1e3a5f);
-  color: #e0eaff;
+  background: var(--gradient-user-bubble);
+  color: var(--text-primary);
   border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
   padding: 10px 16px;
   font-size: 13.5px;
@@ -649,7 +649,7 @@ function copyContent() {
 }
 
 .subagent-state-pill.running {
-  color: #c4b5fd;
+  color: var(--accent-violet);
   border-color: rgba(167, 139, 250, 0.35);
   background: rgba(167, 139, 250, 0.1);
 }

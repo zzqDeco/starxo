@@ -447,12 +447,12 @@ function containerStatusDot(status?: string) {
 }
 
 .dot-yellow {
-  background: #eab308;
-  box-shadow: 0 0 6px rgba(234, 179, 8, 0.4);
+  background: var(--accent-amber);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 .dot-grey {
-  background: #6b7280;
+  background: var(--text-muted);
 }
 
 .dot-pulse {

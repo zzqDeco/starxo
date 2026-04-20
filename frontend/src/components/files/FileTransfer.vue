@@ -50,7 +50,7 @@ async function handleNativeUpload() {
     :title="mode === 'upload' ? t('files.uploadFileTitle') : t('files.downloadFileTitle')"
     :bordered="false"
     size="small"
-    style="width: 420px;"
+    class="transfer-modal"
     :segmented="{ content: true }"
   >
     <div class="transfer-content">

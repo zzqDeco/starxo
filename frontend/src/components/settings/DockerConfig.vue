@@ -28,7 +28,7 @@ const settingsStore = useSettingsStore()
           :min="256"
           :max="32768"
           :step="256"
-          style="width: 100%;"
+          class="u-w-full"
         />
       </NFormItem>
 
@@ -38,7 +38,7 @@ const settingsStore = useSettingsStore()
           :min="1"
           :max="16"
           :step="1"
-          style="width: 100%;"
+          class="u-w-full"
         />
       </NFormItem>
 
