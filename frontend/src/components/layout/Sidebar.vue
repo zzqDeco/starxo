@@ -137,7 +137,19 @@ function containerStatusDot(status?: string) {
     <!-- Sessions List -->
     <div class="sessions-list">
       <div class="section-label">{{ t('sidebar.sessions') }}</div>
-      <div v-if="sessionStore.sessions.length === 0" class="empty-hint">
+      <template v-if="sessionStore.loading && sessionStore.sessions.length === 0">
+        <div v-for="n in 3" :key="n" class="session-skeleton" aria-hidden="true">
+          <div class="skeleton skeleton-icon"></div>
+          <div class="skeleton-lines">
+            <div class="skeleton skeleton-line-title"></div>
+            <div class="skeleton skeleton-line-meta"></div>
+          </div>
+        </div>
+      </template>
+      <div
+        v-else-if="sessionStore.sessions.length === 0"
+        class="empty-hint"
+      >
         {{ t('sidebar.noSessions') }}
       </div>
       <div
@@ -320,6 +332,42 @@ function containerStatusDot(status?: string) {
   font-style: italic;
   text-align: center;
   line-height: 1.5;
+}
+
+/* Session skeleton (loading) */
+.session-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 56px;
+}
+
+.skeleton-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.skeleton-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skeleton-line-title {
+  height: 10px;
+  width: 70%;
+  border-radius: 3px;
+}
+
+.skeleton-line-meta {
+  height: 8px;
+  width: 40%;
+  border-radius: 3px;
 }
 
 /* Session item */
