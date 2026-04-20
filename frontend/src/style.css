@@ -442,6 +442,36 @@ body {
   justify-content: space-between;
 }
 
+.u-form-grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm) var(--space-md);
+}
+
+@media (max-width: 640px) {
+  .u-form-grid-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Top-label form baseline: tighter vertical rhythm + muted label typography.
+ * !important required to defeat Naive UI's inline label padding/typography. */
+.stacked-form .n-form-item-label {
+  padding: 0 0 4px !important;
+  font-size: var(--fs-xs) !important;
+  font-weight: var(--fw-medium) !important;
+  color: var(--text-muted) !important;
+  line-height: 1.2 !important;
+}
+
+.stacked-form > .n-form-item {
+  margin-bottom: var(--space-sm);
+}
+
+.stacked-form .u-form-grid-2col .n-form-item {
+  margin-bottom: 0;
+}
+
 .u-text-muted { color: var(--text-muted); }
 .u-text-faint { color: var(--text-faint); }
 .u-font-mono { font-family: var(--font-mono); }
