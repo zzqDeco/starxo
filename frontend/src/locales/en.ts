@@ -266,6 +266,7 @@ export default {
   terminal: {
     output: 'Output',
     waitingForOutput: 'Waiting for output...',
+    clear: 'Clear terminal',
   },
   layout: {
     terminal: 'Terminal',
@@ -287,6 +288,9 @@ export default {
     stop: 'Stop',
     destroy: 'Destroy',
     destroyConfirm: 'Destroy this container? This cannot be undone.',
+    destroyConfirmTitle: 'Destroy container',
+    destroyWarning: 'This will permanently destroy the container and remove all data inside. This action cannot be undone.',
+    destroyTypeToConfirm: 'Type the container name to confirm:',
     createContainer: 'New Container',
     activate: 'Activate',
     deactivate: 'Deactivate',

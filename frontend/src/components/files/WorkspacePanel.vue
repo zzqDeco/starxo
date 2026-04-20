@@ -290,6 +290,34 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.workspace-tree :deep(.n-tree-node-content) {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-ui), color var(--transition-ui);
+}
+
+.workspace-tree :deep(.n-tree-node-content:hover) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.workspace-tree :deep(.n-tree-node--selected .n-tree-node-content) {
+  position: relative;
+  background: var(--bg-elevated);
+  color: var(--accent-cyan);
+}
+
+.workspace-tree :deep(.n-tree-node--selected .n-tree-node-content::before) {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--accent-cyan);
+  border-radius: 1px;
+}
+
 .tree-empty {
   padding: 20px 8px;
 }

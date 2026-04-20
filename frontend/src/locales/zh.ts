@@ -266,6 +266,7 @@ export default {
   terminal: {
     output: '输出',
     waitingForOutput: '等待输出...',
+    clear: '清空终端',
   },
   layout: {
     terminal: '终端',
@@ -287,6 +288,9 @@ export default {
     stop: '停止',
     destroy: '销毁',
     destroyConfirm: '确定销毁此容器？此操作不可撤销。',
+    destroyConfirmTitle: '销毁容器',
+    destroyWarning: '这将永久销毁容器并移除其中的所有数据，此操作无法撤销。',
+    destroyTypeToConfirm: '输入容器名称以确认：',
     createContainer: '新建容器',
     activate: '激活',
     deactivate: '取消激活',
