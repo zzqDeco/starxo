@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NIcon, NButton } from 'naive-ui'
 import {
   Build, CheckmarkCircle, Reload, InformationCircle, AlertCircle,
-  DocumentText, Terminal, CodeSlash, People, ChevronForward
+  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
@@ -276,6 +276,21 @@ const hasResult = computed(() => !!props.event.toolResult)
 const hasDetails = computed(() =>
   toolInfo.value.category !== 'todo' && (!!props.event.toolArgs || !!props.event.toolResult)
 )
+
+type ToolStatus = 'running' | 'done' | 'error'
+const toolStatus = computed<ToolStatus>(() => {
+  const result = props.event.toolResult
+  if (!result) return 'running'
+  const exit = parseExitCode(result)
+  if (exit !== null && exit !== 0) return 'error'
+  return 'done'
+})
+
+const statusLabel = computed(() => {
+  if (toolStatus.value === 'running') return t('taskRail.running')
+  if (toolStatus.value === 'error') return t('taskRail.failed')
+  return t('status.done')
+})
 </script>
 
 <template>
@@ -314,8 +329,14 @@ const hasDetails = computed(() =>
           <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
           <span class="tool-strip-primary" :title="toolInfo.primary">{{ toolInfo.primary }}</span>
           <span v-if="toolInfo.secondary" class="tool-strip-secondary">{{ toolInfo.secondary }}</span>
-          <NIcon v-if="hasResult" size="12" class="tool-status-icon done"><CheckmarkCircle /></NIcon>
-          <NIcon v-else size="12" class="tool-status-icon running"><Reload /></NIcon>
+          <span class="tool-status-pill" :class="`status-${toolStatus}`">
+            <NIcon size="11" class="status-pill-icon">
+              <CheckmarkCircle v-if="toolStatus === 'done'" />
+              <CloseCircle v-else-if="toolStatus === 'error'" />
+              <Reload v-else />
+            </NIcon>
+            <span class="status-pill-label">{{ statusLabel }}</span>
+          </span>
           <span v-if="hasDetails" class="tool-strip-chevron" :class="{ expanded }">
             <NIcon size="11"><ChevronForward /></NIcon>
           </span>
@@ -353,7 +374,7 @@ const hasDetails = computed(() =>
       <div class="event-transfer-inline">
         <span class="transfer-text">
           <span :style="{ color: agentColor(event.agent) }">{{ agentLabel(event.agent) }}</span>
-          <span class="transfer-arrow">&rarr;</span>
+          <NIcon size="12" class="transfer-arrow"><ChevronForward /></NIcon>
           <span :style="{ color: agentColor(event.content) }">{{ agentLabel(event.content) }}</span>
         </span>
         <span v-if="event.toolArgs" class="transfer-desc">{{ event.toolArgs }}</span>
@@ -452,6 +473,13 @@ const hasDetails = computed(() =>
   50% { opacity: 0; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor {
+    animation: none;
+    opacity: 0.3;
+  }
+}
+
 /* Tool call compact strip */
 .event-tool-call {
   margin: 2px 0;
@@ -546,22 +574,62 @@ const hasDetails = computed(() =>
   transform: rotate(90deg);
 }
 
-.tool-status-icon.done {
-  color: var(--accent-emerald);
+.tool-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
   margin-left: auto;
   flex-shrink: 0;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.3px;
+  border: 1px solid transparent;
+  line-height: 1.2;
 }
 
-.tool-status-icon.running {
-  color: var(--text-faint);
+.status-pill-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-pill-label {
+  white-space: nowrap;
+}
+
+.tool-status-pill.status-done {
+  color: var(--accent-emerald);
+  background: color-mix(in srgb, var(--accent-emerald) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-emerald) 22%, transparent);
+}
+
+.tool-status-pill.status-error {
+  color: var(--accent-rose, #f87171);
+  background: color-mix(in srgb, var(--accent-rose, #f87171) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-rose, #f87171) 22%, transparent);
+}
+
+.tool-status-pill.status-running {
+  color: var(--text-muted);
+  background: var(--bg-deepest);
+  border-color: var(--border-subtle);
+}
+
+.tool-status-pill.status-running .status-pill-icon {
   animation: spin 1.5s linear infinite;
-  margin-left: auto;
-  flex-shrink: 0;
 }
 
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-status-pill.status-running .status-pill-icon {
+    animation: none;
+  }
 }
 
 .tool-call-body {
@@ -637,7 +705,8 @@ const hasDetails = computed(() =>
 
 .transfer-arrow {
   color: var(--text-faint);
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* Interrupt */
