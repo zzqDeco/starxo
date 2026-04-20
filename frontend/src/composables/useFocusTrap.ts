@@ -62,7 +62,7 @@ export function useFocusTrap(
   watch(active, (v) => {
     if (v) activate()
     else deactivate()
-  })
+  }, { immediate: true })
 
   onBeforeUnmount(() => deactivate())
 }

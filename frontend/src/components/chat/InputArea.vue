@@ -241,7 +241,7 @@ const attachedFileName = computed(() => {
 
 .send-btn {
   flex-shrink: 0;
-  box-shadow: 0 2px 10px rgba(34, 211, 238, 0.24);
+  box-shadow: var(--shadow-cyan);
   transition: opacity var(--transition-ui), transform var(--transition-ui);
 }
 

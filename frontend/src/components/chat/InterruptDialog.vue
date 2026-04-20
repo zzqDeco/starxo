@@ -11,7 +11,7 @@ const chatStore = useChatStore()
 
 const answers = ref<string[]>([])
 const selectedIndex = ref(-1)
-const focusedChoiceIndex = ref(0)
+const focusedChoiceIndex = ref(-1)
 const isSubmitting = ref(false)
 
 const interrupt = computed(() => chatStore.pendingInterrupt)
@@ -22,13 +22,14 @@ const dialogRef = ref<HTMLElement | null>(null)
 const trapActive = computed(() => !!interrupt.value)
 useFocusTrap(dialogRef, trapActive)
 
-// Initialize per-question answer slots when interrupt changes
+// Initialize per-question answer slots and choice focus when interrupt changes
 watch(interrupt, (val) => {
   if (val?.type === 'followup' && val.questions) {
     answers.value = new Array(val.questions.length).fill('')
   } else {
     answers.value = []
   }
+  focusedChoiceIndex.value = val?.type === 'choice' ? 0 : -1
 }, { immediate: true })
 
 const canSubmit = computed(() => answers.value.some(a => a.trim()))
@@ -129,13 +130,6 @@ function handleDialogKeydown(e: KeyboardEvent) {
   }
 }
 
-watch(interrupt, (val) => {
-  if (val?.type === 'choice') {
-    focusedChoiceIndex.value = 0
-  } else {
-    focusedChoiceIndex.value = -1
-  }
-})
 </script>
 
 <template>
