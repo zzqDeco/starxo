@@ -22,10 +22,10 @@ function toggleLocale() {
 </script>
 
 <template>
-  <header class="app-header wails-drag">
+  <header class="app-header wails-drag" role="banner">
     <div class="header-left">
-      <div class="app-title">
-        <span class="title-icon">&#x25C8;</span>
+      <div class="app-title" aria-label="Starxo">
+        <span class="title-icon" aria-hidden="true">&#x25C8;</span>
         <span class="title-text">{{ t('header.title') }}</span>
       </div>
     </div>
@@ -42,6 +42,7 @@ function toggleLocale() {
             circle
             size="small"
             class="header-btn"
+            :aria-label="workspaceDrawerVisible ? t('header.workspaceClose') : t('header.workspaceOpen')"
             @click="emit('toggle-workspace-drawer')"
           >
             <template #icon>
@@ -58,6 +59,7 @@ function toggleLocale() {
             quaternary
             size="small"
             class="header-btn lang-btn"
+            :aria-label="locale === 'en' ? '切换到中文' : 'Switch to English'"
             @click="toggleLocale"
           >
             {{ locale === 'en' ? '中' : 'EN' }}
@@ -73,6 +75,7 @@ function toggleLocale() {
             circle
             size="small"
             class="header-btn"
+            :aria-label="t('header.settings')"
             @click="emit('toggle-settings')"
           >
             <template #icon>
@@ -91,39 +94,41 @@ function toggleLocale() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 52px;
-  padding: 0 16px;
+  height: 48px;
+  padding: 0 var(--space-lg);
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  z-index: 10;
+  z-index: var(--z-sticky, 20);
   position: relative;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-md);
 }
 
 .app-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
   user-select: none;
 }
 
 .title-icon {
-  font-size: 18px;
+  font-size: var(--fs-lg);
   color: var(--accent-cyan);
   filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.4));
 }
 
 .title-text {
-  font-size: 15px;
-  font-weight: 700;
+  font-family: var(--font-brand);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
   color: var(--text-primary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
 }
 
 .header-center {
@@ -136,12 +141,12 @@ function toggleLocale() {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
 }
 
 .header-btn {
   color: var(--text-muted) !important;
-  transition: color var(--transition-fast) !important;
+  transition: color var(--transition-ui), background var(--transition-ui) !important;
 }
 
 .header-btn:hover {
@@ -149,9 +154,10 @@ function toggleLocale() {
 }
 
 .lang-btn {
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.3px;
+  font-family: var(--font-brand);
+  font-size: var(--fs-xs) !important;
+  font-weight: var(--fw-bold) !important;
+  letter-spacing: 0.5px;
   min-width: 32px;
 }
 </style>

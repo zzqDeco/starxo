@@ -176,6 +176,7 @@ export default {
     isWorking: 'is working...',
     done: 'Done',
     sshConnected: 'SSH: Connected',
+    sshConnecting: 'SSH: Connecting…',
     sshDisconnected: 'SSH: Disconnected',
     dockerRunning: 'Docker: Running',
     dockerStopped: 'Docker: Stopped',

@@ -201,9 +201,25 @@ function toggleResponsiveDock() {
   display: flex;
   height: 100vh;
   width: 100vw;
+  max-width: 100vw;
   background: var(--bg-base);
   overflow: hidden;
   position: relative;
+}
+
+/* CSS safety net — keeps layout contained if JS breakpoints lag at resize.
+   Structural mounting (v-if gates) stays in JS so drawer contents unmount
+   when collapsed; these rules only clamp visuals. */
+@media (max-width: 1200px) {
+  .container-dock {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .left-panel {
+    display: none;
+  }
 }
 
 .left-panel {
@@ -273,7 +289,7 @@ function toggleResponsiveDock() {
 
 .dock-panel-wrap {
   position: absolute;
-  top: 52px;
+  top: 48px;
   right: 0;
   bottom: 0;
   transform: translateX(100%);
@@ -289,7 +305,7 @@ function toggleResponsiveDock() {
 
 .mobile-sidebar-panel {
   position: absolute;
-  top: 52px;
+  top: 48px;
   left: 0;
   bottom: 0;
   width: min(300px, 86vw);
@@ -322,7 +338,7 @@ function toggleResponsiveDock() {
 .sidebar-tab {
   position: absolute;
   z-index: 90;
-  top: 60px;
+  top: 56px;
 }
 
 .dock-tab {

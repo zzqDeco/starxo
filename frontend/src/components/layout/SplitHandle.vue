@@ -112,7 +112,8 @@ onUnmounted(() => {
   flex-shrink: 0;
   z-index: var(--z-splitter, 10);
   background: transparent;
-  transition: background 150ms ease-out;
+  transition: background var(--transition-ui);
+  transition-delay: 0ms;
 }
 
 .split-handle.horizontal {
@@ -125,15 +126,21 @@ onUnmounted(() => {
   cursor: row-resize;
 }
 
-.split-handle:hover,
-.split-handle.dragging {
+.split-handle:hover {
   background: var(--splitter-hover, var(--accent-cyan-dim));
+  transition-delay: 400ms;
+}
+
+.split-handle.dragging {
+  background: var(--splitter-active, var(--accent-cyan));
+  transition-delay: 0ms;
 }
 
 .split-handle-line {
   position: absolute;
   opacity: 0;
-  transition: opacity 150ms ease-out;
+  transition: opacity var(--transition-ui);
+  transition-delay: 0ms;
   background: var(--splitter-active, var(--accent-cyan));
 }
 
@@ -151,8 +158,13 @@ onUnmounted(() => {
   height: 2px;
 }
 
-.split-handle:hover .split-handle-line,
+.split-handle:hover .split-handle-line {
+  opacity: 1;
+  transition-delay: 400ms;
+}
+
 .split-handle.dragging .split-handle-line {
   opacity: 1;
+  transition-delay: 0ms;
 }
 </style>
