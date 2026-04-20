@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { NForm, NFormItem, NInput, NInputNumber, NButton, NIcon, NSpace } from 'naive-ui'
+import { NForm, NFormItem, NInput, NInputNumber, NButton, NIcon } from 'naive-ui'
 import { Checkmark, Key } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { TestSSHConnection } from '../../../wailsjs/go/service/SettingsService'
