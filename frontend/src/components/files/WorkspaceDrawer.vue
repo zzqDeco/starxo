@@ -70,7 +70,7 @@ onUnmounted(() => {
       <aside class="workspace-panel" :style="{ width: effectiveDrawerWidth + 'px' }">
         <header class="workspace-panel-head">
           <h3 class="workspace-panel-title">{{ t('workspace.drawerTitle') }}</h3>
-          <NButton quaternary circle size="small" @click="closeDrawer">
+          <NButton quaternary circle size="small" :aria-label="t('header.workspaceClose')" @click="closeDrawer">
             <template #icon>
               <NIcon size="16"><Close /></NIcon>
             </template>

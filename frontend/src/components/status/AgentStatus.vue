@@ -19,7 +19,7 @@ const agentColor = computed(() => {
 </script>
 
 <template>
-  <div class="agent-status" v-if="agent">
+  <div class="agent-status" v-if="agent" role="status" aria-live="polite" :aria-label="`${agent} ${t('status.isWorking')}`">
     <div class="status-bar">
       <div class="thinking-animation">
         <span class="think-dot" :style="{ background: agentColor }"></span>
