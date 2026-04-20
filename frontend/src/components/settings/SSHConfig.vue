@@ -45,7 +45,7 @@ async function testConnection() {
           v-model:value="settingsStore.settings.ssh.port"
           :min="1"
           :max="65535"
-          style="width: 100%;"
+          class="u-w-full"
         />
       </NFormItem>
 

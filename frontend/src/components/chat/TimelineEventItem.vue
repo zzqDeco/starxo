@@ -136,7 +136,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'read_file') {
     return {
       category: 'file',
-      color: '#34d399',
+      color: 'var(--agent-file-manager)',
       action: t('message.tool.read'),
       primary: args?.path || '-',
       secondary: result ? `${result.length} ${t('message.tool.chars')}` : undefined,
@@ -146,7 +146,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'write_file') {
     return {
       category: 'file',
-      color: '#34d399',
+      color: 'var(--agent-file-manager)',
       action: t('message.tool.write'),
       primary: args?.path || '-',
       secondary: result ? t('message.tool.saved') : undefined,
@@ -156,7 +156,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'list_files') {
     return {
       category: 'file',
-      color: '#34d399',
+      color: 'var(--agent-file-manager)',
       action: t('message.tool.list'),
       primary: args?.path || '/workspace',
       secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
@@ -167,7 +167,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     const cmd = args?.command || 'edit'
     return {
       category: 'edit',
-      color: '#38bdf8',
+      color: 'var(--agent-code-writer)',
       action: t('message.tool.edit'),
       primary: args?.path || '-',
       secondary: cmd,
@@ -177,7 +177,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'shell_execute') {
     return {
       category: 'shell',
-      color: '#a78bfa',
+      color: 'var(--agent-code-executor)',
       action: t('message.tool.shell'),
       primary: truncStr(firstLine(args?.command || '') || '-', 80),
       secondary: exitCode !== null ? `exit ${exitCode}` : result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
@@ -187,7 +187,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'python_execute') {
     return {
       category: 'shell',
-      color: '#a78bfa',
+      color: 'var(--agent-code-executor)',
       action: t('message.tool.python'),
       primary: truncStr(firstLine(args?.code || '') || '-', 80),
       secondary: exitCode !== null ? `exit ${exitCode}` : result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
@@ -197,7 +197,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'task') {
     return {
       category: 'agent',
-      color: '#22d3ee',
+      color: 'var(--agent-orchestrator)',
       action: t('message.tool.delegate'),
       primary: args?.subagent_type || 'sub-agent',
       secondary: truncStr(args?.description || '', 60) || undefined,
@@ -209,7 +209,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     const msg = msgFromResult || args?.message || ''
     return {
       category: 'notify',
-      color: '#22d3ee',
+      color: 'var(--agent-orchestrator)',
       action: t('message.tool.notify'),
       primary: truncStr(msg || '-', 80),
       secondary: result ? t('status.done') : undefined,
@@ -220,7 +220,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     const detail = args ? `${args.id} -> ${args.status}` : '-'
     return {
       category: 'todo',
-      color: '#f59e0b',
+      color: 'var(--agent-default)',
       action: t('message.tool.todoUpdate'),
       primary: detail,
       secondary: parsedTodos.value.length > 0 ? todoStats(parsedTodos.value) : undefined,
@@ -230,7 +230,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'write_todos') {
     return {
       category: 'todo',
-      color: '#f59e0b',
+      color: 'var(--agent-default)',
       action: t('message.tool.todos'),
       primary: parsedTodos.value.length > 0
         ? `${parsedTodos.value.length} ${t('message.tool.items')}`
@@ -241,19 +241,19 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
 
   return {
     category: 'other',
-    color: '#f59e0b',
+    color: 'var(--agent-default)',
     action: name || t('message.tool.tool'),
     primary: truncStr(jsonInline(args) || '-', 80),
   }
 })
 
 function agentColor(name: string): string {
-  if (!name) return '#8b8da3'
-  if (name.includes('orchestrator')) return '#22d3ee'
-  if (name.includes('writer') || name.includes('code_w')) return '#38bdf8'
-  if (name.includes('executor') || name.includes('code_e')) return '#a78bfa'
-  if (name.includes('file')) return '#34d399'
-  return '#f59e0b'
+  if (!name) return 'var(--text-muted)'
+  if (name.includes('orchestrator')) return 'var(--agent-orchestrator)'
+  if (name.includes('writer') || name.includes('code_w')) return 'var(--agent-code-writer)'
+  if (name.includes('executor') || name.includes('code_e')) return 'var(--agent-code-executor)'
+  if (name.includes('file')) return 'var(--agent-file-manager)'
+  return 'var(--agent-default)'
 }
 
 function agentLabel(name: string): string {
@@ -482,31 +482,31 @@ const hasDetails = computed(() =>
 }
 
 .tool-strip-file {
-  border-left: 3px solid #34d399;
+  border-left: 3px solid var(--agent-file-manager);
 }
 
 .tool-strip-edit {
-  border-left: 3px solid #38bdf8;
+  border-left: 3px solid var(--agent-code-writer);
 }
 
 .tool-strip-shell {
-  border-left: 3px solid #a78bfa;
+  border-left: 3px solid var(--agent-code-executor);
 }
 
 .tool-strip-agent {
-  border-left: 3px solid #22d3ee;
+  border-left: 3px solid var(--agent-orchestrator);
 }
 
 .tool-strip-todo {
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--agent-default);
 }
 
 .tool-strip-notify {
-  border-left: 3px solid #22d3ee;
+  border-left: 3px solid var(--agent-orchestrator);
 }
 
 .tool-strip-other {
-  border-left: 3px solid #8b8da3;
+  border-left: 3px solid var(--text-muted);
 }
 
 .tool-strip-action {
@@ -598,7 +598,7 @@ const hasDetails = computed(() =>
 }
 
 .tool-code-shell {
-  border-left: 3px solid #a78bfa;
+  border-left: 3px solid var(--agent-code-executor);
   background: rgba(167, 139, 250, 0.05);
 }
 
