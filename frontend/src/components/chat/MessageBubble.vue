@@ -240,12 +240,12 @@ function segmentStatusLabel(seg: EventSegment): string {
 
 // ---------- Agent helpers ----------
 function agentColor(name: string): string {
-  if (!name) return '#8b8da3'
-  if (name.includes('orchestrator')) return '#22d3ee'
-  if (name.includes('writer') || name.includes('code_w')) return '#38bdf8'
-  if (name.includes('executor') || name.includes('code_e')) return '#a78bfa'
-  if (name.includes('file')) return '#34d399'
-  return '#f59e0b'
+  if (!name) return 'var(--text-muted)'
+  if (name.includes('orchestrator')) return 'var(--agent-orchestrator)'
+  if (name.includes('writer') || name.includes('code_w')) return 'var(--agent-code-writer)'
+  if (name.includes('executor') || name.includes('code_e')) return 'var(--agent-code-executor)'
+  if (name.includes('file')) return 'var(--agent-file-manager)'
+  return 'var(--agent-default)'
 }
 
 function agentLabel(name: string): string {
@@ -309,7 +309,13 @@ function copyContent() {
           <NIcon size="14"><HardwareChip /></NIcon>
         </div>
         <span class="msg-time">{{ timeStr }}</span>
-        <button class="copy-btn" @click="copyContent" :title="t('message.copy')">
+        <button
+          class="copy-btn"
+          type="button"
+          @click="copyContent"
+          :title="t('message.copy')"
+          :aria-label="t('message.copy')"
+        >
           <NIcon size="12"><Clipboard /></NIcon>
         </button>
       </div>
@@ -434,30 +440,31 @@ function copyContent() {
   font-size: 12px;
 }
 
-/* User */
+/* User — de-bubbled: flat text with a 3px cyan bar on the right */
 .user-bubble {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  max-width: 75%;
+  max-width: 92%;
 }
 
 .user-content {
-  background: linear-gradient(135deg, #1a2744, #1e3a5f);
-  color: #e0eaff;
-  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
-  padding: 10px 16px;
-  font-size: 13.5px;
-  line-height: 1.6;
+  background: transparent;
+  color: var(--text-primary);
+  border-right: 3px solid var(--accent-cyan);
+  padding: 2px 14px 2px 16px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
   white-space: pre-wrap;
   word-break: break-word;
-  box-shadow: 0 2px 8px rgba(30, 58, 95, 0.3);
+  text-align: right;
 }
 
 /* Assistant */
 .assistant-bubble {
-  max-width: 90%;
+  max-width: 100%;
   min-width: 200px;
+  width: 100%;
 }
 
 .assistant-header {
@@ -503,17 +510,24 @@ function copyContent() {
   border: none;
   color: var(--text-faint);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 3px 6px;
   border-radius: 4px;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-ui), background var(--transition-ui), opacity var(--transition-ui);
   display: flex;
   align-items: center;
   margin-left: auto;
+  opacity: 0.6;
+}
+
+.assistant-bubble:hover .copy-btn,
+.copy-btn:focus-visible {
+  opacity: 1;
 }
 
 .copy-btn:hover {
   color: var(--text-secondary);
   background: var(--bg-hover);
+  opacity: 1;
 }
 
 /* Timeline container */
@@ -649,7 +663,7 @@ function copyContent() {
 }
 
 .subagent-state-pill.running {
-  color: #c4b5fd;
+  color: var(--accent-violet);
   border-color: rgba(167, 139, 250, 0.35);
   background: rgba(167, 139, 250, 0.1);
 }

@@ -115,7 +115,7 @@ function containerStatusDot(status?: string) {
 </script>
 
 <template>
-  <div class="sidebar">
+  <nav class="sidebar" :aria-label="t('sidebar.sessions')">
     <!-- New Chat Button -->
     <div class="sidebar-top">
       <NButton
@@ -129,14 +129,27 @@ function containerStatusDot(status?: string) {
         <template #icon>
           <NIcon><Add /></NIcon>
         </template>
-        {{ t('sidebar.newChat') }}
+        <span class="new-chat-label">{{ t('sidebar.newChat') }}</span>
+        <kbd class="new-chat-kbd" aria-hidden="true">⌘N</kbd>
       </NButton>
     </div>
 
     <!-- Sessions List -->
     <div class="sessions-list">
       <div class="section-label">{{ t('sidebar.sessions') }}</div>
-      <div v-if="sessionStore.sessions.length === 0" class="empty-hint">
+      <template v-if="sessionStore.loading && sessionStore.sessions.length === 0">
+        <div v-for="n in 3" :key="n" class="session-skeleton" aria-hidden="true">
+          <div class="skeleton skeleton-icon"></div>
+          <div class="skeleton-lines">
+            <div class="skeleton skeleton-line-title"></div>
+            <div class="skeleton skeleton-line-meta"></div>
+          </div>
+        </div>
+      </template>
+      <div
+        v-else-if="sessionStore.sessions.length === 0"
+        class="empty-hint"
+      >
         {{ t('sidebar.noSessions') }}
       </div>
       <div
@@ -247,7 +260,7 @@ function containerStatusDot(status?: string) {
         {{ t('common.disconnect') }}
       </NButton>
     </div>
-  </div>
+  </nav>
 </template>
 
 <style scoped>
@@ -255,17 +268,44 @@ function containerStatusDot(status?: string) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 12px;
+  padding: var(--space-md);
 }
 
 .sidebar-top {
   flex-shrink: 0;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-lg);
 }
 
 .new-chat-btn {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.3px;
+}
+
+.new-chat-btn :deep(.n-button__content) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+}
+
+.new-chat-label {
+  flex: 1;
+  text-align: left;
+  padding-left: 2px;
+}
+
+.new-chat-kbd {
+  font-family: var(--font-brand);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.5px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .sessions-list {
@@ -294,19 +334,60 @@ function containerStatusDot(status?: string) {
   line-height: 1.5;
 }
 
+/* Session skeleton (loading) */
+.session-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 56px;
+}
+
+.skeleton-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.skeleton-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skeleton-line-title {
+  height: 10px;
+  width: 70%;
+  border-radius: 3px;
+}
+
+.skeleton-line-meta {
+  height: 8px;
+  width: 40%;
+  border-radius: 3px;
+}
+
 /* Session item */
 .session-item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 10px 10px 14px;
+  padding: 8px 10px 8px 14px;
+  min-height: 56px;
   border-radius: var(--radius-md);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  transition: background var(--transition-ui), border-color var(--transition-ui), transform var(--transition-ui);
   position: relative;
   outline: none;
-  margin-bottom: 2px;
+  margin-bottom: var(--space-2xs);
+}
+
+.session-item:hover:not(.active):not(.disabled) {
+  transform: translateX(1px);
 }
 
 .session-item:hover {
@@ -447,12 +528,12 @@ function containerStatusDot(status?: string) {
 }
 
 .dot-yellow {
-  background: #eab308;
-  box-shadow: 0 0 6px rgba(234, 179, 8, 0.4);
+  background: var(--accent-amber);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 .dot-grey {
-  background: #6b7280;
+  background: var(--text-muted);
 }
 
 .dot-pulse {
@@ -495,12 +576,18 @@ function containerStatusDot(status?: string) {
   gap: 6px;
   padding: 4px;
   margin-bottom: 8px;
+  min-height: 20px;
 }
 
 .progress-text {
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   color: var(--accent-amber);
   font-style: italic;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conn-error {

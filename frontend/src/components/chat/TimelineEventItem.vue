@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NIcon, NButton } from 'naive-ui'
 import {
   Build, CheckmarkCircle, Reload, InformationCircle, AlertCircle,
-  DocumentText, Terminal, CodeSlash, People, ChevronForward
+  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
@@ -136,7 +136,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'read_file') {
     return {
       category: 'file',
-      color: '#34d399',
+      color: 'var(--agent-file-manager)',
       action: t('message.tool.read'),
       primary: args?.path || '-',
       secondary: result ? `${result.length} ${t('message.tool.chars')}` : undefined,
@@ -146,7 +146,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'write_file') {
     return {
       category: 'file',
-      color: '#34d399',
+      color: 'var(--agent-file-manager)',
       action: t('message.tool.write'),
       primary: args?.path || '-',
       secondary: result ? t('message.tool.saved') : undefined,
@@ -156,7 +156,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'list_files') {
     return {
       category: 'file',
-      color: '#34d399',
+      color: 'var(--agent-file-manager)',
       action: t('message.tool.list'),
       primary: args?.path || '/workspace',
       secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
@@ -167,7 +167,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     const cmd = args?.command || 'edit'
     return {
       category: 'edit',
-      color: '#38bdf8',
+      color: 'var(--agent-code-writer)',
       action: t('message.tool.edit'),
       primary: args?.path || '-',
       secondary: cmd,
@@ -177,7 +177,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'shell_execute') {
     return {
       category: 'shell',
-      color: '#a78bfa',
+      color: 'var(--agent-code-executor)',
       action: t('message.tool.shell'),
       primary: truncStr(firstLine(args?.command || '') || '-', 80),
       secondary: exitCode !== null ? `exit ${exitCode}` : result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
@@ -187,7 +187,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'python_execute') {
     return {
       category: 'shell',
-      color: '#a78bfa',
+      color: 'var(--agent-code-executor)',
       action: t('message.tool.python'),
       primary: truncStr(firstLine(args?.code || '') || '-', 80),
       secondary: exitCode !== null ? `exit ${exitCode}` : result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
@@ -197,7 +197,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'task') {
     return {
       category: 'agent',
-      color: '#22d3ee',
+      color: 'var(--agent-orchestrator)',
       action: t('message.tool.delegate'),
       primary: args?.subagent_type || 'sub-agent',
       secondary: truncStr(args?.description || '', 60) || undefined,
@@ -209,7 +209,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     const msg = msgFromResult || args?.message || ''
     return {
       category: 'notify',
-      color: '#22d3ee',
+      color: 'var(--agent-orchestrator)',
       action: t('message.tool.notify'),
       primary: truncStr(msg || '-', 80),
       secondary: result ? t('status.done') : undefined,
@@ -220,7 +220,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     const detail = args ? `${args.id} -> ${args.status}` : '-'
     return {
       category: 'todo',
-      color: '#f59e0b',
+      color: 'var(--agent-default)',
       action: t('message.tool.todoUpdate'),
       primary: detail,
       secondary: parsedTodos.value.length > 0 ? todoStats(parsedTodos.value) : undefined,
@@ -230,7 +230,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   if (name === 'write_todos') {
     return {
       category: 'todo',
-      color: '#f59e0b',
+      color: 'var(--agent-default)',
       action: t('message.tool.todos'),
       primary: parsedTodos.value.length > 0
         ? `${parsedTodos.value.length} ${t('message.tool.items')}`
@@ -241,19 +241,19 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
 
   return {
     category: 'other',
-    color: '#f59e0b',
+    color: 'var(--agent-default)',
     action: name || t('message.tool.tool'),
     primary: truncStr(jsonInline(args) || '-', 80),
   }
 })
 
 function agentColor(name: string): string {
-  if (!name) return '#8b8da3'
-  if (name.includes('orchestrator')) return '#22d3ee'
-  if (name.includes('writer') || name.includes('code_w')) return '#38bdf8'
-  if (name.includes('executor') || name.includes('code_e')) return '#a78bfa'
-  if (name.includes('file')) return '#34d399'
-  return '#f59e0b'
+  if (!name) return 'var(--text-muted)'
+  if (name.includes('orchestrator')) return 'var(--agent-orchestrator)'
+  if (name.includes('writer') || name.includes('code_w')) return 'var(--agent-code-writer)'
+  if (name.includes('executor') || name.includes('code_e')) return 'var(--agent-code-executor)'
+  if (name.includes('file')) return 'var(--agent-file-manager)'
+  return 'var(--agent-default)'
 }
 
 function agentLabel(name: string): string {
@@ -276,6 +276,21 @@ const hasResult = computed(() => !!props.event.toolResult)
 const hasDetails = computed(() =>
   toolInfo.value.category !== 'todo' && (!!props.event.toolArgs || !!props.event.toolResult)
 )
+
+type ToolStatus = 'running' | 'done' | 'error'
+const toolStatus = computed<ToolStatus>(() => {
+  const result = props.event.toolResult
+  if (!result) return 'running'
+  const exit = parseExitCode(result)
+  if (exit !== null && exit !== 0) return 'error'
+  return 'done'
+})
+
+const statusLabel = computed(() => {
+  if (toolStatus.value === 'running') return t('taskRail.running')
+  if (toolStatus.value === 'error') return t('taskRail.failed')
+  return t('taskRail.done')
+})
 </script>
 
 <template>
@@ -314,8 +329,14 @@ const hasDetails = computed(() =>
           <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
           <span class="tool-strip-primary" :title="toolInfo.primary">{{ toolInfo.primary }}</span>
           <span v-if="toolInfo.secondary" class="tool-strip-secondary">{{ toolInfo.secondary }}</span>
-          <NIcon v-if="hasResult" size="12" class="tool-status-icon done"><CheckmarkCircle /></NIcon>
-          <NIcon v-else size="12" class="tool-status-icon running"><Reload /></NIcon>
+          <span class="tool-status-pill" :class="`status-${toolStatus}`">
+            <NIcon size="11" class="status-pill-icon">
+              <CheckmarkCircle v-if="toolStatus === 'done'" />
+              <CloseCircle v-else-if="toolStatus === 'error'" />
+              <Reload v-else />
+            </NIcon>
+            <span class="status-pill-label">{{ statusLabel }}</span>
+          </span>
           <span v-if="hasDetails" class="tool-strip-chevron" :class="{ expanded }">
             <NIcon size="11"><ChevronForward /></NIcon>
           </span>
@@ -353,7 +374,7 @@ const hasDetails = computed(() =>
       <div class="event-transfer-inline">
         <span class="transfer-text">
           <span :style="{ color: agentColor(event.agent) }">{{ agentLabel(event.agent) }}</span>
-          <span class="transfer-arrow">&rarr;</span>
+          <NIcon size="12" class="transfer-arrow"><ChevronForward /></NIcon>
           <span :style="{ color: agentColor(event.content) }">{{ agentLabel(event.content) }}</span>
         </span>
         <span v-if="event.toolArgs" class="transfer-desc">{{ event.toolArgs }}</span>
@@ -452,6 +473,13 @@ const hasDetails = computed(() =>
   50% { opacity: 0; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor {
+    animation: none;
+    opacity: 0.3;
+  }
+}
+
 /* Tool call compact strip */
 .event-tool-call {
   margin: 2px 0;
@@ -482,31 +510,31 @@ const hasDetails = computed(() =>
 }
 
 .tool-strip-file {
-  border-left: 3px solid #34d399;
+  border-left: 3px solid var(--agent-file-manager);
 }
 
 .tool-strip-edit {
-  border-left: 3px solid #38bdf8;
+  border-left: 3px solid var(--agent-code-writer);
 }
 
 .tool-strip-shell {
-  border-left: 3px solid #a78bfa;
+  border-left: 3px solid var(--agent-code-executor);
 }
 
 .tool-strip-agent {
-  border-left: 3px solid #22d3ee;
+  border-left: 3px solid var(--agent-orchestrator);
 }
 
 .tool-strip-todo {
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--agent-default);
 }
 
 .tool-strip-notify {
-  border-left: 3px solid #22d3ee;
+  border-left: 3px solid var(--agent-orchestrator);
 }
 
 .tool-strip-other {
-  border-left: 3px solid #8b8da3;
+  border-left: 3px solid var(--text-muted);
 }
 
 .tool-strip-action {
@@ -546,22 +574,62 @@ const hasDetails = computed(() =>
   transform: rotate(90deg);
 }
 
-.tool-status-icon.done {
-  color: var(--accent-emerald);
+.tool-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
   margin-left: auto;
   flex-shrink: 0;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.3px;
+  border: 1px solid transparent;
+  line-height: 1.2;
 }
 
-.tool-status-icon.running {
-  color: var(--text-faint);
+.status-pill-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-pill-label {
+  white-space: nowrap;
+}
+
+.tool-status-pill.status-done {
+  color: var(--accent-emerald);
+  background: color-mix(in srgb, var(--accent-emerald) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-emerald) 22%, transparent);
+}
+
+.tool-status-pill.status-error {
+  color: var(--accent-rose, #f43f5e);
+  background: color-mix(in srgb, var(--accent-rose, #f43f5e) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-rose, #f43f5e) 22%, transparent);
+}
+
+.tool-status-pill.status-running {
+  color: var(--text-muted);
+  background: var(--bg-deepest);
+  border-color: var(--border-subtle);
+}
+
+.tool-status-pill.status-running .status-pill-icon {
   animation: spin 1.5s linear infinite;
-  margin-left: auto;
-  flex-shrink: 0;
 }
 
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-status-pill.status-running .status-pill-icon {
+    animation: none;
+  }
 }
 
 .tool-call-body {
@@ -598,7 +666,7 @@ const hasDetails = computed(() =>
 }
 
 .tool-code-shell {
-  border-left: 3px solid #a78bfa;
+  border-left: 3px solid var(--agent-code-executor);
   background: rgba(167, 139, 250, 0.05);
 }
 
@@ -637,7 +705,8 @@ const hasDetails = computed(() =>
 
 .transfer-arrow {
   color: var(--text-faint);
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* Interrupt */

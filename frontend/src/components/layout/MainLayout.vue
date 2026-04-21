@@ -11,13 +11,38 @@ import ChatPanel from '@/components/chat/ChatPanel.vue'
 import WorkspaceDrawer from '@/components/files/WorkspaceDrawer.vue'
 import ContainerDock from '@/components/containers/ContainerDock.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
+import CommandPalette from '@/components/palette/CommandPalette.vue'
+import { useKeybinds } from '@/composables/useKeybinds'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useUiFeedback } from '@/composables/useUiFeedback'
 
 const { t } = useI18n()
+const sessionStore = useSessionStore()
+const feedback = useUiFeedback()
 
 const showSettings = ref(false)
 const showWorkspaceDrawer = ref(false)
 const showMobileSidebar = ref(false)
 const showResponsiveDock = ref(false)
+const showPalette = ref(false)
+
+useKeybinds([
+  { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = !showPalette.value }, allowInInput: true },
+  { combo: { key: 'n', meta: true }, handler: async () => {
+      try { await sessionStore.createSession() }
+      catch (e) { feedback.error(t('feedback.actions.createSession'), e) }
+    } },
+  { combo: { key: ',', meta: true }, handler: () => { showSettings.value = true } },
+  ...Array.from({ length: 9 }, (_, i) => ({
+    combo: { key: String(i + 1), meta: true },
+    handler: async () => {
+      const sess = sessionStore.sessions[i]
+      if (!sess) return
+      try { await sessionStore.switchSession(sess.id) }
+      catch (e) { feedback.error(t('feedback.actions.switchSession'), e) }
+    },
+  })),
+])
 
 // Resizable panel widths
 const leftWidth = ref(240)
@@ -172,7 +197,7 @@ function toggleResponsiveDock() {
 
     <NTooltip v-if="isBelow1200" trigger="hover" placement="left">
       <template #trigger>
-        <NButton class="dock-tab" circle size="small" @click="toggleResponsiveDock">
+        <NButton class="dock-tab" circle size="small" :aria-label="showResponsiveDock ? t('header.hideContainers') : t('header.showContainers')" @click="toggleResponsiveDock">
           <template #icon>
             <NIcon size="16"><Albums /></NIcon>
           </template>
@@ -183,7 +208,7 @@ function toggleResponsiveDock() {
 
     <NTooltip v-if="isBelow768" trigger="hover" placement="right">
       <template #trigger>
-        <NButton class="sidebar-tab" circle size="small" @click="toggleMobileSidebar">
+        <NButton class="sidebar-tab" circle size="small" :aria-label="showMobileSidebar ? t('header.hideSessions') : t('header.showSessions')" @click="toggleMobileSidebar">
           <template #icon>
             <NIcon size="16"><ChatboxEllipses /></NIcon>
           </template>
@@ -194,6 +219,7 @@ function toggleResponsiveDock() {
   </div>
 
   <SettingsPanel v-model:show="showSettings" />
+  <CommandPalette v-model:show="showPalette" @open-settings="showSettings = true" />
 </template>
 
 <style scoped>
@@ -201,9 +227,25 @@ function toggleResponsiveDock() {
   display: flex;
   height: 100vh;
   width: 100vw;
+  max-width: 100vw;
   background: var(--bg-base);
   overflow: hidden;
   position: relative;
+}
+
+/* CSS safety net — keeps layout contained if JS breakpoints lag at resize.
+   Structural mounting (v-if gates) stays in JS so drawer contents unmount
+   when collapsed; these rules only clamp visuals. */
+@media (max-width: 1200px) {
+  .container-dock {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .left-panel {
+    display: none;
+  }
 }
 
 .left-panel {
@@ -273,7 +315,7 @@ function toggleResponsiveDock() {
 
 .dock-panel-wrap {
   position: absolute;
-  top: 52px;
+  top: 48px;
   right: 0;
   bottom: 0;
   transform: translateX(100%);
@@ -289,7 +331,7 @@ function toggleResponsiveDock() {
 
 .mobile-sidebar-panel {
   position: absolute;
-  top: 52px;
+  top: 48px;
   left: 0;
   bottom: 0;
   width: min(300px, 86vw);
@@ -322,7 +364,7 @@ function toggleResponsiveDock() {
 .sidebar-tab {
   position: absolute;
   z-index: 90;
-  top: 60px;
+  top: 56px;
 }
 
 .dock-tab {

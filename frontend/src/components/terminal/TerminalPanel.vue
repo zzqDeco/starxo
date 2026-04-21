@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { NButton, NIcon } from 'naive-ui'
+import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { TrashOutline, Cube } from '@vicons/ionicons5'
 import { useWailsEvent } from '@/composables/useWailsEvent'
 import { useConnectionStore } from '@/stores/connectionStore'
@@ -174,17 +174,23 @@ onUnmounted(() => {
   <div class="terminal-panel">
     <div class="terminal-header">
       <span class="terminal-title">{{ t('terminal.output') }}</span>
-      <NButton
-        quaternary
-        circle
-        size="tiny"
-        class="clear-btn"
-        @click="clearTerminal"
-      >
-        <template #icon>
-          <NIcon size="14"><TrashOutline /></NIcon>
+      <NTooltip trigger="hover" placement="left">
+        <template #trigger>
+          <NButton
+            quaternary
+            circle
+            size="tiny"
+            class="clear-btn"
+            :aria-label="t('terminal.clear')"
+            @click="clearTerminal"
+          >
+            <template #icon>
+              <NIcon size="14"><TrashOutline /></NIcon>
+            </template>
+          </NButton>
         </template>
-      </NButton>
+        {{ t('terminal.clear') }}
+      </NTooltip>
     </div>
     <div ref="terminalEl" class="terminal-container">
       <!-- Fallback if xterm doesn't load -->
@@ -207,7 +213,12 @@ onUnmounted(() => {
         <template v-if="activeContainer">
           <span class="status-sep">|</span>
           <NIcon size="11"><Cube /></NIcon>
-          <span class="status-label">{{ activeContainer }}</span>
+          <NTooltip trigger="hover" placement="top">
+            <template #trigger>
+              <span class="status-label status-container">{{ activeContainer }}</span>
+            </template>
+            {{ activeContainer }}
+          </NTooltip>
         </template>
       </div>
       <div class="status-right">
@@ -295,11 +306,16 @@ onUnmounted(() => {
   padding: 4px 12px;
   background: var(--bg-elevated);
   border-top: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-family: var(--font-mono);
   color: var(--text-faint);
   flex-shrink: 0;
   gap: 8px;
+}
+
+.status-container {
+  max-width: 220px;
+  cursor: help;
 }
 
 .status-left {

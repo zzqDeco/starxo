@@ -10,9 +10,9 @@ const settingsStore = useSettingsStore()
 <template>
   <div class="config-form">
     <NForm
-      label-placement="left"
-      label-width="120"
+      label-placement="top"
       size="small"
+      class="stacked-form"
     >
       <NFormItem :label="t('settings.docker.image')">
         <NInput
@@ -22,25 +22,27 @@ const settingsStore = useSettingsStore()
         />
       </NFormItem>
 
-      <NFormItem :label="t('settings.docker.memory')">
-        <NInputNumber
-          v-model:value="settingsStore.settings.docker.memoryLimit"
-          :min="256"
-          :max="32768"
-          :step="256"
-          style="width: 100%;"
-        />
-      </NFormItem>
+      <div class="u-form-grid-2col">
+        <NFormItem :label="t('settings.docker.memory')">
+          <NInputNumber
+            v-model:value="settingsStore.settings.docker.memoryLimit"
+            :min="256"
+            :max="32768"
+            :step="256"
+            class="u-w-full"
+          />
+        </NFormItem>
 
-      <NFormItem :label="t('settings.docker.cpuLimit')">
-        <NInputNumber
-          v-model:value="settingsStore.settings.docker.cpuLimit"
-          :min="1"
-          :max="16"
-          :step="1"
-          style="width: 100%;"
-        />
-      </NFormItem>
+        <NFormItem :label="t('settings.docker.cpuLimit')">
+          <NInputNumber
+            v-model:value="settingsStore.settings.docker.cpuLimit"
+            :min="1"
+            :max="16"
+            :step="1"
+            class="u-w-full"
+          />
+        </NFormItem>
+      </div>
 
       <NFormItem :label="t('settings.docker.workDir')">
         <NInput

@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { NForm, NFormItem, NInput, NInputNumber, NButton, NIcon, NSpace } from 'naive-ui'
+import { NForm, NFormItem, NInput, NInputNumber, NButton, NIcon } from 'naive-ui'
 import { Checkmark, Key } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { TestSSHConnection } from '../../../wailsjs/go/service/SettingsService'
@@ -29,41 +29,43 @@ async function testConnection() {
 <template>
   <div class="config-form">
     <NForm
-      label-placement="left"
-      label-width="110"
+      label-placement="top"
       size="small"
+      class="stacked-form"
     >
-      <NFormItem :label="t('settings.ssh.host')">
-        <NInput
-          v-model:value="settingsStore.settings.ssh.host"
-          :placeholder="t('settings.ssh.hostPlaceholder')"
-        />
-      </NFormItem>
+      <div class="u-form-grid-2col">
+        <NFormItem :label="t('settings.ssh.host')">
+          <NInput
+            v-model:value="settingsStore.settings.ssh.host"
+            :placeholder="t('settings.ssh.hostPlaceholder')"
+          />
+        </NFormItem>
 
-      <NFormItem :label="t('settings.ssh.port')">
-        <NInputNumber
-          v-model:value="settingsStore.settings.ssh.port"
-          :min="1"
-          :max="65535"
-          style="width: 100%;"
-        />
-      </NFormItem>
+        <NFormItem :label="t('settings.ssh.port')">
+          <NInputNumber
+            v-model:value="settingsStore.settings.ssh.port"
+            :min="1"
+            :max="65535"
+            class="u-w-full"
+          />
+        </NFormItem>
 
-      <NFormItem :label="t('settings.ssh.username')">
-        <NInput
-          v-model:value="settingsStore.settings.ssh.user"
-          :placeholder="t('settings.ssh.userPlaceholder')"
-        />
-      </NFormItem>
+        <NFormItem :label="t('settings.ssh.username')">
+          <NInput
+            v-model:value="settingsStore.settings.ssh.user"
+            :placeholder="t('settings.ssh.userPlaceholder')"
+          />
+        </NFormItem>
 
-      <NFormItem :label="t('settings.ssh.password')">
-        <NInput
-          v-model:value="settingsStore.settings.ssh.password"
-          type="password"
-          show-password-on="click"
-          :placeholder="t('settings.ssh.passwordPlaceholder')"
-        />
-      </NFormItem>
+        <NFormItem :label="t('settings.ssh.password')">
+          <NInput
+            v-model:value="settingsStore.settings.ssh.password"
+            type="password"
+            show-password-on="click"
+            :placeholder="t('settings.ssh.passwordPlaceholder')"
+          />
+        </NFormItem>
+      </div>
 
       <NFormItem :label="t('settings.ssh.privateKey')">
         <NInput

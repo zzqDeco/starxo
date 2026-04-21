@@ -104,7 +104,7 @@ function getArgsText(server: MCPServerConfig): string {
                 v-model:value="server.transport"
                 :options="transportOptions"
                 size="tiny"
-                style="width: 120px;"
+                class="transport-select"
               />
             </div>
 
@@ -232,5 +232,9 @@ function getArgsText(server: MCPServerConfig): string {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.transport-select {
+  width: 120px;
 }
 </style>
