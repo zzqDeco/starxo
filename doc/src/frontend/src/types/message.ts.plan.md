@@ -26,6 +26,7 @@
   - `PlanEvent` — 计划事件，包含步骤列表
   - `PlanStepDTO` — 计划步骤，status 区分 todo/doing/done/failed/skipped，包含 taskId/desc/execResult
   - `ModeChangedEvent` — 模式切换事件，mode 为 default 或 plan。**新增 `sessionId?: string`** 字段
+  - `SessionRunState` — 会话运行态，包含 `sessionId/running/currentAgent/mode/hasInterrupt`，对应后端 `agent:run_state`
 
 ## 5. 依赖关系
 - 内部依赖: 无
@@ -35,6 +36,7 @@
 - `TurnEvent` 的 `sessionId` 字段被 `App.vue` 的 `isActiveSession()` 过滤函数使用，决定是否将事件路由到 chatStore
 - `InterruptEvent` 的 `sessionId` 字段被 `App.vue` 的 `agent:interrupt` 事件处理器用于过滤
 - `ModeChangedEvent` 的 `sessionId` 字段被 `App.vue` 的 `agent:mode_changed` 事件处理器用于过滤
+- `SessionRunState` 被 `App.vue` 的 `agent:run_state` 事件处理器写入 chatStore，供 Sidebar 显示后台运行/中断状态
 - `TurnEvent` 修改影响 chatStore.addTimelineEvent、TimelineEventItem、MessageBubble
 - `Message` 修改影响 chatStore、MessageBubble、ChatPanel
 - `InterruptEvent` 修改影响 chatStore.setInterrupt、InterruptDialog

@@ -112,6 +112,26 @@ function containerStatusDot(status?: string) {
     default: return 'dot-grey'
   }
 }
+
+function runStateFor(sessionId: string) {
+  return chatStore.getSessionRunState(sessionId)
+}
+
+function runStateLabel(sessionId: string) {
+  const state = runStateFor(sessionId)
+  if (!state) return ''
+  if (state.hasInterrupt) return t('sidebar.waitingInput')
+  if (state.running) return state.currentAgent || t('sidebar.agentRunning')
+  return state.mode === 'plan' ? t('sidebar.modePlanShort') : t('sidebar.modeDefaultShort')
+}
+
+function runStateClass(sessionId: string) {
+  const state = runStateFor(sessionId)
+  if (!state) return 'idle'
+  if (state.hasInterrupt) return 'waiting'
+  if (state.running) return 'running'
+  return state.mode === 'plan' ? 'plan' : 'idle'
+}
 </script>
 
 <template>
@@ -193,6 +213,13 @@ function containerStatusDot(status?: string) {
               <span v-if="sess.containers && sess.containers.length > 1" class="container-count">+{{ sess.containers.length - 1 }}</span>
             </span>
             <span v-else class="no-container-hint">{{ t('sidebar.noContainer') }}</span>
+            <span
+              v-if="runStateFor(sess.id)"
+              :class="['session-run-badge', runStateClass(sess.id)]"
+            >
+              <span class="run-pulse" aria-hidden="true"></span>
+              {{ runStateLabel(sess.id) }}
+            </span>
           </template>
         </div>
         <!-- Session dropdown menu -->
@@ -269,6 +296,7 @@ function containerStatusDot(status?: string) {
   flex-direction: column;
   height: 100%;
   padding: var(--space-md);
+  background: transparent;
 }
 
 .sidebar-top {
@@ -279,6 +307,8 @@ function containerStatusDot(status?: string) {
 .new-chat-btn {
   font-weight: var(--fw-semibold);
   letter-spacing: 0.3px;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-cyan);
 }
 
 .new-chat-btn :deep(.n-button__content) {
@@ -380,18 +410,14 @@ function containerStatusDot(status?: string) {
   border-radius: var(--radius-md);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background var(--transition-ui), border-color var(--transition-ui), transform var(--transition-ui);
+  transition: background var(--transition-ui), border-color var(--transition-ui), box-shadow var(--transition-ui);
   position: relative;
   outline: none;
   margin-bottom: var(--space-2xs);
 }
 
-.session-item:hover:not(.active):not(.disabled) {
-  transform: translateX(1px);
-}
-
 .session-item:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--bg-hover) 82%, black);
 }
 
 .session-item.disabled {
@@ -400,8 +426,9 @@ function containerStatusDot(status?: string) {
 }
 
 .session-item.active {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.06) 0%, rgba(26, 29, 51, 0.8) 100%);
-  border-color: var(--border-subtle);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%);
+  border-color: rgba(34, 211, 238, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.04);
 }
 
 .session-item:focus-visible {
@@ -478,7 +505,7 @@ function containerStatusDot(status?: string) {
   font-family: var(--font-mono);
   color: var(--text-faint);
   padding: 1px 6px;
-  background: var(--bg-deepest);
+  background: rgba(2, 6, 23, 0.72);
   border-radius: 4px;
   margin-top: 2px;
   width: fit-content;
@@ -502,6 +529,51 @@ function containerStatusDot(status?: string) {
   color: var(--text-faint);
   font-style: italic;
   margin-top: 2px;
+}
+
+.session-run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: rgba(2, 6, 23, 0.58);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  line-height: 1.2;
+}
+
+.session-run-badge.running {
+  color: var(--accent-cyan);
+  border-color: rgba(34, 211, 238, 0.28);
+}
+
+.session-run-badge.waiting {
+  color: var(--accent-amber);
+  border-color: rgba(245, 158, 11, 0.32);
+}
+
+.session-run-badge.plan {
+  color: var(--accent-violet);
+  border-color: rgba(167, 139, 250, 0.28);
+}
+
+.run-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.session-run-badge.running .run-pulse,
+.session-run-badge.waiting .run-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 /* Dot system */
@@ -548,6 +620,7 @@ function containerStatusDot(status?: string) {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
   margin-top: 8px;
+  background: linear-gradient(180deg, transparent 0%, rgba(2, 6, 23, 0.26) 100%);
 }
 
 .conn-strip {

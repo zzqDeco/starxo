@@ -39,6 +39,7 @@
   - `PlanEvent`: 计划事件（Steps []PlanStepDTO）
   - `PlanStepDTO`: 计划步骤 DTO
   - `ModeChangedEvent`: 模式切换事件，新增 `SessionID string json:"sessionId,omitempty"` 字段
+  - `RunStateEvent`: 会话运行态事件，用于 `agent:run_state`，包含 `sessionId`、`running`、`currentAgent`、`mode`、`hasInterrupt`
 
 ## 5. 依赖关系
 - 内部依赖:
@@ -47,7 +48,7 @@
 
 ## 6. 变更影响面
 - `SessionSwitchedEvent` 扩展了 `AgentRunning`、`CurrentAgent`、`Mode`、`HasInterrupt`、`Interrupt` 五个字段，前端 `session:switched` 事件处理器需消费这些字段以实现完整的会话状态恢复
-- `TimelineEvent`、`InterruptEvent`、`ModeChangedEvent` 新增 `SessionID` 字段，前端使用该字段过滤非活跃会话的事件
+- `TimelineEvent`、`InterruptEvent`、`ModeChangedEvent`、`RunStateEvent` 新增/使用 `SessionID` 字段，前端使用该字段过滤非活跃会话的事件或更新会话栏运行态
 - `SandboxStatusDTO` 扩展的三个字段（ActiveContainerID、ActiveContainerName、DockerAvailable）被前端 `GetStatus()` 调用消费
 - `SandboxProgressEvent` 同时用于 `ssh:progress` 和 `container:progress` 两类事件
 - 所有结构体的 JSON 标签是前后端通信的契约，修改会影响前端

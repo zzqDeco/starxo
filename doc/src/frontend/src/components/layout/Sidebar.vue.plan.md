@@ -12,7 +12,7 @@
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: sessionStore 状态、connectionStore 状态 (sshConnected, connecting, error)
+- 输入来源: sessionStore 状态、connectionStore 状态 (sshConnected, connecting, error)、chatStore.sessionRunStates
 - 输出结果: 渲染会话列表和 SSH 连接控制 UI
 
 ## 4. 关键实现细节
@@ -21,10 +21,15 @@
   - Connect 按钮调用 `connectionStore.connect()`（仅 SSH 连接）
   - Disconnect 按钮调用 `connectionStore.disconnect()`（仅 SSH 断开）
   - 按钮切换条件改为 `connectionStore.sshConnected`（不再依赖 `isReady`）
-- **会话项渲染**: 图标 + 标题 + 消息数和时间 + 容器状态徽标 + 操作菜单
+- **会话项渲染**: 图标 + 标题 + 消息数和时间 + 容器状态徽标 + 运行态徽标 + 操作菜单
+- **运行态徽标**:
+  - `running`: 显示当前 agent 名称
+  - `waiting`: 显示等待用户输入
+  - `plan/default`: 显示最近同步到该 session 的模式
 - **辅助函数**:
   - `formatTime(ts)` — 今天显示时间，否则显示日期
   - `containerStatusDot(status)` — 容器状态对应的点颜色类名
+  - `runStateFor/runStateLabel/runStateClass` — 读取并格式化 session 运行态
 
 ## 5. 依赖关系
 - 内部依赖: `@/stores/chatStore`、`@/stores/connectionStore`、`@/stores/sessionStore`
@@ -33,6 +38,7 @@
 ## 6. 变更影响面
 - SSH 连接操作修改需同步 connectionStore
 - 容器管理已完全移至 ContainerPanel.vue
+- `agent:run_state` 事件会改变会话项徽标，不影响会话切换逻辑
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

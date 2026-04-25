@@ -19,7 +19,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
 - **File Transfer** — Upload/download support; small files via base64 + docker exec, large files via SFTP + docker cp
-- **Refined Workbench UI** — Maximized window by default; long workspace drawer from top-right trigger; persistent container dock; floating task rail above input
+- **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, workspace drawer, persistent runtime dock, and composer-level mode controls
 
 ## Tech Stack
 

@@ -20,9 +20,14 @@
   - `todo`, `plan`, `status`, `settings`, `files`, `terminal`, `layout`, `containers`
 - 本轮新增键组/键:
   - `header.workspaceOpen`, `header.workspaceClose`
+  - `header.commandPalette`, `header.commandPlaceholder`
+  - `chat.workbenchTitle`, `chat.sandboxReady`, `chat.sandboxRequired`, `chat.capability*`
+  - `sidebar.waitingInput`, `sidebar.agentRunning`, `sidebar.mode*Short`
+  - `runtime.*`
   - `taskRail.*`
-  - `workspace.*`（含 `drawerTitle`）
+  - `workspace.*`（含 `drawerTitle`, `openFile`）
   - `codePreview.*`
+  - `palette.openWorkspace`
 
 ## 5. 依赖关系
 - 内部依赖: 被 `frontend/src/locales/index.ts` 引用

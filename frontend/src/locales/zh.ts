@@ -17,6 +17,8 @@ export default {
     showPanel: '显示面板',
     workspaceOpen: '打开工作区抽屉',
     workspaceClose: '关闭工作区抽屉',
+    commandPalette: '打开命令面板',
+    commandPlaceholder: '搜索命令、会话和工作区',
     settings: '设置',
     hideContainers: '隐藏容器面板',
     showContainers: '显示容器面板',
@@ -41,9 +43,20 @@ export default {
     untitled: '未命名会话',
     noSessions: '暂无会话',
     noContainer: '无容器',
+    waitingInput: '等待输入',
+    agentRunning: 'Agent 运行中',
+    modeDefaultShort: '默认',
+    modePlanShort: '计划',
   },
   chat: {
     title: 'Starxo',
+    workbenchTitle: 'AI 编程工作台',
+    sandboxReady: '沙箱就绪',
+    sandboxRequired: '等待沙箱',
+    capabilitiesLabel: '工作台能力',
+    capabilityRuntime: '运行时',
+    capabilityWorkspace: '工作区',
+    capabilityIsolation: '隔离沙箱',
     emptyConnected: '已连接，准备就绪。描述一个任务开始吧。',
     emptyDisconnected: '连接到沙盒以开始编程。',
     modeLabel: '模式',
@@ -165,6 +178,7 @@ export default {
     download: '下载',
     refresh: '刷新',
     noFiles: '暂无文件',
+    openFile: '在工作区打开文件',
   },
   codePreview: {
     noFileSelected: '未选择文件',
@@ -273,6 +287,12 @@ export default {
     files: '文件',
     containers: '容器',
   },
+  runtime: {
+    title: '运行时',
+    containers: '容器',
+    terminal: '终端',
+    noActiveContainer: '未激活容器',
+  },
   palette: {
     title: '命令面板',
     placeholder: '输入命令或搜索…',
@@ -282,6 +302,7 @@ export default {
     close: '关闭',
     newSession: '新建会话',
     openSettings: '打开设置',
+    openWorkspace: '打开工作区',
     switchToPlan: '切换到计划模式',
     switchToDefault: '切换到默认模式',
     connectSSH: '连接 SSH',
@@ -316,4 +337,3 @@ export default {
     sshReadyHint: 'SSH 已连接，点击"新建容器"开始',
   },
 }
-

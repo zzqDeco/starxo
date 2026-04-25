@@ -17,6 +17,8 @@ export default {
     showPanel: 'Show panel',
     workspaceOpen: 'Open workspace drawer',
     workspaceClose: 'Close workspace drawer',
+    commandPalette: 'Open command palette',
+    commandPlaceholder: 'Search commands, sessions, and workspace',
     settings: 'Settings',
     hideContainers: 'Hide containers',
     showContainers: 'Show containers',
@@ -41,9 +43,20 @@ export default {
     untitled: 'Untitled session',
     noSessions: 'No sessions',
     noContainer: 'No container',
+    waitingInput: 'Waiting for input',
+    agentRunning: 'Agent running',
+    modeDefaultShort: 'Default',
+    modePlanShort: 'Plan',
   },
   chat: {
     title: 'Starxo',
+    workbenchTitle: 'AI Coding Workbench',
+    sandboxReady: 'Sandbox ready',
+    sandboxRequired: 'Sandbox required',
+    capabilitiesLabel: 'Workbench capabilities',
+    capabilityRuntime: 'Runtime',
+    capabilityWorkspace: 'Workspace',
+    capabilityIsolation: 'Isolated sandbox',
     emptyConnected: 'Connected and ready. Describe a task to get started.',
     emptyDisconnected: 'Connect to your sandbox to start coding.',
     modeLabel: 'Mode',
@@ -165,6 +178,7 @@ export default {
     download: 'Download',
     refresh: 'Refresh',
     noFiles: 'No files',
+    openFile: 'Open file in workspace',
   },
   codePreview: {
     noFileSelected: 'No file selected',
@@ -273,6 +287,12 @@ export default {
     files: 'Files',
     containers: 'Containers',
   },
+  runtime: {
+    title: 'Runtime',
+    containers: 'Containers',
+    terminal: 'Terminal',
+    noActiveContainer: 'No active container',
+  },
   palette: {
     title: 'Command Palette',
     placeholder: 'Type a command or search…',
@@ -282,6 +302,7 @@ export default {
     close: 'close',
     newSession: 'New session',
     openSettings: 'Open settings',
+    openWorkspace: 'Open workspace',
     switchToPlan: 'Switch to Plan mode',
     switchToDefault: 'Switch to Default mode',
     connectSSH: 'Connect SSH',
@@ -316,4 +337,3 @@ export default {
     sshReadyHint: 'SSH connected — click "New Container" to start',
   },
 }
-

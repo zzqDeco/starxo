@@ -1,11 +1,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
+import { escapeHtml, getHighlighter } from '@/composables/highlight'
 
 let mdInstance: MarkdownIt | null = null
 
 function getMd(): MarkdownIt {
   if (!mdInstance) {
+    const hljs = getHighlighter()
     mdInstance = new MarkdownIt({
       html: false,
       linkify: true,
@@ -22,7 +23,7 @@ function getMd(): MarkdownIt {
           } catch (_) { /* fallback */ }
         }
         return `<pre class="hljs-code-block">${headerHtml}<code class="hljs">${
-          mdInstance!.utils.escapeHtml(str)
+          escapeHtml(str)
         }</code></pre>`
       }
     })

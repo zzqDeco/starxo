@@ -124,3 +124,12 @@ type ModeChangedEvent struct {
 	Mode      string `json:"mode"` // "default" | "plan"
 	SessionID string `json:"sessionId,omitempty"`
 }
+
+// RunStateEvent is emitted whenever a session's visible agent run state changes.
+type RunStateEvent struct {
+	SessionID    string `json:"sessionId"`
+	Running      bool   `json:"running"`
+	CurrentAgent string `json:"currentAgent,omitempty"`
+	Mode         string `json:"mode"`
+	HasInterrupt bool   `json:"hasInterrupt"`
+}

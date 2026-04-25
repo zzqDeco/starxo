@@ -28,6 +28,7 @@
   - `agentMode: 'default' | 'plan'` — 当前代理模式
   - `planSteps: PlanStepDTO[]` — 计划步骤列表
   - `latestTodos: TodoItem[]` — 最新 Todo 任务快照，从 write_todos/update_todo 工具事件中提取，供 ChatPanel 常驻 TodoBoard 消费
+  - `sessionRunStates: Record<string, SessionRunState>` — 按 sessionId 保存后台运行态（running/currentAgent/mode/hasInterrupt）
 - **Getters**:
   - `lastMessage` — 最后一条消息
   - `visibleMessages` — 过滤掉无内容且无事件的空助手消息
@@ -39,6 +40,7 @@
   - `addUserMessage(content)` — 添加用户消息并重置轮次状态
   - `setInterrupt(evt)` / `clearInterrupt()` — 中断状态管理
   - `updatePlanSteps(steps)` / `setMode(mode)` — 计划模式管理
+  - `setSessionRunState(state)` / `getSessionRunState(sessionId)` — 会话运行态管理，供 Sidebar 和 App.vue 使用
   - `setGenerating(generating, agent?)` — 更新生成状态
   - `restoreTodosFromMessages()` — 扫描所有已恢复消息的 events，提取最新的 todos 快照用于会话恢复
   - `clearMessages()` — 清空所有状态（含 latestTodos）
@@ -53,6 +55,7 @@
 - 修改计划步骤影响 PlanPanel 组件
 - `visibleMessages` 过滤逻辑影响 ChatPanel 消息列表显示
 - `latestTodos` 状态影响 ChatPanel 中常驻 TodoBoard 的显示
+- `sessionRunStates` 状态影响 Sidebar 的后台运行、中断等待和模式徽标
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

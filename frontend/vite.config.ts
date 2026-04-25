@@ -8,5 +8,17 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src')
     }
+  },
+  build: {
+    chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vue: ['vue', 'pinia', 'vue-i18n', '@vueuse/core'],
+          naive: ['naive-ui', '@vicons/ionicons5'],
+          markdown: ['markdown-it', 'highlight.js/lib/core']
+        }
+      }
+    }
   }
 })

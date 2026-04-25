@@ -1,18 +1,21 @@
 <script lang="ts" setup>
 import { ref, computed } from 'vue'
-import { NInput, NButton, NIcon, NTooltip } from 'naive-ui'
-import { Send, Attach, StopCircle } from '@vicons/ionicons5'
+import { NInput, NButton, NIcon, NTooltip, NButtonGroup } from 'naive-ui'
+import { Send, Attach, StopCircle, GitBranch, DocumentText } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
 const props = defineProps<{
   isStreaming: boolean
+  agentMode: 'default' | 'plan'
+  modeSwitching: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'send', content: string, filePath?: string): void
   (e: 'stop'): void
+  (e: 'switch-mode', mode: 'default' | 'plan'): void
 }>()
 
 const inputText = ref('')
@@ -65,6 +68,44 @@ const attachedFileName = computed(() => {
     <div v-if="attachedFile" class="attached-file">
       <span class="attached-name">{{ attachedFileName }}</span>
       <button class="attached-remove" @click="removeAttachment">&times;</button>
+    </div>
+
+    <div class="composer-meta">
+      <div class="mode-control" :aria-label="t('chat.modeLabel')">
+        <span class="mode-caption">{{ t('chat.modeLabel') }}</span>
+        <NButtonGroup size="tiny" class="mode-buttons">
+          <NTooltip trigger="hover" placement="top">
+            <template #trigger>
+              <NButton
+                :type="agentMode === 'default' ? 'primary' : 'default'"
+                :disabled="isStreaming || modeSwitching"
+                :loading="modeSwitching && agentMode !== 'default'"
+                @click="emit('switch-mode', 'default')"
+              >
+                <template #icon><NIcon size="13"><GitBranch /></NIcon></template>
+                {{ t('chat.modeDefault') }}
+              </NButton>
+            </template>
+            {{ t('chat.modeDefaultHint') }}
+          </NTooltip>
+          <NTooltip trigger="hover" placement="top">
+            <template #trigger>
+              <NButton
+                :type="agentMode === 'plan' ? 'primary' : 'default'"
+                :disabled="isStreaming || modeSwitching"
+                :loading="modeSwitching && agentMode !== 'plan'"
+                @click="emit('switch-mode', 'plan')"
+              >
+                <template #icon><NIcon size="13"><DocumentText /></NIcon></template>
+                {{ t('chat.modePlan') }}
+              </NButton>
+            </template>
+            {{ t('chat.modePlanHint') }}
+          </NTooltip>
+        </NButtonGroup>
+      </div>
+
+      <span class="composer-hint">{{ t('input.shiftEnter') }}</span>
     </div>
 
     <div class="input-shell">
@@ -135,6 +176,40 @@ const attachedFileName = computed(() => {
   width: 100%;
 }
 
+.composer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.mode-caption {
+  font-family: var(--font-brand);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mode-buttons {
+  flex-shrink: 0;
+}
+
+.composer-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 .attached-file {
   display: flex;
   align-items: center;
@@ -173,8 +248,8 @@ const attachedFileName = computed(() => {
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 88%, black);
   box-shadow: var(--elev-2);
   position: relative;
   transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
@@ -251,5 +326,17 @@ const attachedFileName = computed(() => {
 
 .stop-btn {
   flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .composer-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .composer-hint {
+    display: none;
+  }
 }
 </style>

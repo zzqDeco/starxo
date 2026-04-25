@@ -19,7 +19,7 @@
 - **useMarkdown**:
   - 使用单例模式 (`mdInstance`) 初始化 markdown-it 实例
   - 配置: html=false, linkify=true, typographer=true
-  - 代码高亮: 集成 highlight.js，生成带语言标签和复制按钮的代码块
+- 代码高亮: 通过 `getHighlighter()` 使用 highlight.js core + 常用语言注册，生成带语言标签和复制按钮的代码块
   - 代码块 HTML 结构: `.hljs-code-block` > `.code-block-header` (lang label + copy btn) + `code.hljs`
   - 复制按钮使用内联 onclick 调用 `navigator.clipboard.writeText`
   - 返回 `{ renderMarkdown }` 函数
@@ -32,13 +32,14 @@
   - 返回 `{ isAutoScroll, isNearBottom, scrollToBottom, onScroll }`
 
 ## 5. 依赖关系
-- 内部依赖: 无
-- 外部依赖: `vue` (ref, computed, onMounted, onUnmounted)、`markdown-it` (MarkdownIt)、`highlight.js` (hljs)
+- 内部依赖: `@/composables/highlight`
+- 外部依赖: `vue` (ref, computed, onMounted, onUnmounted)、`markdown-it` (MarkdownIt)、`highlight.js/lib/core`
 
 ## 6. 变更影响面
 - useMarkdown 修改影响 MessageBubble 和 TimelineEventItem 的消息渲染
 - useAutoScroll 修改影响 ChatPanel 的滚动行为
 - Markdown 渲染的 HTML 结构修改需同步 style.css 中的代码块样式
+- 高亮语言集合修改需同步 `highlight.ts`，避免重新引入完整 highlight.js 语言包
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
