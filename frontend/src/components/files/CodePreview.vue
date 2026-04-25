@@ -2,8 +2,8 @@
 import { computed } from 'vue'
 import { NButton, NIcon, NSpin } from 'naive-ui'
 import { CopyOutline } from '@vicons/ionicons5'
-import hljs from 'highlight.js'
 import { useI18n } from 'vue-i18n'
+import { escapeHtml, getHighlighter } from '@/composables/highlight'
 
 const props = withDefaults(defineProps<{
   path?: string
@@ -55,20 +55,12 @@ function languageForExt(ext: string): string {
   return map[ext] || ''
 }
 
-function escapeHtml(raw: string): string {
-  return raw
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
-
 const highlightedLines = computed(() => {
   const raw = props.content || ''
   if (!raw) return [] as string[]
 
   const lang = languageForExt(extension.value)
+  const hljs = getHighlighter()
   let highlighted = ''
 
   try {

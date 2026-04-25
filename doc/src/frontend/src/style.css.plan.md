@@ -18,9 +18,9 @@
 
 ## 4. 关键实现细节
 - **CSS 变量体系**:
-  - 背景层级: `--bg-deepest` (#080a14) → `--bg-base` (#0c0e1a) → `--bg-surface` (#141726) → `--bg-elevated` (#1a1d33) → `--bg-hover` (#1e2140)
+  - 背景层级: `--bg-deepest` (#020617) → `--bg-base` (#07111f) → `--bg-surface` (#0f172a) → `--bg-elevated` (#172033) → `--bg-raised` (#1e293b) → `--bg-hover` (#243044)
   - 文本层级: `--text-primary` → `--text-secondary` → `--text-muted` → `--text-faint`
-  - 强调色: cyan (#22d3ee)、amber (#f59e0b)、rose (#f43f5e)、emerald (#10b981)、blue (#3b82f6)
+  - 强调色: cyan (#22d3ee)、emerald (#22c55e)、amber (#f59e0b)、rose (#fb7185)、violet (#a78bfa)、blue (#60a5fa)
   - Agent 颜色系统: orchestrator (cyan)、code-writer (blue)、code-executor (purple)、file-manager (green)、default (amber)
   - 间距系统: xs (4px) → sm (8px) → md (16px) → lg (24px) → xl (32px)
   - 圆角系统: sm (6px) → md (8px) → lg (12px) → xl (16px)
@@ -28,7 +28,8 @@
 - **代码块样式**: `.hljs-code-block` 包含代码头部（语言标签 + 复制按钮）和 highlight.js 语法高亮色覆盖
 - **Markdown 样式**: `.markdown-body` 类定义了段落、链接、列表、行内代码、引用、标题、表格、分割线的样式
 - **动画**: fadeIn、pulse、blink、slideInLeft、slideInRight、shimmer（骨架屏）
-- **无障碍**: `:focus-visible` 焦点环、`prefers-reduced-motion` 减少动画支持
+- **工作台视觉**: `--gradient-workbench` 提供低干扰深色工作区背景，组件以边框、层级阴影和状态色承载信息密度。
+- **无障碍**: 全局 `:focus-visible` 焦点环、按钮 cursor 规则、禁用态 cursor、`prefers-reduced-motion` 减少动画支持。
 - **Wails 特性**: `.wails-drag` 类启用窗口拖拽区域
 
 ## 5. 依赖关系

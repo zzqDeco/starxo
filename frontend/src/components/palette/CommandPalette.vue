@@ -8,14 +8,17 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { SetMode } from '../../../wailsjs/go/service/ChatService'
 import {
   Add, Settings, SwapHorizontal, ChatbubbleEllipses, Flash, Power, Search, Close,
+  FolderOpen,
 } from '@vicons/ionicons5'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
   (e: 'open-settings'): void
+  (e: 'open-workspace'): void
 }>()
 
 const { t } = useI18n()
@@ -70,14 +73,28 @@ const baseCommands = computed<Command[]>(() => {
       run: () => emit('open-settings'),
     },
     {
+      id: 'open-workspace',
+      title: t('palette.openWorkspace'),
+      hint: t('workspace.drawerTitle'),
+      icon: FolderOpen,
+      group: 'action',
+      run: () => emit('open-workspace'),
+    },
+    {
       id: 'toggle-mode',
       title: chatStore.agentMode === 'plan' ? t('palette.switchToDefault') : t('palette.switchToPlan'),
       hint: t('chat.modeLabel'),
       icon: SwapHorizontal,
       group: 'mode',
-      run: () => {
+      run: async () => {
         const next = chatStore.agentMode === 'plan' ? 'default' : 'plan'
-        chatStore.setMode(next)
+        try {
+          await SetMode(next)
+          chatStore.setMode(next)
+          feedback.success(t('feedback.modeSwitched', { mode: next === 'plan' ? t('chat.modePlan') : t('chat.modeDefault') }))
+        } catch (e) {
+          feedback.error(t('feedback.actions.switchMode'), e)
+        }
       },
     },
   ]
@@ -274,8 +291,8 @@ function indexOf(cmd: Command): number {
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 16, 0.62);
-  backdrop-filter: blur(3px);
+  background: rgba(2, 6, 23, 0.68);
+  backdrop-filter: blur(8px);
   z-index: 2200;
   display: flex;
   align-items: flex-start;
@@ -288,9 +305,9 @@ function indexOf(cmd: Command): number {
   max-height: min(520px, 72vh);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--bg-surface) 94%, black);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   box-shadow: var(--elev-3);
   overflow: hidden;
 }
@@ -301,6 +318,7 @@ function indexOf(cmd: Command): number {
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
+  background: rgba(2, 6, 23, 0.42);
   flex-shrink: 0;
 }
 
@@ -374,7 +392,7 @@ function indexOf(cmd: Command): number {
 }
 
 .palette-item.active {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-hover));
   color: var(--text-primary);
 }
 

@@ -18,6 +18,11 @@
 ## 4. 关键配置项
 - **plugins**: `vue()` — @vitejs/plugin-vue，启用 Vue 3 SFC 支持
 - **resolve.alias**: `@` → `src/` 目录 — 路径别名，使用 `resolve(__dirname, 'src')` 计算绝对路径
+- **build.chunkSizeWarningLimit**: 650 — 当前 Naive UI vendor chunk 约 550KB，避免旧版 1.8MB 首包优化后仍被默认阈值误报。
+- **build.rollupOptions.output.manualChunks**:
+  - `vue`: Vue/Pinia/i18n/VueUse 基础运行时
+  - `naive`: Naive UI 与图标库
+  - `markdown`: markdown-it 与 highlight.js core
 
 ## 5. 依赖关系
 - 内部依赖: 无
@@ -27,6 +32,7 @@
 - 新增 Vite 插件影响构建管线
 - 修改路径别名需同步 tsconfig.json 中的 paths 配置
 - 构建配置变更影响 Wails 的前端构建流程
+- 手动分块会改变生产构建产物文件名和加载顺序，需通过 `npm run build` 回归验证
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

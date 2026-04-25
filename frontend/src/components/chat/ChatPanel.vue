@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
-import { NIcon, NButton, NButtonGroup, NTooltip } from 'naive-ui'
-import { ArrowDown } from '@vicons/ionicons5'
+import { NIcon } from 'naive-ui'
+import { ArrowDown, Terminal, FolderOpen, ShieldCheckmark } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chatStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useAutoScroll } from '@/composables/useHelpers'
@@ -128,58 +128,37 @@ onUnmounted(() => {
 
 <template>
   <div class="chat-panel">
-    <div class="mode-toolbar">
-      <span class="mode-label">{{ t('chat.modeLabel') }}</span>
-      <NButtonGroup size="tiny">
-        <NTooltip trigger="hover" placement="bottom">
-          <template #trigger>
-            <NButton
-              :type="currentMode === 'default' ? 'primary' : 'default'"
-              :disabled="chatStore.isStreaming || modeSwitching"
-              :loading="modeSwitching && currentMode !== 'default'"
-              @click="handleModeSwitch('default')"
-            >
-              {{ t('chat.modeDefault') }}
-            </NButton>
-          </template>
-          {{ t('chat.modeDefaultHint') }}
-        </NTooltip>
-        <NTooltip trigger="hover" placement="bottom">
-          <template #trigger>
-            <NButton
-              :type="currentMode === 'plan' ? 'primary' : 'default'"
-              :disabled="chatStore.isStreaming || modeSwitching"
-              :loading="modeSwitching && currentMode !== 'plan'"
-              @click="handleModeSwitch('plan')"
-            >
-              {{ t('chat.modePlan') }}
-            </NButton>
-          </template>
-          {{ t('chat.modePlanHint') }}
-        </NTooltip>
-      </NButtonGroup>
-    </div>
-
     <div
       ref="scrollContainer"
       class="messages-area"
       @scroll="onScroll"
     >
       <div v-if="!hasMessages" class="empty-state">
-        <div class="empty-icon-wrap">
-          <svg class="empty-icon-svg" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M24 4L28.9 18.1L44 20.3L33 30.5L35.8 44L24 37.1L12.2 44L15 30.5L4 20.3L19.1 18.1L24 4Z"
-              stroke="currentColor" stroke-width="2" fill="none" opacity="0.6" />
-            <circle cx="24" cy="24" r="8" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.4" />
-          </svg>
+        <div class="empty-kicker">
+          <span :class="['empty-status-dot', connectionStore.isReady ? 'ready' : 'offline']"></span>
+          {{ connectionStore.isReady ? t('chat.sandboxReady') : t('chat.sandboxRequired') }}
         </div>
-        <h2 class="empty-title">{{ t('chat.title') }}</h2>
+        <h2 class="empty-title">{{ t('chat.workbenchTitle') }}</h2>
         <p class="empty-subtitle">
           {{ connectionStore.isReady
             ? t('chat.emptyConnected')
             : t('chat.emptyDisconnected')
           }}
         </p>
+        <div class="empty-capabilities" :aria-label="t('chat.capabilitiesLabel')">
+          <div class="capability-item">
+            <NIcon size="16"><Terminal /></NIcon>
+            <span>{{ t('chat.capabilityRuntime') }}</span>
+          </div>
+          <div class="capability-item">
+            <NIcon size="16"><FolderOpen /></NIcon>
+            <span>{{ t('chat.capabilityWorkspace') }}</span>
+          </div>
+          <div class="capability-item">
+            <NIcon size="16"><ShieldCheckmark /></NIcon>
+            <span>{{ t('chat.capabilityIsolation') }}</span>
+          </div>
+        </div>
         <div class="empty-hints">
           <button class="hint-card" @click="handleHintClick('chat.hint1')">{{ t('chat.hint1') }}</button>
           <button class="hint-card" @click="handleHintClick('chat.hint2')">{{ t('chat.hint2') }}</button>
@@ -227,8 +206,11 @@ onUnmounted(() => {
 
         <InputArea
           :is-streaming="chatStore.isStreaming"
+          :agent-mode="currentMode"
+          :mode-switching="modeSwitching"
           @send="handleSend"
           @stop="handleStop"
+          @switch-mode="handleModeSwitch"
         />
       </div>
     </div>
@@ -240,28 +222,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-base);
+  background: transparent;
   position: relative;
-  --chat-content-max-width: 760px;
+  --chat-content-max-width: 820px;
   --chat-content-padding: var(--space-xl);
-}
-
-.mode-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-sm) var(--chat-content-padding) 0;
-  max-width: var(--chat-content-max-width);
-  width: 100%;
-  margin: 0 auto;
-}
-
-.mode-label {
-  font-size: var(--fs-2xs);
-  color: var(--text-faint);
-  font-family: var(--font-brand);
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
 }
 
 .messages-area {
@@ -291,18 +255,38 @@ onUnmounted(() => {
   animation: fadeIn 600ms ease both;
 }
 
-.empty-icon-wrap {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 16px;
-  color: var(--accent-cyan);
-  filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.3));
-  animation: pulse 3s ease-in-out infinite;
+.empty-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+  padding: 5px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: rgba(2, 6, 23, 0.55);
+  color: var(--text-muted);
+  font-family: var(--font-brand);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
-.empty-icon-svg {
-  width: 100%;
-  height: 100%;
+.empty-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.empty-status-dot.ready {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.42);
+}
+
+.empty-status-dot.offline {
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.35);
 }
 
 .empty-title {
@@ -317,8 +301,30 @@ onUnmounted(() => {
 .empty-subtitle {
   font-size: var(--fs-md);
   color: var(--text-muted);
-  margin: 0 0 var(--space-2xl) 0;
-  max-width: 420px;
+  margin: 0 0 var(--space-xl) 0;
+  max-width: 520px;
+}
+
+.empty-capabilities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  width: min(620px, 100%);
+  margin-bottom: var(--space-xl);
+}
+
+.capability-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  min-height: 40px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.72);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
 }
 
 .empty-hints {
@@ -331,7 +337,7 @@ onUnmounted(() => {
 
 .hint-card {
   padding: var(--space-md) var(--space-lg);
-  background: var(--bg-surface);
+  background: rgba(15, 23, 42, 0.84);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
@@ -339,7 +345,7 @@ onUnmounted(() => {
   font-family: var(--font-sans);
   cursor: pointer;
   transition: border-color var(--transition-ui), color var(--transition-ui),
-    background var(--transition-ui), transform var(--transition-ui),
+    background var(--transition-ui),
     box-shadow var(--transition-ui);
 }
 
@@ -347,7 +353,6 @@ onUnmounted(() => {
   border-color: var(--accent-cyan-dim);
   color: var(--text-primary);
   background: var(--bg-elevated);
-  transform: translateY(-1px);
   box-shadow: var(--shadow-cyan);
 }
 
@@ -399,7 +404,8 @@ onUnmounted(() => {
 .bottom-area {
   flex-shrink: 0;
   border-top: 1px solid var(--border-subtle);
-  background: linear-gradient(180deg, rgba(15, 17, 34, 0.78) 0%, rgba(15, 17, 34, 0.96) 100%);
+  background: linear-gradient(180deg, rgba(7, 17, 31, 0.76) 0%, rgba(2, 6, 23, 0.96) 100%);
+  backdrop-filter: blur(14px);
 }
 
 .bottom-stack {
@@ -410,5 +416,15 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .chat-panel {
+    --chat-content-padding: var(--space-md);
+  }
+
+  .empty-capabilities {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
