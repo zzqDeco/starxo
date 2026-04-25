@@ -9,7 +9,7 @@
 
 ## 2. 核心职责
 - 聊天主容器，负责消息流渲染、发送/停止、模式切换、自动滚动和中断交互。
-- 在底部区域组合“任务浮层 + 输入框”，统一与消息区栅格对齐。
+- 作为工作台中央执行画布，在底部区域组合“任务浮层 + composer”，统一与消息区栅格对齐。
 
 ## 3. 输入与输出
 - 输入来源: `chatStore`、`connectionStore`、Wails ChatService
@@ -22,16 +22,16 @@
 - 消息区:
   - `visibleMessages` 渲染 `MessageBubble`
   - `AgentStatus` 在流式时显示
-  - 空状态提供快捷提示卡片（点击可直接发送）
+- 空状态显示沙箱就绪/待连接状态、运行时/工作区/隔离能力摘要，以及快捷提示卡片（点击可直接发送）
 - 底部区:
   - `InterruptDialog`
   - `TaskRailFloating`（任务摘要浮层）
-  - `InputArea`
+  - `InputArea`（接收当前 agent 模式和切换 loading 状态，模式切换入口已下沉到 composer）
 - 自动滚动:
   - 使用 `useAutoScroll`
   - 通过 `ResizeObserver` 动态计算“回到底部”按钮偏移
 - 栅格对齐:
-  - `--chat-content-max-width` 与 `--chat-content-padding` 统一控制消息区/模式栏/底部区对齐
+  - `--chat-content-max-width` 与 `--chat-content-padding` 统一控制消息区/底部区对齐
 
 ## 5. 依赖关系
 - 内部依赖:
@@ -44,6 +44,7 @@
 
 ## 6. 变更影响面
 - 旧的 `PlanPanel` 与持久 `TodoBoard` 从聊天主流中移除。
+- 模式切换入口从顶部工具条移动到 composer，减少消息流上方的固定占用。
 - 任务信息改为输入区上方浮层，减少消息区视觉干扰。
 
 ## 7. 维护建议

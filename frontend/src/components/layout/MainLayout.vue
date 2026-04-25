@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import { useWindowSize } from '@vueuse/core'
 import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -8,13 +8,14 @@ import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import SplitHandle from './SplitHandle.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
-import WorkspaceDrawer from '@/components/files/WorkspaceDrawer.vue'
-import ContainerDock from '@/components/containers/ContainerDock.vue'
-import SettingsPanel from '@/components/settings/SettingsPanel.vue'
-import CommandPalette from '@/components/palette/CommandPalette.vue'
 import { useKeybinds } from '@/composables/useKeybinds'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+
+const WorkspaceDrawer = defineAsyncComponent(() => import('@/components/files/WorkspaceDrawer.vue'))
+const ContainerDock = defineAsyncComponent(() => import('@/components/containers/ContainerDock.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
+const CommandPalette = defineAsyncComponent(() => import('@/components/palette/CommandPalette.vue'))
 
 const { t } = useI18n()
 const sessionStore = useSessionStore()
@@ -109,12 +110,20 @@ function toggleWorkspaceDrawer() {
   showWorkspaceDrawer.value = !showWorkspaceDrawer.value
 }
 
+function openWorkspaceDrawer() {
+  showWorkspaceDrawer.value = true
+}
+
 function toggleMobileSidebar() {
   showMobileSidebar.value = !showMobileSidebar.value
 }
 
 function toggleResponsiveDock() {
   showResponsiveDock.value = !showResponsiveDock.value
+}
+
+function openCommandPalette() {
+  showPalette.value = true
 }
 </script>
 
@@ -142,6 +151,7 @@ function toggleResponsiveDock() {
       <Header
         @toggle-settings="toggleSettings"
         @toggle-workspace-drawer="toggleWorkspaceDrawer"
+        @open-command-palette="openCommandPalette"
         :workspace-drawer-visible="showWorkspaceDrawer"
       />
 
@@ -219,7 +229,11 @@ function toggleResponsiveDock() {
   </div>
 
   <SettingsPanel v-model:show="showSettings" />
-  <CommandPalette v-model:show="showPalette" @open-settings="showSettings = true" />
+  <CommandPalette
+    v-model:show="showPalette"
+    @open-settings="showSettings = true"
+    @open-workspace="openWorkspaceDrawer"
+  />
 </template>
 
 <style scoped>
@@ -228,7 +242,7 @@ function toggleResponsiveDock() {
   height: 100vh;
   width: 100vw;
   max-width: 100vw;
-  background: var(--bg-base);
+  background: var(--gradient-workbench);
   overflow: hidden;
   position: relative;
 }
@@ -252,7 +266,7 @@ function toggleResponsiveDock() {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 92%, black);
   border-right: 1px solid var(--border-subtle);
   flex-shrink: 0;
   overflow: hidden;
@@ -263,7 +277,7 @@ function toggleResponsiveDock() {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--bg-base);
+  background: transparent;
   position: relative;
 }
 
@@ -272,6 +286,8 @@ function toggleResponsiveDock() {
   display: flex;
   min-height: 0;
   overflow: hidden;
+  padding: 10px 10px 10px 0;
+  gap: 0;
 }
 
 .chat-shell {
@@ -280,6 +296,10 @@ function toggleResponsiveDock() {
   min-height: 0;
   position: relative;
   overflow: hidden;
+  background: color-mix(in srgb, var(--bg-base) 88%, black);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1);
 }
 
 .chat-area {
@@ -289,10 +309,13 @@ function toggleResponsiveDock() {
 
 .container-dock {
   height: 100%;
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 94%, black);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1);
   flex-shrink: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .responsive-dock,

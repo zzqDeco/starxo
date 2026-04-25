@@ -25,23 +25,23 @@ const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#22d3ee',
     primaryColorHover: '#67e8f9',
-    primaryColorPressed: '#06b6d4',
+    primaryColorPressed: '#0891b2',
     primaryColorSuppl: '#22d3ee',
-    bodyColor: '#0c0e1a',
-    cardColor: '#141726',
-    modalColor: '#141726',
-    popoverColor: '#1a1d33',
-    tableColor: '#141726',
-    inputColor: '#0f1122',
-    actionColor: '#0f1122',
-    tagColor: '#1a1d33',
-    borderColor: '#2a2d45',
-    dividerColor: '#2a2d45',
-    hoverColor: '#1e2140',
-    textColor1: '#f0f0f5',
-    textColor2: '#c8c9d6',
-    textColor3: '#8b8da3',
-    placeholderColor: '#5a5c72',
+    bodyColor: '#07111f',
+    cardColor: '#0f172a',
+    modalColor: '#0f172a',
+    popoverColor: '#172033',
+    tableColor: '#0f172a',
+    inputColor: '#020617',
+    actionColor: '#172033',
+    tagColor: '#172033',
+    borderColor: '#263348',
+    dividerColor: '#263348',
+    hoverColor: '#243044',
+    textColor1: '#f8fafc',
+    textColor2: '#d9e2ef',
+    textColor3: '#94a3b8',
+    placeholderColor: '#64748b',
     fontFamily: '"Nunito", "Segoe UI", system-ui, sans-serif',
     fontFamilyMono: '"JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace'
   },
@@ -54,10 +54,10 @@ const themeOverrides: GlobalThemeOverrides = {
     borderRadius: '8px'
   },
   Card: {
-    borderRadius: '12px'
+    borderRadius: '8px'
   },
   Modal: {
-    borderRadius: '16px'
+    borderRadius: '10px'
   },
   Tag: {
     borderRadius: '6px'

@@ -17,6 +17,8 @@ export default {
     showPanel: 'Show panel',
     workspaceOpen: 'Open workspace drawer',
     workspaceClose: 'Close workspace drawer',
+    commandPalette: 'Open command palette',
+    commandPlaceholder: 'Search commands, sessions, and workspace',
     settings: 'Settings',
     hideContainers: 'Hide containers',
     showContainers: 'Show containers',
@@ -44,6 +46,13 @@ export default {
   },
   chat: {
     title: 'Starxo',
+    workbenchTitle: 'AI Coding Workbench',
+    sandboxReady: 'Sandbox ready',
+    sandboxRequired: 'Sandbox required',
+    capabilitiesLabel: 'Workbench capabilities',
+    capabilityRuntime: 'Runtime',
+    capabilityWorkspace: 'Workspace',
+    capabilityIsolation: 'Isolated sandbox',
     emptyConnected: 'Connected and ready. Describe a task to get started.',
     emptyDisconnected: 'Connect to your sandbox to start coding.',
     modeLabel: 'Mode',
@@ -282,6 +291,7 @@ export default {
     close: 'close',
     newSession: 'New session',
     openSettings: 'Open settings',
+    openWorkspace: 'Open workspace',
     switchToPlan: 'Switch to Plan mode',
     switchToDefault: 'Switch to Default mode',
     connectSSH: 'Connect SSH',
@@ -316,4 +326,3 @@ export default {
     sshReadyHint: 'SSH connected — click "New Container" to start',
   },
 }
-

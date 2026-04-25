@@ -17,6 +17,7 @@
 ## 4. 关键实现细节
 - 语言识别:
   - 按文件扩展名映射到 highlight.js 语言
+  - 通过 `getHighlighter()` 复用 highlight.js core 与常用语言注册
 - 渲染策略:
   - 先高亮（或 HTML 转义兜底）再按行切分
   - 使用双列表格渲染：左侧行号，右侧代码
@@ -29,7 +30,8 @@
 - 外部依赖:
   - `vue`
   - `naive-ui`
-  - `highlight.js`
+  - `@/composables/highlight`
+  - `highlight.js/lib/core`
   - `@vicons/ionicons5`
   - `vue-i18n`
 
