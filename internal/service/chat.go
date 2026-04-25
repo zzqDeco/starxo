@@ -1238,6 +1238,7 @@ func (s *ChatService) SetMode(mode string) error {
 			SessionID: sessionID,
 		})
 	}
+	s.emitRunState(sessionID)
 	if sessionSvc != nil && sessionID != "" {
 		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
 			logger.Warn("[CHAT] Failed to schedule mode save", "session", sessionID, "error", err)
@@ -1275,6 +1276,38 @@ func (s *ChatService) IsSessionRunning(sessionID string) bool {
 	defer s.mu.Unlock()
 	run, ok := s.sessions[sessionID]
 	return ok && run.running
+}
+
+func (s *ChatService) runStateEventLocked(sessionID string) (RunStateEvent, bool) {
+	run, ok := s.sessions[sessionID]
+	if !ok {
+		return RunStateEvent{}, false
+	}
+	mode := run.mode
+	if mode == "" {
+		mode = model.ModeDefault
+	}
+	return RunStateEvent{
+		SessionID:    sessionID,
+		Running:      run.running || run.starting,
+		CurrentAgent: run.currentAgent,
+		Mode:         mode,
+		HasInterrupt: run.pendingInterrupt != nil,
+	}, true
+}
+
+func (s *ChatService) emitRunState(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	evt, ok := s.runStateEventLocked(sessionID)
+	ctx := s.ctx
+	s.mu.Unlock()
+	if !ok || ctx == nil || ctx.Value("events") == nil {
+		return
+	}
+	wailsruntime.EventsEmit(ctx, "agent:run_state", evt)
 }
 
 // WaitForSessionDone waits for a specific session's agent run to complete.
@@ -1359,6 +1392,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	run.cancelFn = startCancel
 	run.startDone = make(chan struct{})
 	s.mu.Unlock()
+	s.emitRunState(sessionID)
 
 	bundle, err := s.ensureBundleReadyForNewRun(startCtx, sessionID)
 	if err != nil {
@@ -1366,6 +1400,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		s.mu.Lock()
 		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
+		s.emitRunState(sessionID)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
@@ -1381,6 +1416,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		s.mu.Lock()
 		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
+		s.emitRunState(sessionID)
 		return nil
 	}
 
@@ -1391,6 +1427,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		s.mu.Lock()
 		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
+		s.emitRunState(sessionID)
 		return fmt.Errorf("runner %s unavailable for bundle generation %d", runnerKind, bundle.Generation)
 	}
 
@@ -1403,6 +1440,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		s.finalizeStartupLocked(sessionID)
 		s.mu.Unlock()
 		cancel()
+		s.emitRunState(sessionID)
 		return nil
 	}
 	done := make(chan struct{})
@@ -1416,6 +1454,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		}
 		return err
 	}
+	s.emitRunState(sessionID)
 	startCancel()
 
 	// Prepare messages
@@ -1429,10 +1468,12 @@ func (s *ChatService) SendMessage(userMessage string) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			run.currentAgent = ""
 			run.activeBundleGeneration = 0
 			run.activeRunnerKind = ""
 			s.cleanupRetiredBundlesLocked()
 			s.mu.Unlock()
+			s.emitRunState(sessionID)
 		}()
 		defer cancel()
 		defer func() {
@@ -1499,6 +1540,18 @@ func (s *ChatService) SendMessage(userMessage string) error {
 func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 	evt.SessionID = run.sessionID
 	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	if evt.Agent != "" {
+		agentChanged := false
+		s.mu.Lock()
+		if current, ok := s.sessions[run.sessionID]; ok && current.currentAgent != evt.Agent {
+			current.currentAgent = evt.Agent
+			agentChanged = true
+		}
+		s.mu.Unlock()
+		if agentChanged {
+			s.emitRunState(run.sessionID)
+		}
+	}
 	run.stateMu.Lock()
 	defer run.stateMu.Unlock()
 	run.timeline.AddEvent(model.DisplayEvent{
@@ -1522,6 +1575,18 @@ func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
 	if ok {
+		agentChanged := false
+		if evt.Agent != "" {
+			s.mu.Lock()
+			if current, exists := s.sessions[sessionID]; exists && current.currentAgent != evt.Agent {
+				current.currentAgent = evt.Agent
+				agentChanged = true
+			}
+			s.mu.Unlock()
+		}
+		if agentChanged {
+			s.emitRunState(sessionID)
+		}
 		run.stateMu.Lock()
 		defer run.stateMu.Unlock()
 		run.timeline.AddEvent(model.DisplayEvent{
@@ -1788,6 +1853,7 @@ func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, chec
 	run.activeBundleGeneration = 0
 	run.activeRunnerKind = ""
 	s.mu.Unlock()
+	s.emitRunState(run.sessionID)
 
 	// Determine interrupt type and emit event
 	var evt InterruptEvent
@@ -1892,6 +1958,7 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 	done := make(chan struct{})
 	run.runDone = done
 	s.mu.Unlock()
+	s.emitRunState(sessionID)
 
 	go func() {
 		defer close(done)
@@ -1899,10 +1966,12 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			run.currentAgent = ""
 			run.activeBundleGeneration = 0
 			run.activeRunnerKind = ""
 			s.cleanupRetiredBundlesLocked()
 			s.mu.Unlock()
+			s.emitRunState(sessionID)
 		}()
 		defer cancel()
 		defer func() {
@@ -2010,6 +2079,7 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 	done := make(chan struct{})
 	run.runDone = done
 	s.mu.Unlock()
+	s.emitRunState(sessionID)
 
 	go func() {
 		defer close(done)
@@ -2017,10 +2087,12 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 			s.mu.Lock()
 			run.running = false
 			run.cancelFn = nil
+			run.currentAgent = ""
 			run.activeBundleGeneration = 0
 			run.activeRunnerKind = ""
 			s.cleanupRetiredBundlesLocked()
 			s.mu.Unlock()
+			s.emitRunState(sessionID)
 		}()
 		defer cancel()
 		defer func() {
@@ -2112,7 +2184,14 @@ func (s *ChatService) StopGeneration() error {
 		return nil
 	}
 	if !run.running {
+		sessionID := run.sessionID
+		hadInterrupt := run.pendingInterrupt != nil
+		run.pendingInterrupt = nil
+		s.cleanupRetiredBundlesLocked()
 		s.mu.Unlock()
+		if hadInterrupt {
+			s.emitRunState(sessionID)
+		}
 		return nil
 	}
 	if run.cancelFn != nil {

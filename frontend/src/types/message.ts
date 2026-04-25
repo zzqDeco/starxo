@@ -68,3 +68,11 @@ export interface ModeChangedEvent {
   mode: 'default' | 'plan'
   sessionId?: string
 }
+
+export interface SessionRunState {
+  sessionId: string
+  running: boolean
+  currentAgent?: string
+  mode: 'default' | 'plan'
+  hasInterrupt: boolean
+}

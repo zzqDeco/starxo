@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Message, TurnEvent, InterruptEvent, PlanStepDTO } from '@/types/message'
+import type { Message, TurnEvent, InterruptEvent, PlanStepDTO, SessionRunState } from '@/types/message'
 
 export interface TodoItem {
   id: string
@@ -32,6 +32,7 @@ export const useChatStore = defineStore('chat', () => {
   const currentAgent = ref('')
   const agentDone = ref(false)
   const activeTurnId = ref<string | null>(null)
+  const sessionRunStates = ref<Record<string, SessionRunState>>({})
 
   // Interrupt state
   const pendingInterrupt = ref<InterruptEvent | null>(null)
@@ -259,6 +260,23 @@ export const useChatStore = defineStore('chat', () => {
     agentMode.value = mode
   }
 
+  function setSessionRunState(state: SessionRunState) {
+    if (!state?.sessionId) return
+    sessionRunStates.value = {
+      ...sessionRunStates.value,
+      [state.sessionId]: {
+        ...state,
+        mode: state.mode === 'plan' ? 'plan' : 'default',
+        running: !!state.running,
+        hasInterrupt: !!state.hasInterrupt
+      }
+    }
+  }
+
+  function getSessionRunState(sessionId: string) {
+    return sessionRunStates.value[sessionId] || null
+  }
+
   function setGenerating(generating: boolean, agent?: string) {
     if (generating) {
       agentDone.value = false
@@ -315,6 +333,7 @@ export const useChatStore = defineStore('chat', () => {
     agentDone,
     activeTurnId,
     pendingInterrupt,
+    sessionRunStates,
     agentMode,
     planSteps,
     lastMessage,
@@ -330,6 +349,8 @@ export const useChatStore = defineStore('chat', () => {
     clearInterrupt,
     updatePlanSteps,
     setMode,
+    setSessionRunState,
+    getSessionRunState,
     setGenerating,
     clearMessages,
     restoreTodosFromMessages

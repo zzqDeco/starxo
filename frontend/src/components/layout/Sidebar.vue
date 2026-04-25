@@ -112,6 +112,26 @@ function containerStatusDot(status?: string) {
     default: return 'dot-grey'
   }
 }
+
+function runStateFor(sessionId: string) {
+  return chatStore.getSessionRunState(sessionId)
+}
+
+function runStateLabel(sessionId: string) {
+  const state = runStateFor(sessionId)
+  if (!state) return ''
+  if (state.hasInterrupt) return t('sidebar.waitingInput')
+  if (state.running) return state.currentAgent || t('sidebar.agentRunning')
+  return state.mode === 'plan' ? t('sidebar.modePlanShort') : t('sidebar.modeDefaultShort')
+}
+
+function runStateClass(sessionId: string) {
+  const state = runStateFor(sessionId)
+  if (!state) return 'idle'
+  if (state.hasInterrupt) return 'waiting'
+  if (state.running) return 'running'
+  return state.mode === 'plan' ? 'plan' : 'idle'
+}
 </script>
 
 <template>
@@ -193,6 +213,13 @@ function containerStatusDot(status?: string) {
               <span v-if="sess.containers && sess.containers.length > 1" class="container-count">+{{ sess.containers.length - 1 }}</span>
             </span>
             <span v-else class="no-container-hint">{{ t('sidebar.noContainer') }}</span>
+            <span
+              v-if="runStateFor(sess.id)"
+              :class="['session-run-badge', runStateClass(sess.id)]"
+            >
+              <span class="run-pulse" aria-hidden="true"></span>
+              {{ runStateLabel(sess.id) }}
+            </span>
           </template>
         </div>
         <!-- Session dropdown menu -->
@@ -502,6 +529,51 @@ function containerStatusDot(status?: string) {
   color: var(--text-faint);
   font-style: italic;
   margin-top: 2px;
+}
+
+.session-run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: rgba(2, 6, 23, 0.58);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  line-height: 1.2;
+}
+
+.session-run-badge.running {
+  color: var(--accent-cyan);
+  border-color: rgba(34, 211, 238, 0.28);
+}
+
+.session-run-badge.waiting {
+  color: var(--accent-amber);
+  border-color: rgba(245, 158, 11, 0.32);
+}
+
+.session-run-badge.plan {
+  color: var(--accent-violet);
+  border-color: rgba(167, 139, 250, 0.28);
+}
+
+.run-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.session-run-badge.running .run-pulse,
+.session-run-badge.waiting .run-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 /* Dot system */

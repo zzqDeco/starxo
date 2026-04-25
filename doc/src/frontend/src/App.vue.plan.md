@@ -15,7 +15,7 @@
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: Wails 事件（session:switched, ssh:progress, ssh:connected, ssh:disconnected, container:progress, container:ready, container:activated, container:deactivated, agent:timeline, agent:done, agent:error, agent:interrupt, agent:mode_changed）
+- 输入来源: Wails 事件（session:switched, ssh:progress, ssh:connected, ssh:disconnected, container:progress, container:ready, container:activated, container:deactivated, agent:timeline, agent:done, agent:error, agent:interrupt, agent:mode_changed, agent:run_state）
 - 输出结果: 渲染 NConfigProvider 包裹的 MainLayout 组件；将 Wails 事件数据分发到对应 Store
 
 ## 4. 关键实现细节
@@ -42,6 +42,7 @@
   - `agent:error` -> **过滤 sessionId**（接收对象，含 sessionId + error），仅处理活跃会话事件
   - `agent:interrupt` -> **过滤 sessionId**，仅处理活跃会话中断
   - `agent:mode_changed` -> **过滤 sessionId**，仅处理活跃会话模式变更
+  - `agent:run_state` -> 写入 `chatStore.sessionRunStates`；若属于活跃会话，同步 mode 和 generating 状态
 - **会话恢复 (`restoreActiveMessages`)**:
   - 优先通过 `sessionStore.loadSessionData()` 从后端 `session_data.json` 加载统一的 display 数据
   - 如有 `streaming` 中途状态，追加 `[streaming interrupted]` 标记的不完整消息

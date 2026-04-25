@@ -3,11 +3,12 @@ import { computed, ref } from 'vue'
 import { NIcon, NButton } from 'naive-ui'
 import {
   Build, CheckmarkCircle, Reload, InformationCircle, AlertCircle,
-  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle
+  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle, FolderOpen
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
 import { useI18n } from 'vue-i18n'
+import { openWorkspacePath } from '@/composables/useWorkspaceBridge'
 
 const { t } = useI18n()
 
@@ -291,6 +292,12 @@ const statusLabel = computed(() => {
   if (toolStatus.value === 'error') return t('taskRail.failed')
   return t('taskRail.done')
 })
+
+const canOpenWorkspacePath = computed(() => {
+  const category = toolInfo.value.category
+  const path = toolInfo.value.primary || ''
+  return (category === 'file' || category === 'edit') && path.startsWith('/')
+})
 </script>
 
 <template>
@@ -311,12 +318,15 @@ const statusLabel = computed(() => {
     <!-- Tool call event -->
     <template v-else-if="event.type === 'tool_call'">
       <div class="event-tool-call">
-        <button
-          type="button"
+        <div
           class="tool-strip"
           :class="[`tool-strip-${toolInfo.category}`, { expandable: hasDetails }]"
+          :role="hasDetails ? 'button' : undefined"
+          :tabindex="hasDetails ? 0 : -1"
           :aria-expanded="expanded"
           @click="toggleExpanded"
+          @keydown.enter.prevent="toggleExpanded"
+          @keydown.space.prevent="toggleExpanded"
         >
           <NIcon size="13" :style="{ color: toolInfo.color }">
             <DocumentText v-if="toolInfo.category === 'file'" />
@@ -329,6 +339,15 @@ const statusLabel = computed(() => {
           <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
           <span class="tool-strip-primary" :title="toolInfo.primary">{{ toolInfo.primary }}</span>
           <span v-if="toolInfo.secondary" class="tool-strip-secondary">{{ toolInfo.secondary }}</span>
+          <button
+            v-if="canOpenWorkspacePath"
+            type="button"
+            class="tool-open-path"
+            :aria-label="t('workspace.openFile')"
+            @click.stop="openWorkspacePath(toolInfo.primary)"
+          >
+            <NIcon size="12"><FolderOpen /></NIcon>
+          </button>
           <span class="tool-status-pill" :class="`status-${toolStatus}`">
             <NIcon size="11" class="status-pill-icon">
               <CheckmarkCircle v-if="toolStatus === 'done'" />
@@ -340,7 +359,7 @@ const statusLabel = computed(() => {
           <span v-if="hasDetails" class="tool-strip-chevron" :class="{ expanded }">
             <NIcon size="11"><ChevronForward /></NIcon>
           </span>
-        </button>
+        </div>
 
         <transition name="expand">
           <div v-if="expanded && hasDetails" class="tool-call-body">
@@ -560,6 +579,27 @@ const statusLabel = computed(() => {
   font-family: var(--font-mono);
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.tool-open-path {
+  width: 24px;
+  height: 22px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deepest);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--transition-ui), background var(--transition-ui), border-color var(--transition-ui);
+}
+
+.tool-open-path:hover,
+.tool-open-path:focus-visible {
+  color: var(--accent-cyan);
+  background: var(--bg-hover);
+  border-color: var(--accent-cyan-dim);
 }
 
 .tool-strip-chevron {

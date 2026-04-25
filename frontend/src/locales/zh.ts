@@ -43,6 +43,10 @@ export default {
     untitled: '未命名会话',
     noSessions: '暂无会话',
     noContainer: '无容器',
+    waitingInput: '等待输入',
+    agentRunning: 'Agent 运行中',
+    modeDefaultShort: '默认',
+    modePlanShort: '计划',
   },
   chat: {
     title: 'Starxo',
@@ -174,6 +178,7 @@ export default {
     download: '下载',
     refresh: '刷新',
     noFiles: '暂无文件',
+    openFile: '在工作区打开文件',
   },
   codePreview: {
     noFileSelected: '未选择文件',
@@ -281,6 +286,12 @@ export default {
     terminal: '终端',
     files: '文件',
     containers: '容器',
+  },
+  runtime: {
+    title: '运行时',
+    containers: '容器',
+    terminal: '终端',
+    noActiveContainer: '未激活容器',
   },
   palette: {
     title: '命令面板',

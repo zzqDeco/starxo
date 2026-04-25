@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import { useWindowSize } from '@vueuse/core'
 import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -11,6 +11,7 @@ import ChatPanel from '@/components/chat/ChatPanel.vue'
 import { useKeybinds } from '@/composables/useKeybinds'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 
 const WorkspaceDrawer = defineAsyncComponent(() => import('@/components/files/WorkspaceDrawer.vue'))
 const ContainerDock = defineAsyncComponent(() => import('@/components/containers/ContainerDock.vue'))
@@ -125,6 +126,17 @@ function toggleResponsiveDock() {
 function openCommandPalette() {
   showPalette.value = true
 }
+
+let stopWorkspaceBridge: (() => void) | null = null
+onMounted(() => {
+  stopWorkspaceBridge = onWorkspaceOpenPath(() => {
+    showWorkspaceDrawer.value = true
+  })
+})
+
+onUnmounted(() => {
+  stopWorkspaceBridge?.()
+})
 </script>
 
 <template>

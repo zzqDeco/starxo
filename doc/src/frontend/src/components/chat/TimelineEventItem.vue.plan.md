@@ -22,6 +22,7 @@
   - `action`（动作）
   - `primary`（主信息，如路径/命令）
   - `secondary`（辅助信息，如退出码/行数）
+- 文件/编辑类工具若 `primary` 是容器绝对路径，会显示工作区打开按钮，调用 `openWorkspacePath(path)` 打开抽屉并预览文件。
 - 结果处理:
   - toolResult 超过 500 字符默认截断，可手动展开
 - todo 工具策略:
@@ -34,11 +35,13 @@
 - 内部依赖:
   - `@/types/message` (`TurnEvent`)
   - `@/composables/useHelpers` (`useMarkdown`)
+  - `@/composables/useWorkspaceBridge`
 - 外部依赖:
   - `vue`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
 
 ## 6. 变更影响面
 - 时间线中 todo 工具的可视形态由“详情组件”改为“摘要条”，减少视觉堆叠。
+- 文件路径可以从时间线跳转到 WorkspacePanel，提高工具事件与文件预览的联动。
 
 ## 7. 维护建议
 - 新增工具名时在 `toolInfo` 中显式分类，避免落入 `other` 丢失语义。

@@ -10,7 +10,7 @@ import { useContainerStore } from '@/stores/containerStore'
 import { GetMode } from '../wailsjs/go/service/ChatService'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
-import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent } from '@/types/message'
+import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent, SessionRunState } from '@/types/message'
 
 const settingsStore = useSettingsStore()
 const connectionStore = useConnectionStore()
@@ -187,6 +187,13 @@ onMounted(async () => {
 
       // 2. Sync running state → input box enabled/disabled
       chatStore.setGenerating(data.agentRunning || false, data.currentAgent || '')
+      chatStore.setSessionRunState({
+        sessionId: data.session.id,
+        running: data.agentRunning || false,
+        currentAgent: data.currentAgent || '',
+        mode: data.mode === 'plan' ? 'plan' : 'default',
+        hasInterrupt: data.hasInterrupt || false,
+      })
 
       // 3. Sync agent mode
       if (data.mode) {
@@ -300,6 +307,15 @@ onMounted(async () => {
   EventsOn('agent:mode_changed', (data: ModeChangedEvent) => {
     if (!data?.mode || !isActiveSession(data)) return
     chatStore.setMode(data.mode)
+  })
+
+  // Session-level run state stream — used by session rail and active composer.
+  EventsOn('agent:run_state', (data: SessionRunState) => {
+    if (!data?.sessionId) return
+    chatStore.setSessionRunState(data)
+    if (!isActiveSession(data)) return
+    chatStore.setMode(data.mode)
+    chatStore.setGenerating(data.running, data.currentAgent || '')
   })
 })
 </script>

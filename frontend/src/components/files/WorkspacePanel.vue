@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NEmpty, NIcon, NInput, NSpin, NTree, type TreeOption } from 'naive-ui'
 import { CloudDownload, CloudUpload, Refresh, Search } from '@vicons/ionicons5'
 import type { FileInfo } from '@/types/config'
@@ -8,6 +8,7 @@ import FileTransfer from './FileTransfer.vue'
 import CodePreview from './CodePreview.vue'
 import { DownloadFile, ListWorkspaceFiles, ReadFilePreview } from '../../../wailsjs/go/service/FileService'
 import { useI18n } from 'vue-i18n'
+import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -147,8 +148,31 @@ function openUpload() {
   showTransfer.value = true
 }
 
-onMounted(() => {
-  refreshFiles()
+async function openPath(path: string) {
+  if (!path) return
+  if (files.value.length === 0) {
+    await refreshFiles()
+  }
+  selectedPath.value = path
+  previewContent.value = ''
+  loadPreview(path)
+}
+
+let stopWorkspaceBridge: (() => void) | null = null
+
+onMounted(async () => {
+  await refreshFiles()
+  const pending = consumePendingWorkspacePath()
+  if (pending) {
+    await openPath(pending)
+  }
+  stopWorkspaceBridge = onWorkspaceOpenPath((path) => {
+    openPath(path)
+  })
+})
+
+onUnmounted(() => {
+  stopWorkspaceBridge?.()
 })
 </script>
 
