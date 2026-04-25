@@ -22,8 +22,10 @@
   - `header.workspaceOpen`, `header.workspaceClose`
   - `header.commandPalette`, `header.commandPlaceholder`
   - `chat.workbenchTitle`, `chat.sandboxReady`, `chat.sandboxRequired`, `chat.capability*`
+  - `sidebar.waitingInput`, `sidebar.agentRunning`, `sidebar.mode*Short`
+  - `runtime.*`
   - `taskRail.*`（任务轨文案）
-  - `workspace.*`（工作区抽屉/面板文案）
+  - `workspace.*`（工作区抽屉/面板文案，含 `openFile`）
   - `codePreview.*`（代码预览文案）
   - `palette.openWorkspace`
 

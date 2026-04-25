@@ -21,7 +21,7 @@
   - 依赖注入：`config.Store`、`sandbox.SandboxManager`、`SessionService`
   - 运行时上下文：`contextWithSessionID(...)` 注入的 `sessionID`
 - 输出结果:
-  - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`
+  - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`、`agent:run_state`
   - 一致性快照：`ExportSessionSnapshot(sessionID)`
   - discovery 状态操作：`RestoreSessionData`、`AddDiscoveredTool`、`ReplaceDiscoveredTools`、`PruneDiscoveredToolsForSave`
 
@@ -54,6 +54,11 @@
   - 解锁后再调用 `SessionService.SaveSessionByID(...)`
   - 仅在 mode 实际变更时调度 async save
   - 不提供 blocking durability
+  - 额外广播 `agent:run_state`，让前端会话栏和 composer 同步当前 mode
+- `agent:run_state`:
+  - 由 `RunStateEvent` 承载 `sessionId/running/currentAgent/mode/hasInterrupt`
+  - 在启动准备、真实 running、agent 切换、中断挂起、resume、结束和取消 interrupt 时广播
+  - `emitRunState()` 在无 Wails events context（例如 Go 单测）时短路，避免 Wails runtime 对普通 context 触发 fatal
 - `ClearHistory()`：
   - 清空消息/显示/streaming/deferred state 与 plan state
   - 不重置当前 mode

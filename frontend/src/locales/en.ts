@@ -43,6 +43,10 @@ export default {
     untitled: 'Untitled session',
     noSessions: 'No sessions',
     noContainer: 'No container',
+    waitingInput: 'Waiting for input',
+    agentRunning: 'Agent running',
+    modeDefaultShort: 'Default',
+    modePlanShort: 'Plan',
   },
   chat: {
     title: 'Starxo',
@@ -174,6 +178,7 @@ export default {
     download: 'Download',
     refresh: 'Refresh',
     noFiles: 'No files',
+    openFile: 'Open file in workspace',
   },
   codePreview: {
     noFileSelected: 'No file selected',
@@ -281,6 +286,12 @@ export default {
     terminal: 'Terminal',
     files: 'Files',
     containers: 'Containers',
+  },
+  runtime: {
+    title: 'Runtime',
+    containers: 'Containers',
+    terminal: 'Terminal',
+    noActiveContainer: 'No active container',
   },
   palette: {
     title: 'Command Palette',

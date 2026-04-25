@@ -10,6 +10,7 @@
 ## 2. 核心职责
 - 应用主布局容器，组织为“左侧会话栏 + 中央执行画布 + 右侧运行时入口”。
 - 负责工作区抽屉、命令面板、面板宽度拖拽持久化和设置面板显隐。
+- 监听工作区路径桥接事件，确保时间线里的文件路径能打开工作区抽屉。
 
 ## 3. 输入与输出
 - 输入来源: Header 事件、SplitHandle 拖拽事件、窗口尺寸 (`useWindowSize`)
@@ -31,6 +32,7 @@
   - `WorkspaceDrawer` 以覆盖层方式挂在聊天区内
   - 右侧 `ContainerDock` 常驻
   - SettingsPanel / CommandPalette / WorkspaceDrawer / ContainerDock 使用 async component 降低首包
+  - `onWorkspaceOpenPath()` 打开 WorkspaceDrawer；路径选择由 WorkspacePanel 消费 pending path
 - 拖拽持久化 key:
   - `starxo-left-panel-width`
   - `starxo-container-dock-width`
@@ -39,6 +41,7 @@
 - 内部依赖:
   - `Header.vue`, `Sidebar.vue`, `SplitHandle.vue`
   - `ChatPanel.vue`, async `WorkspaceDrawer.vue`, async `ContainerDock.vue`, async `SettingsPanel.vue`, async `CommandPalette.vue`
+  - `@/composables/useWorkspaceBridge`
 - 外部依赖: `vue`、`@vueuse/core`
 
 ## 6. 变更影响面
