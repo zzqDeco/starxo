@@ -4,21 +4,21 @@
 
 ## 项目简介
 
-Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架的 AI 编程智能体桌面应用。通过 SSH 连接远程服务器，在 Docker 容器沙箱中自主编写、执行和管理代码，为开发者提供安全隔离的 AI 辅助编程环境。
+Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架的 AI 编程智能体桌面应用。通过 SSH 连接远程服务器，在轻量 bwrap/Seatbelt 沙箱中自主编写、执行和管理代码，为开发者提供安全隔离的 AI 辅助编程环境。
 
 ## 核心特性
 
 - **Deep Agent 架构** — 主智能体协调 3 个专用子智能体（code_writer / code_executor / file_manager），通过 `transfer_to_agent` 实现任务委派
 - **双模式运行** — 默认模式（直接执行）+ 计划模式（Planner/Replanner 规划-执行）
 - **中断/恢复** — 支持 `ask_user` / `ask_choice` 工具暂停等待用户输入，状态通过 CheckPointStore 保持
-- **沙箱隔离** — SSH + Docker 容器环境，支持容器生命周期管理（创建/重连/停止/销毁）
+- **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **MCP 协议** — 支持 Model Context Protocol 扩展工具（stdio/SSE 传输）
 - **多 LLM 支持** — OpenAI / DeepSeek / 火山引擎 Ark / Ollama
 - **多语言界面** — 中文/英文（vue-i18n）
 - **实时事件流** — 通过 Wails Events 实现 `agent:timeline` 统一事件流，前端实时展示 Agent 活动，所有事件携带 `sessionId` 实现多会话隔离
 - **多会话并行执行** — 多个会话可同时运行 Agent；切换会话不会取消后台运行的 Agent，切换时完整恢复状态快照
 - **会话持久化** — 完整的会话管理，统一存储消息历史、timeline 事件和流式状态
-- **文件传输** — 支持文件上传/下载，小文件 base64 + docker exec，大文件 SFTP + docker cp
+- **文件传输** — 通过 SFTP 直接上传/下载到每个持久沙箱工作区
 - **开发工作台 UI** — 高信息密度深色工作台，包含命令面板、会话栏、中央执行画布、工作区抽屉、右侧运行时 Dock 和 composer 内模式控制
 
 ## 技术栈
@@ -65,7 +65,7 @@ starxo/
 │   │   ├── codewriter.go            #   code_writer 子 Agent
 │   │   ├── codeexecutor.go          #   code_executor 子 Agent
 │   │   ├── filemanager.go           #   file_manager 子 Agent
-│   │   ├── context.go               #   AgentContext（工作空间、容器、SSH 信息）
+│   │   ├── context.go               #   AgentContext（工作空间、沙箱、SSH 信息）
 │   │   ├── plan.go                  #   Plan/Step 类型定义
 │   │   ├── plan_wrapper.go          #   计划状态持久化 + 事件发射
 │   │   └── tool_wrapper.go          #   eventEmittingTool 包装器
@@ -76,16 +76,15 @@ starxo/
 │   │   ├── session_svc.go           #   SessionService：会话 CRUD、多会话状态协调
 │   │   ├── settings_svc.go          #   SettingsService：配置管理、连接测试
 │   │   ├── file_svc.go              #   FileService：文件上传/下载/预览
-│   │   ├── container_svc.go         #   ContainerService：容器生命周期
+│   │   ├── container_svc.go         #   ContainerService：沙箱注册生命周期（兼容命名）
 │   │   └── events.go                #   事件 DTO 定义
 │   │
 │   ├── sandbox/                     # 远程沙箱管理
 │   │   ├── manager.go               #   SandboxManager 顶层编排
 │   │   ├── ssh.go                   #   SSH 连接管理
-│   │   ├── docker.go                #   远程 Docker 管理
+│   │   ├── runtime.go               #   bwrap/Seatbelt 运行时管理
 │   │   ├── operator.go              #   RemoteOperator（commandline.Operator 实现）
-│   │   ├── transfer.go              #   文件传输（SFTP + docker cp）
-│   │   └── setup.go                 #   环境初始化（Docker 安装、镜像拉取）
+│   │   └── transfer.go              #   文件传输（SFTP 到沙箱工作区）
 │   │
 │   ├── tools/                       # Agent 工具定义
 │   │   ├── registry.go              #   ToolRegistry 中央注册表
@@ -100,8 +99,8 @@ starxo/
 │   ├── config/                      # 配置管理
 │   ├── context/                     # 上下文引擎（历史、文件上下文、窗口化）
 │   ├── llm/                         # LLM Provider 工厂
-│   ├── model/                       # 数据模型（Message, Session, Container）
-│   ├── storage/                     # 持久化存储（会话、容器）
+│   ├── model/                       # 数据模型（Message、Session、沙箱注册表）
+│   ├── storage/                     # 持久化存储（会话、沙箱）
 │   ├── store/                       # CheckPointStore（中断恢复状态）
 │   └── logger/                      # 结构化日志 + Eino 回调
 │
@@ -116,9 +115,9 @@ starxo/
 │       ├── components/
 │       │   ├── chat/                #   聊天面板、消息气泡、中断对话框、任务浮层、输入区
 │       │   ├── layout/              #   主布局、头部、侧边栏、任务轨组件
-│       │   ├── settings/            #   设置面板（SSH/Docker/LLM/MCP）
+│       │   ├── settings/            #   设置面板（SSH/沙箱/LLM/MCP）
 │       │   ├── files/               #   工作区抽屉、文件树、代码预览、文件传输
-│       │   ├── containers/          #   容器面板 + 常驻 Dock
+│       │   ├── containers/          #   沙箱面板 + 常驻 Dock
 │       │   ├── status/              #   Agent 状态、连接状态
 │       │   └── terminal/            #   终端组件（当前非主界面默认入口）
 │       ├── stores/                  #   Pinia 状态管理
@@ -139,7 +138,7 @@ starxo/
 - **Go** >= 1.24
 - **Node.js** >= 18
 - **Wails CLI** v2（安装：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`）
-- **远程服务器**：需要 SSH 访问权限 + Docker 已安装（或允许安装）
+- **远程服务器**：需要 SSH 访问权限，并安装 Linux `bubblewrap`/`python3` 或 macOS `sandbox-exec`/`python3`
 
 ### 开发运行
 
@@ -172,7 +171,7 @@ npm run dev
 | 配置块 | 说明 |
 |--------|------|
 | `ssh` | SSH 连接配置（主机、端口、用户名、认证方式） |
-| `docker` | Docker 配置（镜像、容器名、资源限制） |
+| `sandbox` | 沙箱运行时配置（运行时、工作区根目录、网络、进程级限制、Python 初始化） |
 | `llm` | LLM 配置（Provider、模型、API Key、Base URL） |
 | `mcp` | MCP 服务器配置（命令、参数、环境变量、传输方式） |
 | `agent` | Agent 配置（模式选择、系统提示词、工作目录） |
@@ -197,7 +196,7 @@ npm run dev
 ```
 ~/.starxo/
 ├── config.json                # 应用配置
-├── containers.json            # 容器注册表
+├── sandboxes.json             # 沙箱注册表
 └── sessions/
     └── {session-id}/
         ├── session.json       # 会话元数据

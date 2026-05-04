@@ -11,12 +11,15 @@ const defaultSettings: AppSettings = {
     password: '',
     privateKey: ''
   },
-  docker: {
-    image: 'ubuntu:22.04',
-    memoryLimit: 2048,
-    cpuLimit: 2,
-    workDir: '/workspace',
-    network: true
+  sandbox: {
+    runtime: 'auto',
+    rootDir: '~/.starxo/sandboxes',
+    workDirName: 'workspace',
+    network: true,
+    memoryLimitMB: 2048,
+    commandTimeoutSec: 120,
+    bootstrapPython: true,
+    pythonPackages: ['pandas', 'numpy', 'matplotlib', 'openpyxl']
   },
   llm: {
     type: 'openai',
@@ -46,7 +49,11 @@ export const useSettingsStore = defineStore('settings', () => {
         const src = result as unknown as Partial<AppSettings>
         // Merge top-level sections, preserving defaults for missing fields
         if (src.ssh) Object.assign(merged.ssh, src.ssh)
-        if (src.docker) Object.assign(merged.docker, src.docker)
+        if (src.sandbox) Object.assign(merged.sandbox, src.sandbox)
+        if (src.docker) {
+          if (typeof src.docker.memoryLimit === 'number') merged.sandbox.memoryLimitMB = src.docker.memoryLimit
+          if (typeof src.docker.network === 'boolean') merged.sandbox.network = src.docker.network
+        }
         if (src.llm) Object.assign(merged.llm, src.llm)
         if (src.agent) Object.assign(merged.agent, src.agent)
         if (src.mcp) {
@@ -77,8 +84,8 @@ export const useSettingsStore = defineStore('settings', () => {
     Object.assign(settings.value.ssh, partial)
   }
 
-  function updateDocker(partial: Partial<AppSettings['docker']>) {
-    Object.assign(settings.value.docker, partial)
+  function updateSandbox(partial: Partial<AppSettings['sandbox']>) {
+    Object.assign(settings.value.sandbox, partial)
   }
 
   function updateLLM(partial: Partial<AppSettings['llm']>) {
@@ -107,7 +114,7 @@ export const useSettingsStore = defineStore('settings', () => {
     loadSettings,
     saveSettings,
     updateSSH,
-    updateDocker,
+    updateSandbox,
     updateLLM,
     addMCPServer,
     removeMCPServer,

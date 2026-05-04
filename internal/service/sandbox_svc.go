@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"starxo/internal/config"
@@ -17,14 +16,14 @@ import (
 
 // SandboxService manages sandbox lifecycle for the frontend.
 type SandboxService struct {
-	mu               sync.RWMutex
-	ctx              context.Context
-	manager          *sandbox.SandboxManager
-	store            *config.Store
-	containerStore   *storage.ContainerStore
-	sessionService   *SessionService
-	onConnect        func(mgr *sandbox.SandboxManager)
-	onContainerBound func(containerRegID, workspacePath string)
+	mu                     sync.RWMutex
+	ctx                    context.Context
+	manager                *sandbox.SandboxManager
+	store                  *config.Store
+	containerStore         *storage.ContainerStore
+	sessionService         *SessionService
+	onConnect              func(mgr *sandbox.SandboxManager)
+	onContainerBound       func(containerRegID, workspacePath string)
 	onContainerDeactivated func()
 	// activeContainerRegID tracks the registry ID of the currently connected container
 	activeContainerRegID string
@@ -77,8 +76,8 @@ func (s *SandboxService) SetOnContainerDeactivated(fn func()) {
 
 // --- New SSH-independent methods ---
 
-// ConnectSSH establishes SSH connection and ensures Docker is available on the remote host.
-// Does NOT create any container. Use CreateAndActivateContainer separately.
+// ConnectSSH establishes SSH connection and ensures the lightweight sandbox
+// runtime is available on the remote host.
 func (s *SandboxService) ConnectSSH() error {
 	s.mu.Lock()
 	// Disconnect existing SSH (keep containers alive on remote)
@@ -114,8 +113,8 @@ func (s *SandboxService) ConnectSSH() error {
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 
-	// Step 2: Ensure Docker (long-running, outside lock)
-	if err := mgr.EnsureDocker(appCtx, func(step string, percent int) {
+	// Step 2: Ensure sandbox runtime (long-running, outside lock)
+	if err := mgr.EnsureRuntime(appCtx, func(step string, percent int) {
 		wailsruntime.EventsEmit(appCtx, "ssh:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: 50 + percent/2, // 50-100%
@@ -125,7 +124,7 @@ func (s *SandboxService) ConnectSSH() error {
 		s.mu.Lock()
 		s.manager = nil
 		s.mu.Unlock()
-		return fmt.Errorf("Docker setup failed: %w", err)
+		return fmt.Errorf("sandbox runtime setup failed: %w", err)
 	}
 
 	// Start health monitor in SSH-only mode
@@ -165,7 +164,7 @@ func (s *SandboxService) DisconnectSSH() error {
 	return err
 }
 
-// CreateAndActivateContainer creates a new container on the connected SSH host,
+// CreateAndActivateContainer creates a new sandbox on the connected SSH host,
 // registers it, and activates it for agent use.
 func (s *SandboxService) CreateAndActivateContainer() error {
 	s.mu.Lock()
@@ -188,18 +187,18 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 	excludeIDs := s.containerStore.RegisteredDockerIDs()
 
 	// Long-running operation outside lock
-	dockerID, containerName, err := mgr.CreateNewContainer(appCtx, excludeIDs, func(step string, percent int) {
+	inst, err := mgr.CreateNewSandbox(appCtx, excludeIDs, func(step string, percent int) {
 		wailsruntime.EventsEmit(appCtx, "container:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: percent,
 		})
 	})
 	if err != nil {
-		return fmt.Errorf("container creation failed: %w", err)
+		return fmt.Errorf("sandbox creation failed: %w", err)
 	}
 
-	// Register the new container
-	regID := uuid.New().String()[:8]
+	// Register the new sandbox. The model name remains Container for Wails compatibility.
+	regID := inst.ID
 	now := time.Now().UnixMilli()
 
 	s.mu.RLock()
@@ -215,9 +214,12 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 
 	container := &model.Container{
 		ID:            regID,
-		DockerID:      dockerID,
-		Name:          containerName,
-		Image:         cfg.Docker.Image,
+		RuntimeID:     inst.ID,
+		Runtime:       inst.Runtime,
+		WorkspacePath: inst.WorkspacePath,
+		DockerID:      inst.ID,
+		Name:          inst.Name,
+		Image:         inst.Runtime,
 		SSHHost:       cfg.SSH.Host,
 		SSHPort:       cfg.SSH.Port,
 		Status:        model.ContainerRunning,
@@ -242,7 +244,7 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 	}
 
 	if boundCb != nil {
-		boundCb(regID, "/workspace")
+		boundCb(regID, inst.WorkspacePath)
 	}
 
 	wailsruntime.EventsEmit(appCtx, "container:ready", map[string]string{
@@ -265,13 +267,16 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 
 	container, err := s.containerStore.Get(containerRegID)
 	if err != nil {
-		return fmt.Errorf("container not found: %w", err)
+		return fmt.Errorf("sandbox not found: %w", err)
+	}
+	if container.Status == model.ContainerUnavailable || container.Runtime == sandbox.RuntimeDocker {
+		return fmt.Errorf("sandbox %s is a legacy Docker record and cannot be activated by the dockerless runtime", containerRegID)
 	}
 
 	// Validate SSH host matches
 	cfg := s.store.Get()
 	if container.SSHHost != cfg.SSH.Host || container.SSHPort != cfg.SSH.Port {
-		return fmt.Errorf("container is on %s:%d but SSH is connected to %s:%d — disconnect and reconnect SSH to the correct host first",
+		return fmt.Errorf("sandbox is on %s:%d but SSH is connected to %s:%d; disconnect and reconnect SSH to the correct host first",
 			container.SSHHost, container.SSHPort, cfg.SSH.Host, cfg.SSH.Port)
 	}
 
@@ -283,14 +288,19 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 	}
 	s.mu.Unlock()
 
-	// Attach to the target container (long-running, outside lock)
-	if err := mgr.AttachToContainer(appCtx, container.DockerID, container.Name, func(step string, percent int) {
+	runtimeID := container.RuntimeID
+	if runtimeID == "" {
+		runtimeID = container.DockerID
+	}
+
+	// Attach to the target sandbox (long-running, outside lock)
+	if err := mgr.AttachToSandbox(appCtx, runtimeID, container.Name, container.WorkspacePath, func(step string, percent int) {
 		wailsruntime.EventsEmit(appCtx, "container:progress", SandboxProgressEvent{
 			Step:    step,
 			Percent: percent,
 		})
 	}); err != nil {
-		return fmt.Errorf("failed to activate container: %w", err)
+		return fmt.Errorf("failed to activate sandbox: %w", err)
 	}
 
 	// Update registry
@@ -312,7 +322,7 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 	}
 
 	if boundCb != nil {
-		boundCb(containerRegID, "/workspace")
+		boundCb(containerRegID, container.WorkspacePath)
 	}
 
 	wailsruntime.EventsEmit(appCtx, "container:activated", map[string]string{
@@ -400,7 +410,7 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 			return fmt.Errorf("SSH connection failed: %w", err)
 		}
 
-		if err := mgr.EnsureDocker(appCtx, func(step string, percent int) {
+		if err := mgr.EnsureRuntime(appCtx, func(step string, percent int) {
 			wailsruntime.EventsEmit(appCtx, "ssh:progress", SandboxProgressEvent{
 				Step:    step,
 				Percent: 50 + percent/2,
@@ -410,7 +420,7 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 			s.mu.Lock()
 			s.manager = nil
 			s.mu.Unlock()
-			return fmt.Errorf("Docker setup failed: %w", err)
+			return fmt.Errorf("sandbox runtime setup failed: %w", err)
 		}
 
 		wailsruntime.EventsEmit(appCtx, "ssh:connected", nil)
@@ -468,13 +478,17 @@ func (s *SandboxService) GetStatus() SandboxStatusDTO {
 		ContainerID:       "",
 		DockerAvailable:   mgr.Docker() != nil,
 		ActiveContainerID: activeRegID,
+		RuntimeAvailable:  mgr.Runtime() != nil,
+		ActiveSandboxID:   activeRegID,
 	}
 
-	docker := mgr.Docker()
-	if docker != nil {
-		status.DockerRunning = docker.IsRunning()
-		status.ContainerID = docker.ContainerID()
-		status.ActiveContainerName = docker.ContainerName()
+	runtime := mgr.Runtime()
+	if runtime != nil {
+		status.DockerRunning = runtime.IsRunning()
+		status.ContainerID = runtime.ContainerID()
+		status.ActiveContainerName = runtime.ContainerName()
+		status.SandboxActive = runtime.IsActive()
+		status.ActiveSandboxName = runtime.RuntimeName()
 	}
 
 	return status

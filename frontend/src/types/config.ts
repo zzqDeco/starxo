@@ -6,12 +6,15 @@ export interface SSHConfig {
   privateKey?: string
 }
 
-export interface DockerConfig {
-  image: string
-  memoryLimit: number
-  cpuLimit: number
-  workDir: string
+export interface SandboxConfig {
+  runtime: 'auto' | 'bwrap' | 'seatbelt'
+  rootDir: string
+  workDirName: string
   network: boolean
+  memoryLimitMB: number
+  commandTimeoutSec: number
+  bootstrapPython: boolean
+  pythonPackages: string[]
 }
 
 export interface LLMConfig {
@@ -33,7 +36,14 @@ export interface MCPServerConfig {
 
 export interface AppSettings {
   ssh: SSHConfig
-  docker: DockerConfig
+  sandbox: SandboxConfig
+  docker?: {
+    image?: string
+    memoryLimit?: number
+    cpuLimit?: number
+    workDir?: string
+    network?: boolean
+  }
   llm: LLMConfig
   mcp: { servers: MCPServerConfig[] }
   agent: { maxIterations: number }
@@ -50,6 +60,10 @@ export interface FileInfo {
 
 export interface SandboxStatus {
   sshConnected: boolean
+  runtimeAvailable: boolean
+  sandboxActive: boolean
+  activeSandboxID: string
+  activeSandboxName: string
   dockerRunning: boolean
   containerID: string
   activeContainerID: string
