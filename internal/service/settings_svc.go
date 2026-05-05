@@ -83,6 +83,23 @@ func (s *SettingsService) CheckSandboxRuntime(cfg config.AppConfig) (sandbox.Run
 	return result, nil
 }
 
+func (s *SettingsService) DiagnoseSandboxRuntime(cfg config.AppConfig) (sandbox.SandboxDiagnosticsResult, error) {
+	config.MigrateLegacyDockerConfig(&cfg)
+	config.NormalizeAppConfig(&cfg)
+	client := sandbox.NewSSHClient(cfg.SSH)
+	if err := client.Connect(s.ctx); err != nil {
+		return sandbox.SandboxDiagnosticsResult{}, fmt.Errorf("SSH connection failed: %w", err)
+	}
+	defer client.Close()
+
+	runtime := sandbox.NewRemoteRuntimeManager(client, cfg.Sandbox)
+	result, err := runtime.Diagnose(s.ctx)
+	if err != nil {
+		return sandbox.SandboxDiagnosticsResult{}, fmt.Errorf("sandbox runtime diagnostics failed: %w", err)
+	}
+	return result, nil
+}
+
 func (s *SettingsService) InstallSandboxRuntime(cfg config.AppConfig) (sandbox.RuntimeInstallResult, error) {
 	config.MigrateLegacyDockerConfig(&cfg)
 	config.NormalizeAppConfig(&cfg)

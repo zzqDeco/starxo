@@ -3,7 +3,11 @@
 import {service} from '../models';
 import {context} from '../models';
 
+export function CleanupSandboxTmp():Promise<service.WorkspaceCleanupResultDTO>;
+
 export function DownloadFile(arg1:string):Promise<void>;
+
+export function GetWorkspaceInfo():Promise<service.WorkspaceInfoDTO>;
 
 export function ListWorkspaceFiles():Promise<Array<service.FileInfoDTO>>;
 

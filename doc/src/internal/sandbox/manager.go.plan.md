@@ -14,6 +14,7 @@
 - `EnsureRuntime` 检测远端 bwrap/Seatbelt 可用性，不自动安装。
 - `CreateNewSandbox` 创建远端持久 workspace 并创建 operator。
 - `AttachToSandbox` 激活已有 workspace。
+- `SSHHostPort` 暴露当前远端地址给 workspace 元信息面板。
 - `DestroySandbox` 删除指定 workspace 根目录；`Disconnect` 保留 workspace。
 
 ## 维护要点

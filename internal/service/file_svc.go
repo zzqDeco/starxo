@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -36,6 +40,13 @@ func (s *FileService) SetSessionService(ss *SessionService) {
 
 // workspacePath returns the current workspace path from the session or a default.
 func (s *FileService) workspacePath() string {
+	if s.sandbox != nil {
+		if mgr := s.sandbox.Manager(); mgr != nil {
+			if workspace := mgr.WorkspacePath(); workspace != "" {
+				return workspace
+			}
+		}
+	}
 	if s.sessionService != nil {
 		return s.sessionService.GetWorkspacePath()
 	}
@@ -70,9 +81,9 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 		return FileInfoDTO{}, fmt.Errorf("file transfer is not available")
 	}
 
-	docker := mgr.Docker()
-	if docker == nil {
-		return FileInfoDTO{}, fmt.Errorf("docker manager is not available")
+	runtime := mgr.Runtime()
+	if runtime == nil {
+		return FileInfoDTO{}, fmt.Errorf("sandbox runtime manager is not available")
 	}
 
 	// Get file info
@@ -82,10 +93,10 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 	}
 
 	baseName := filepath.Base(localPath)
-	containerPath := s.workspacePath() + "/" + baseName
+	containerPath := path.Join(s.workspacePath(), baseName)
 
-	// Upload to container
-	if err := transfer.UploadToContainer(s.ctx, localPath, containerPath, docker); err != nil {
+	// Upload to active sandbox workspace.
+	if err := transfer.UploadToContainer(s.ctx, localPath, containerPath, runtime); err != nil {
 		return FileInfoDTO{}, fmt.Errorf("upload failed: %w", err)
 	}
 
@@ -110,9 +121,9 @@ func (s *FileService) DownloadFile(containerPath string) error {
 		return fmt.Errorf("file transfer is not available")
 	}
 
-	docker := mgr.Docker()
-	if docker == nil {
-		return fmt.Errorf("docker manager is not available")
+	runtime := mgr.Runtime()
+	if runtime == nil {
+		return fmt.Errorf("sandbox runtime manager is not available")
 	}
 
 	baseName := filepath.Base(containerPath)
@@ -128,7 +139,7 @@ func (s *FileService) DownloadFile(containerPath string) error {
 		return fmt.Errorf("no save location selected")
 	}
 
-	if err := transfer.DownloadFromContainer(s.ctx, containerPath, localPath, docker); err != nil {
+	if err := transfer.DownloadFromContainer(s.ctx, containerPath, localPath, runtime); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
@@ -147,38 +158,117 @@ func (s *FileService) ListWorkspaceFiles() ([]FileInfoDTO, error) {
 		return nil, fmt.Errorf("sandbox operator is not available")
 	}
 
-	// Use stat to get file size along with path
-	output, err := op.RunCommand(s.ctx, []string{
-		"find", s.workspacePath(), "-maxdepth", "3", "-type", "f",
-		"-exec", "stat", "-c", "%s %n", "{}", ";",
-	})
+	script := `import json, os, time
+root = os.getcwd()
+max_depth = 3
+items = []
+for dirpath, dirnames, filenames in os.walk(root):
+    rel_dir = os.path.relpath(dirpath, root)
+    depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+    if depth >= max_depth:
+        dirnames[:] = []
+        continue
+    if depth >= max_depth - 1:
+        dirnames[:] = []
+    for name in filenames:
+        full = os.path.join(dirpath, name)
+        try:
+            st = os.stat(full)
+        except OSError:
+            continue
+        rel = os.path.relpath(full, root).replace(os.sep, "/")
+        items.append({
+            "name": name,
+            "path": os.path.join(root, rel).replace(os.sep, "/"),
+            "size": st.st_size,
+            "modified": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(st.st_mtime)),
+        })
+items.sort(key=lambda item: item["path"])
+print(json.dumps(items))`
+	output, err := op.RunCommand(s.ctx, []string{"python3", "-c", script})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
-
-	lines := strings.Split(strings.TrimSpace(output.Stdout), "\n")
-	var files []FileInfoDTO
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Parse "size path" format from stat output
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		var size int64
-		fmt.Sscanf(parts[0], "%d", &size)
-		filePath := parts[1]
-		files = append(files, FileInfoDTO{
-			Name: filepath.Base(filePath),
-			Path: filePath,
-			Size: size,
-		})
+	if output.ExitCode != 0 {
+		return nil, fmt.Errorf("failed to list files (exit %d): %s", output.ExitCode, output.Stderr)
 	}
 
+	var files []FileInfoDTO
+	if stdout := strings.TrimSpace(output.Stdout); stdout != "" {
+		if err := json.Unmarshal([]byte(stdout), &files); err != nil {
+			return nil, fmt.Errorf("failed to parse workspace file list: %w", err)
+		}
+	}
+	sort.SliceStable(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
 	return files, nil
+}
+
+func (s *FileService) GetWorkspaceInfo() (WorkspaceInfoDTO, error) {
+	info := WorkspaceInfoDTO{RefreshedAt: time.Now().UnixMilli()}
+	mgr := s.sandbox.Manager()
+	if mgr == nil {
+		return info, nil
+	}
+
+	host, port := mgr.SSHHostPort()
+	info.SSHConnected = mgr.SSHConnected()
+	info.SSHHost = host
+	info.SSHPort = port
+
+	runtime := mgr.Runtime()
+	if runtime == nil {
+		return info, nil
+	}
+	info.Active = runtime.IsActive()
+	info.SandboxID = runtime.RuntimeID()
+	info.SandboxName = runtime.RuntimeName()
+	info.Runtime = runtime.RuntimeKind()
+	info.WorkspacePath = runtime.WorkspacePath()
+	if !info.Active {
+		return info, nil
+	}
+
+	op := mgr.Operator()
+	if op == nil {
+		return info, nil
+	}
+	output, err := op.RunCommand(s.ctx, []string{"sh", "-lc", "files=$(find . -type f 2>/dev/null | wc -l | tr -d ' '); bytes=$(du -sk . 2>/dev/null | awk '{printf \"%d\", $1 * 1024}'); printf '%s %s\\n' \"${files:-0}\" \"${bytes:-0}\""})
+	if err != nil {
+		return info, fmt.Errorf("failed to inspect workspace: %w", err)
+	}
+	if output.ExitCode != 0 {
+		return info, fmt.Errorf("failed to inspect workspace (exit %d): %s", output.ExitCode, output.Stderr)
+	}
+	fields := strings.Fields(strings.TrimSpace(output.Stdout))
+	if len(fields) >= 1 {
+		_, _ = fmt.Sscanf(fields[0], "%d", &info.FileCount)
+	}
+	if len(fields) >= 2 {
+		_, _ = fmt.Sscanf(fields[1], "%d", &info.TotalSize)
+	}
+	return info, nil
+}
+
+func (s *FileService) CleanupSandboxTmp() (WorkspaceCleanupResultDTO, error) {
+	mgr := s.sandbox.Manager()
+	if mgr == nil || !mgr.SSHConnected() {
+		return WorkspaceCleanupResultDTO{}, fmt.Errorf("sandbox is not connected")
+	}
+	runtime := mgr.Runtime()
+	if runtime == nil || !runtime.IsActive() {
+		return WorkspaceCleanupResultDTO{}, fmt.Errorf("no sandbox is active")
+	}
+	result, err := runtime.CleanupTmp(s.ctx)
+	if err != nil {
+		return WorkspaceCleanupResultDTO{}, err
+	}
+	return WorkspaceCleanupResultDTO{
+		TmpPath:        result.TmpPath,
+		RemovedEntries: result.RemovedEntries,
+		ReclaimedBytes: result.ReclaimedBytes,
+	}, nil
 }
 
 // ReadFilePreview reads the first N bytes of a file in the container for preview.
