@@ -169,7 +169,7 @@ func (c *SSHClient) buildAuthMethods() ([]ssh.AuthMethod, error) {
 	// 2. Explicitly configured private key
 	if c.cfg.PrivateKey != "" {
 		if signer := c.tryParseKey(c.cfg.PrivateKey); signer != nil {
-			methods = append(methods, ssh.PublicKeys(signer))
+			methods = append(methods, ssh.PublicKeys(preferredSigners(signer)...))
 		}
 	}
 
@@ -181,7 +181,7 @@ func (c *SSHClient) buildAuthMethods() ([]ssh.AuthMethod, error) {
 	// 4. Auto-detect default SSH key files (~/.ssh/id_*)
 	if c.cfg.PrivateKey == "" {
 		for _, signer := range c.tryDefaultKeys() {
-			methods = append(methods, ssh.PublicKeys(signer))
+			methods = append(methods, ssh.PublicKeys(preferredSigners(signer)...))
 		}
 	}
 
@@ -190,6 +190,30 @@ func (c *SSHClient) buildAuthMethods() ([]ssh.AuthMethod, error) {
 	}
 
 	return methods, nil
+}
+
+func preferredSigners(signer ssh.Signer) []ssh.Signer {
+	if signer == nil {
+		return nil
+	}
+	if signer.PublicKey().Type() != ssh.KeyAlgoRSA {
+		return []ssh.Signer{signer}
+	}
+	algorithmSigner, ok := signer.(ssh.AlgorithmSigner)
+	if !ok {
+		return []ssh.Signer{signer}
+	}
+	var signers []ssh.Signer
+	for _, algo := range []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA} {
+		preferred, err := ssh.NewSignerWithAlgorithms(algorithmSigner, []string{algo})
+		if err == nil {
+			signers = append(signers, preferred)
+		}
+	}
+	if len(signers) == 0 {
+		return []ssh.Signer{signer}
+	}
+	return signers
 }
 
 // trySSHAgent attempts to connect to the local SSH agent.
