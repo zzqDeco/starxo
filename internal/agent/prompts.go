@@ -9,9 +9,9 @@ func DeepAgentPrompt(ac AgentContext) string {
 
 ENVIRONMENT:
 - SSH: %s@%s:%d
-- Container: %s (ID: %s)
+- Sandbox: %s (ID: %s)
 - Workspace: %s
-- All file operations happen inside this container.
+- All file operations happen inside this sandbox workspace.
 
 You have two ways to handle tasks:
 
@@ -68,7 +68,7 @@ func DeepAgentPlanPrompt(ac AgentContext) string {
 
 ENVIRONMENT:
 - SSH: %s@%s:%d
-- Container: %s (ID: %s)
+- Sandbox: %s (ID: %s)
 - Workspace: %s
 
 ROLE BOUNDARY (STRICT):
@@ -120,7 +120,7 @@ func CodeWriterPrompt(ac AgentContext) string {
 
 ENVIRONMENT:
 - Workspace: %s
-- All file paths are inside the container. Use absolute paths starting with %s.
+- All file paths are inside the sandbox workspace. Use absolute paths starting with %s.
 
 YOUR TOOLS (use these directly — do NOT delegate):
 - str_replace_editor: Create new files, view existing files, and edit code with precise string replacement.
@@ -151,7 +151,7 @@ func CodeExecutorPrompt(ac AgentContext) string {
 
 ENVIRONMENT:
 - Workspace: %s
-- All commands execute inside the container.
+- All commands execute inside the sandbox.
 
 YOUR TOOLS (use these directly — do NOT delegate):
 - python_execute: Execute Python code.

@@ -73,6 +73,7 @@ function statusType(status: string): 'success' | 'warning' | 'error' | 'default'
     case 'running': return 'success'
     case 'stopped': return 'warning'
     case 'destroyed': return 'error'
+    case 'unavailable': return 'default'
     default: return 'default'
   }
 }
@@ -82,6 +83,7 @@ function statusLabel(status: string): string {
     case 'running': return t('containers.running')
     case 'stopped': return t('containers.stopped')
     case 'destroyed': return t('containers.destroyed')
+    case 'unavailable': return t('containers.unavailable')
     default: return t('containers.unknown')
   }
 }
@@ -232,7 +234,7 @@ function sessionTitle(sessionID: string): string {
             <NTag v-if="isActive(c)" type="info" size="small" round>{{ t('containers.active') }}</NTag>
           </div>
           <div class="card-details">
-            <span class="detail-item">{{ c.image }}</span>
+            <span class="detail-item">{{ c.runtime || c.image }}</span>
             <span class="detail-item">{{ c.sshHost }}:{{ c.sshPort }}</span>
             <span class="detail-item detail-time">{{ formatTime(c.lastUsedAt) }}</span>
           </div>
@@ -295,7 +297,7 @@ function sessionTitle(sessionID: string): string {
                 <NTag :type="statusType(c.status)" size="small" round>{{ statusLabel(c.status) }}</NTag>
               </div>
               <div class="card-details">
-                <span class="detail-item">{{ c.image }}</span>
+            <span class="detail-item">{{ c.runtime || c.image }}</span>
                 <span class="detail-item detail-session">{{ sessionTitle(c.sessionID) }}</span>
                 <span class="detail-item detail-time">{{ formatTime(c.lastUsedAt) }}</span>
               </div>
@@ -487,7 +489,8 @@ function sessionTitle(sessionID: string): string {
 .container-card.status-running::before { background: var(--accent-emerald); }
 .container-card.status-stopped::before { background: var(--accent-amber); }
 .container-card.status-destroyed::before { background: var(--accent-rose); }
-.container-card.status-unknown::before { background: var(--text-faint); }
+.container-card.status-unknown::before,
+.container-card.status-unavailable::before { background: var(--text-faint); }
 
 .container-card:hover {
   border-color: var(--accent-cyan-dim);

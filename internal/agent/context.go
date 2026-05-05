@@ -4,11 +4,11 @@ import "context"
 
 // AgentContext provides runtime environment information that is injected
 // into agent prompts and tool defaults. This removes all hard-coded
-// "/workspace" references and makes agents aware of their container.
+// "/workspace" references and makes agents aware of their sandbox.
 type AgentContext struct {
 	WorkspacePath string // e.g. "/workspace"
-	ContainerName string // e.g. "eino-sandbox-abc123"
-	ContainerID   string // short Docker container ID
+	ContainerName string // compatibility field; sandbox name
+	ContainerID   string // compatibility field; sandbox runtime ID
 	SSHHost       string // e.g. "192.168.1.100"
 	SSHPort       int    // e.g. 22
 	SSHUser       string // e.g. "root"

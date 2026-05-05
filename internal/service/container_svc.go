@@ -55,19 +55,23 @@ func (s *ContainerService) RefreshContainerStatus(containerRegID string) (*model
 		return container, nil
 	}
 
-	docker := mgr.Docker()
-	if docker == nil {
+	runtime := mgr.Runtime()
+	if runtime == nil {
 		container.Status = model.ContainerUnknown
 		_ = s.containerStore.Update(container)
 		return container, nil
 	}
 
-	exists, running, err := docker.InspectContainer(s.ctx, container.DockerID)
+	runtimeID := container.RuntimeID
+	if runtimeID == "" {
+		runtimeID = container.DockerID
+	}
+	exists, active, err := runtime.InspectSandbox(s.ctx, runtimeID, container.WorkspacePath)
 	if err != nil {
 		container.Status = model.ContainerUnknown
 	} else if !exists {
 		container.Status = model.ContainerDestroyed
-	} else if running {
+	} else if active || s.sandboxService.ActiveContainerRegID() == containerRegID {
 		container.Status = model.ContainerRunning
 	} else {
 		container.Status = model.ContainerStopped
@@ -130,7 +134,13 @@ func (s *ContainerService) DestroyContainer(containerRegID string) error {
 			return err
 		}
 	} else {
-		// Otherwise, just remove from registry
+		if mgr := s.sandboxService.Manager(); mgr != nil && container != nil && container.Status != model.ContainerUnavailable {
+			runtimeID := container.RuntimeID
+			if runtimeID == "" {
+				runtimeID = container.DockerID
+			}
+			_ = mgr.DestroySandbox(s.ctx, runtimeID, container.WorkspacePath)
+		}
 		_ = s.containerStore.Remove(containerRegID)
 	}
 

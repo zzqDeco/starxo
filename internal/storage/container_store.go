@@ -14,6 +14,7 @@ import (
 // All containers are stored in a single ~/.starxo/containers.json file.
 type ContainerStore struct {
 	path       string
+	legacyPath string
 	containers []model.Container
 	mu         sync.RWMutex
 }
@@ -30,7 +31,8 @@ func NewContainerStore() (*ContainerStore, error) {
 	}
 
 	s := &ContainerStore{
-		path: filepath.Join(dir, "containers.json"),
+		path:       filepath.Join(dir, "sandboxes.json"),
+		legacyPath: filepath.Join(dir, "containers.json"),
 	}
 	if err := s.load(); err != nil {
 		s.containers = []model.Container{}
@@ -127,7 +129,9 @@ func (s *ContainerStore) RegisteredDockerIDs() []string {
 	defer s.mu.RUnlock()
 	ids := make([]string, 0, len(s.containers))
 	for _, c := range s.containers {
-		if c.DockerID != "" && c.Status != model.ContainerDestroyed {
+		if c.RuntimeID != "" && c.Status != model.ContainerDestroyed {
+			ids = append(ids, c.RuntimeID)
+		} else if c.DockerID != "" && c.Status != model.ContainerDestroyed {
 			ids = append(ids, c.DockerID)
 		}
 	}
@@ -137,10 +141,34 @@ func (s *ContainerStore) RegisteredDockerIDs() []string {
 // load reads containers.json from disk (caller must not hold lock).
 func (s *ContainerStore) load() error {
 	data, err := os.ReadFile(s.path)
-	if err != nil {
+	if err == nil {
+		if err := json.Unmarshal(data, &s.containers); err != nil {
+			return err
+		}
+		s.normalize()
+		return nil
+	}
+
+	legacyData, legacyErr := os.ReadFile(s.legacyPath)
+	if legacyErr != nil {
 		return err
 	}
-	return json.Unmarshal(data, &s.containers)
+	if err := json.Unmarshal(legacyData, &s.containers); err != nil {
+		return err
+	}
+	for i := range s.containers {
+		if s.containers[i].RuntimeID == "" {
+			s.containers[i].RuntimeID = s.containers[i].DockerID
+		}
+		if s.containers[i].Runtime == "" {
+			s.containers[i].Runtime = "docker"
+		}
+		if s.containers[i].Status != model.ContainerDestroyed {
+			s.containers[i].Status = model.ContainerUnavailable
+		}
+	}
+	s.normalize()
+	return s.save()
 }
 
 // save writes containers.json to disk (caller must hold write lock).
@@ -150,4 +178,19 @@ func (s *ContainerStore) save() error {
 		return err
 	}
 	return os.WriteFile(s.path, data, 0644)
+}
+
+func (s *ContainerStore) normalize() {
+	for i := range s.containers {
+		c := &s.containers[i]
+		if c.RuntimeID == "" {
+			c.RuntimeID = c.DockerID
+		}
+		if c.DockerID == "" {
+			c.DockerID = c.RuntimeID
+		}
+		if c.Runtime == "" {
+			c.Runtime = "bwrap"
+		}
+	}
 }

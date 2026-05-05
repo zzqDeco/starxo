@@ -1,10 +1,10 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { Close, Terminal, Cube, Cloud, Apps } from '@vicons/ionicons5'
+import { Close, Terminal, ShieldCheckmark, Cloud, Apps } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import SSHConfigForm from './SSHConfig.vue'
-import DockerConfigForm from './DockerConfig.vue'
+import SandboxConfigForm from './SandboxConfig.vue'
 import LLMConfigForm from './LLMConfig.vue'
 import MCPConfigForm from './MCPConfig.vue'
 import { useI18n } from 'vue-i18n'
@@ -30,7 +30,7 @@ useFocusTrap(dialogRef, trapActive)
 
 const tabs = computed(() => [
   { name: 'ssh', label: t('settings.ssh.tab'), icon: Terminal },
-  { name: 'docker', label: t('settings.docker.tab'), icon: Cube },
+  { name: 'sandbox', label: t('settings.sandbox.tab'), icon: ShieldCheckmark },
   { name: 'llm', label: t('settings.llm.tab'), icon: Cloud },
   { name: 'mcp', label: t('settings.mcp.tab'), icon: Apps },
 ])
@@ -121,7 +121,7 @@ onBeforeUnmount(() => {
           >
             <Transition name="fade-fast" mode="out-in">
               <SSHConfigForm v-if="activeTab === 'ssh'" key="ssh" />
-              <DockerConfigForm v-else-if="activeTab === 'docker'" key="docker" />
+              <SandboxConfigForm v-else-if="activeTab === 'sandbox'" key="sandbox" />
               <LLMConfigForm v-else-if="activeTab === 'llm'" key="llm" />
               <MCPConfigForm v-else-if="activeTab === 'mcp'" key="mcp" />
             </Transition>

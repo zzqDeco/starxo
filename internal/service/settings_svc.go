@@ -66,6 +66,40 @@ func (s *SettingsService) TestSSHConnection(sshCfg config.SSHConfig) error {
 	return nil
 }
 
+func (s *SettingsService) CheckSandboxRuntime(cfg config.AppConfig) (sandbox.RuntimeCheckResult, error) {
+	config.MigrateLegacyDockerConfig(&cfg)
+	config.NormalizeAppConfig(&cfg)
+	client := sandbox.NewSSHClient(cfg.SSH)
+	if err := client.Connect(s.ctx); err != nil {
+		return sandbox.RuntimeCheckResult{}, fmt.Errorf("SSH connection failed: %w", err)
+	}
+	defer client.Close()
+
+	runtime := sandbox.NewRemoteRuntimeManager(client, cfg.Sandbox)
+	result, err := runtime.Detect(s.ctx)
+	if err != nil {
+		return sandbox.RuntimeCheckResult{}, fmt.Errorf("sandbox runtime check failed: %w", err)
+	}
+	return result, nil
+}
+
+func (s *SettingsService) InstallSandboxRuntime(cfg config.AppConfig) (sandbox.RuntimeInstallResult, error) {
+	config.MigrateLegacyDockerConfig(&cfg)
+	config.NormalizeAppConfig(&cfg)
+	client := sandbox.NewSSHClient(cfg.SSH)
+	if err := client.Connect(s.ctx); err != nil {
+		return sandbox.RuntimeInstallResult{}, fmt.Errorf("SSH connection failed: %w", err)
+	}
+	defer client.Close()
+
+	runtime := sandbox.NewRemoteRuntimeManager(client, cfg.Sandbox)
+	result, err := runtime.Install(s.ctx)
+	if err != nil {
+		return result, fmt.Errorf("sandbox runtime install failed: %w", err)
+	}
+	return result, nil
+}
+
 // TestLLMConnection tests whether an LLM connection can be established
 // with the provided LLM configuration. It sends a minimal request to verify
 // the API endpoint is reachable and credentials are valid.

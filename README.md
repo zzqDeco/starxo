@@ -4,21 +4,21 @@
 
 ## About
 
-Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](https://github.com/cloudwego/eino) framework. It connects to remote servers via SSH, manages Docker containers as sandboxed coding environments, and uses LLM-powered agents to autonomously write, execute, and manage code.
+Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](https://github.com/cloudwego/eino) framework. It connects to remote servers via SSH, manages lightweight bwrap/Seatbelt sandboxes as coding environments, and uses LLM-powered agents to autonomously write, execute, and manage code.
 
 ## Features
 
 - **Deep Agent Architecture** — Orchestrator agent delegates to 3 specialized sub-agents (code_writer / code_executor / file_manager) via `transfer_to_agent`
 - **Dual Execution Modes** — Default mode (direct execution) + Plan mode (Planner/Replanner structured execution)
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
-- **Sandbox Isolation** — SSH + Docker container environment with full container lifecycle management (create/reconnect/stop/destroy)
+- **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
 - **Real-time Event Stream** — Unified `agent:timeline` event stream via Wails Events for live agent activity display, all events tagged with `sessionId` for multi-session isolation
 - **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
-- **File Transfer** — Upload/download support; small files via base64 + docker exec, large files via SFTP + docker cp
+- **File Transfer** — Upload/download support via SFTP directly into each persistent sandbox workspace
 - **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, workspace drawer, persistent runtime dock, and composer-level mode controls
 
 ## Tech Stack
@@ -65,7 +65,7 @@ starxo/
 │   │   ├── codewriter.go            #   code_writer sub-agent
 │   │   ├── codeexecutor.go          #   code_executor sub-agent
 │   │   ├── filemanager.go           #   file_manager sub-agent
-│   │   ├── context.go               #   AgentContext (workspace, container, SSH info)
+│   │   ├── context.go               #   AgentContext (workspace, sandbox, SSH info)
 │   │   ├── plan.go                  #   Plan/Step type definitions
 │   │   ├── plan_wrapper.go          #   Plan state persistence + event emission
 │   │   └── tool_wrapper.go          #   eventEmittingTool wrapper
@@ -76,16 +76,15 @@ starxo/
 │   │   ├── session_svc.go           #   SessionService: session CRUD, multi-session state coordination
 │   │   ├── settings_svc.go         #   SettingsService: config management, connection testing
 │   │   ├── file_svc.go              #   FileService: upload/download/preview
-│   │   ├── container_svc.go         #   ContainerService: container lifecycle
+│   │   ├── container_svc.go         #   ContainerService: sandbox registry lifecycle (compat name)
 │   │   └── events.go                #   Event DTO definitions
 │   │
 │   ├── sandbox/                     # Remote sandbox management
 │   │   ├── manager.go               #   SandboxManager top-level orchestrator
 │   │   ├── ssh.go                   #   SSH connection management
-│   │   ├── docker.go                #   Remote Docker management
+│   │   ├── runtime.go               #   bwrap/Seatbelt runtime management
 │   │   ├── operator.go              #   RemoteOperator (commandline.Operator impl)
-│   │   ├── transfer.go              #   File transfer (SFTP + docker cp)
-│   │   └── setup.go                 #   Environment setup (Docker install, image pull)
+│   │   └── transfer.go              #   File transfer (SFTP into sandbox workspace)
 │   │
 │   ├── tools/                       # Agent tool definitions
 │   │   ├── registry.go              #   ToolRegistry central registry
@@ -100,8 +99,8 @@ starxo/
 │   ├── config/                      # Configuration management
 │   ├── context/                     # Context engine (history, file context, windowing)
 │   ├── llm/                         # LLM provider factory
-│   ├── model/                       # Data models (Message, Session, Container)
-│   ├── storage/                     # Persistence (sessions, containers)
+│   ├── model/                       # Data models (Message, Session, sandbox registry)
+│   ├── storage/                     # Persistence (sessions, sandboxes)
 │   ├── store/                       # CheckPointStore (interrupt/resume state)
 │   └── logger/                      # Structured logging + Eino callbacks
 │
@@ -116,9 +115,9 @@ starxo/
 │       ├── components/
 │       │   ├── chat/                #   Chat panel, message bubbles, interrupt dialog, floating task rail, input area
 │       │   ├── layout/              #   Main layout, header, sidebar, task rail components
-│       │   ├── settings/            #   Settings panel (SSH/Docker/LLM/MCP)
+│       │   ├── settings/            #   Settings panel (SSH/Sandbox/LLM/MCP)
 │       │   ├── files/               #   Workspace drawer, file tree, code preview, file transfer
-│       │   ├── containers/          #   Container panel + persistent dock
+│       │   ├── containers/          #   Sandbox panel + persistent dock
 │       │   ├── status/              #   Agent status, connection status
 │       │   └── terminal/            #   Terminal component (not a default main-view entry)
 │       ├── stores/                  #   Pinia state management
@@ -140,7 +139,7 @@ starxo/
 - **Go** >= 1.24
 - **Node.js** >= 18
 - **Wails CLI** v2 — Install: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-- **Remote Server** with SSH access + Docker installed (or permission to install)
+- **Remote Server** with SSH access plus either Linux `bubblewrap`/`python3` or macOS `sandbox-exec`/`python3`
 
 ### Development
 
@@ -186,7 +185,7 @@ App configuration is stored at `~/.starxo/config.json`:
 | Block | Description |
 |-------|-------------|
 | `ssh` | SSH connection (host, port, username, auth method) |
-| `docker` | Docker settings (image, container name, resource limits) |
+| `sandbox` | Sandbox runtime settings (runtime, workspace root, network, process limits, Python bootstrap) |
 | `llm` | LLM settings (provider, model, API key, base URL) |
 | `mcp` | MCP server settings (command, args, env vars, transport) |
 | `agent` | Agent settings (mode, system prompt, workspace directory) |
@@ -211,7 +210,7 @@ All persistent data is stored under `~/.starxo/`:
 ```
 ~/.starxo/
 ├── config.json                # App configuration
-├── containers.json            # Container registry
+├── sandboxes.json             # Sandbox registry
 └── sessions/
     └── {session-id}/
         ├── session.json       # Session metadata
