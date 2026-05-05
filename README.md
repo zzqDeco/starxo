@@ -170,6 +170,14 @@ git push origin v0.1.0
 
 The release workflow builds unsigned macOS, Windows, and Linux packages, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
 
+After the workflow finishes, verify:
+
+- The Release page is public and contains the macOS zip, Windows exe, Windows installer, Linux tarball, and `SHA256SUMS.txt`.
+- `SHA256SUMS.txt` hashes match the downloaded assets.
+- Each platform package launches at least once; unsigned macOS/Windows security prompts are expected for v1.
+- Settings open correctly, SSH connection testing works, and sandbox runtime detection reports the expected remote runtime state.
+- On a Linux remote, creating a sandbox can write to the workspace and `network=false` blocks outbound network access.
+
 ### Frontend-Only Development
 
 ```bash
