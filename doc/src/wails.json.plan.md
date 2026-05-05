@@ -32,11 +32,13 @@
 ## 5. 依赖关系
 - 内部依赖: 引用 frontend/ 目录的 npm 脚本
 - 外部依赖: Wails CLI v2
+- Release CI 依赖该配置中的 `outputfilename`、`frontend:build` 和 `build/` 平台资源生成 GitHub Release 产物。
 
 ## 6. 变更影响面
 - 修改 frontend 命令影响构建和开发流程
 - 修改 outputfilename 影响打包产物命名
 - 修改 productVersion 影响应用版本标识
+- 修改 Wails 构建输出路径或文件名时，需同步 `.github/workflows/release.yml` 的产物打包步骤。
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
