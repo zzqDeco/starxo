@@ -127,7 +127,7 @@ useWailsEvent<{ stdout?: string; stderr?: string; exitCode?: number }>('terminal
 
 useWailsEvent('container:ready', () => {
   if (termInstance && xtermLoaded) {
-    termInstance.writeln(`\x1b[32m[${formatTime()}] Container connected and ready.\x1b[0m`)
+    termInstance.writeln(`\x1b[32m[${formatTime()}] Sandbox connected and ready.\x1b[0m`)
     termInstance.writeln('')
     lineCount.value += 2
   }

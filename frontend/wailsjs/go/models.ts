@@ -135,6 +135,32 @@ export namespace config {
 	        this.network = source["network"];
 	    }
 	}
+	export class SandboxConfig {
+	    runtime: string;
+	    rootDir: string;
+	    workDirName: string;
+	    network: boolean;
+	    memoryLimitMB: number;
+	    commandTimeoutSec: number;
+	    bootstrapPython: boolean;
+	    pythonPackages: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SandboxConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.runtime = source["runtime"];
+	        this.rootDir = source["rootDir"];
+	        this.workDirName = source["workDirName"];
+	        this.network = source["network"];
+	        this.memoryLimitMB = source["memoryLimitMB"];
+	        this.commandTimeoutSec = source["commandTimeoutSec"];
+	        this.bootstrapPython = source["bootstrapPython"];
+	        this.pythonPackages = source["pythonPackages"];
+	    }
+	}
 	export class SSHConfig {
 	    host: string;
 	    port: number;
@@ -157,7 +183,8 @@ export namespace config {
 	}
 	export class AppConfig {
 	    ssh: SSHConfig;
-	    docker: DockerConfig;
+	    sandbox: SandboxConfig;
+	    docker?: DockerConfig;
 	    llm: LLMConfig;
 	    mcp: MCPConfig;
 	    agent: AgentConfig;
@@ -169,6 +196,7 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ssh = this.convertValues(source["ssh"], SSHConfig);
+	        this.sandbox = this.convertValues(source["sandbox"], SandboxConfig);
 	        this.docker = this.convertValues(source["docker"], DockerConfig);
 	        this.llm = this.convertValues(source["llm"], LLMConfig);
 	        this.mcp = this.convertValues(source["mcp"], MCPConfig);
@@ -197,6 +225,7 @@ export namespace config {
 	
 	
 	
+	
 
 }
 
@@ -204,9 +233,12 @@ export namespace model {
 	
 	export class Container {
 	    id: string;
-	    dockerID: string;
+	    runtimeID?: string;
+	    runtime?: string;
+	    workspacePath?: string;
+	    dockerID?: string;
 	    name: string;
-	    image: string;
+	    image?: string;
 	    sshHost: string;
 	    sshPort: number;
 	    status: string;
@@ -222,6 +254,9 @@ export namespace model {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.runtimeID = source["runtimeID"];
+	        this.runtime = source["runtime"];
+	        this.workspacePath = source["workspacePath"];
 	        this.dockerID = source["dockerID"];
 	        this.name = source["name"];
 	        this.image = source["image"];
@@ -577,6 +612,62 @@ export namespace model {
 
 export namespace sandbox {
 	
+	export class RuntimeCheckResult {
+	    runtime: string;
+	    os: string;
+	    available: boolean;
+	    installable: boolean;
+	    missing: string[];
+	    message: string;
+	    installCommand?: string;
+	    workspaceRoot?: string;
+	    commandTimeoutSec: number;
+	    memoryLimitMB: number;
+	    networkEnabled: boolean;
+	    pythonBootstrap: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuntimeCheckResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.runtime = source["runtime"];
+	        this.os = source["os"];
+	        this.available = source["available"];
+	        this.installable = source["installable"];
+	        this.missing = source["missing"];
+	        this.message = source["message"];
+	        this.installCommand = source["installCommand"];
+	        this.workspaceRoot = source["workspaceRoot"];
+	        this.commandTimeoutSec = source["commandTimeoutSec"];
+	        this.memoryLimitMB = source["memoryLimitMB"];
+	        this.networkEnabled = source["networkEnabled"];
+	        this.pythonBootstrap = source["pythonBootstrap"];
+	    }
+	}
+	export class RuntimeInstallResult {
+	    runtime: string;
+	    os: string;
+	    installed: boolean;
+	    stdout?: string;
+	    stderr?: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuntimeInstallResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.runtime = source["runtime"];
+	        this.os = source["os"];
+	        this.installed = source["installed"];
+	        this.stdout = source["stdout"];
+	        this.stderr = source["stderr"];
+	        this.message = source["message"];
+	    }
+	}
 	export class SandboxManager {
 	
 	
@@ -813,6 +904,10 @@ export namespace service {
 	
 	export class SandboxStatusDTO {
 	    sshConnected: boolean;
+	    runtimeAvailable: boolean;
+	    sandboxActive: boolean;
+	    activeSandboxID: string;
+	    activeSandboxName: string;
 	    dockerRunning: boolean;
 	    containerID: string;
 	    activeContainerID: string;
@@ -826,6 +921,10 @@ export namespace service {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sshConnected = source["sshConnected"];
+	        this.runtimeAvailable = source["runtimeAvailable"];
+	        this.sandboxActive = source["sandboxActive"];
+	        this.activeSandboxID = source["activeSandboxID"];
+	        this.activeSandboxName = source["activeSandboxName"];
 	        this.dockerRunning = source["dockerRunning"];
 	        this.containerID = source["containerID"];
 	        this.activeContainerID = source["activeContainerID"];

@@ -17,12 +17,16 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "root", cfg.SSH.User)
 	assert.Empty(t, cfg.SSH.Host)
 
-	// Docker defaults
-	assert.Equal(t, "python:3.11-slim", cfg.Docker.Image)
-	assert.Equal(t, int64(2048), cfg.Docker.MemoryLimit)
-	assert.Equal(t, 1.0, cfg.Docker.CPULimit)
-	assert.Equal(t, "/workspace", cfg.Docker.WorkDir)
-	assert.True(t, cfg.Docker.Network)
+	// Sandbox defaults
+	require.Nil(t, cfg.Docker)
+	assert.Equal(t, "auto", cfg.Sandbox.Runtime)
+	assert.Equal(t, "~/.starxo/sandboxes", cfg.Sandbox.RootDir)
+	assert.Equal(t, "workspace", cfg.Sandbox.WorkDirName)
+	assert.Equal(t, int64(2048), cfg.Sandbox.MemoryLimitMB)
+	assert.Equal(t, 120, cfg.Sandbox.CommandTimeoutSec)
+	assert.True(t, cfg.Sandbox.Network)
+	assert.True(t, cfg.Sandbox.BootstrapPython)
+	assert.Equal(t, []string{"pandas", "numpy", "matplotlib", "openpyxl"}, cfg.Sandbox.PythonPackages)
 
 	// LLM defaults
 	assert.Equal(t, "openai", cfg.LLM.Type)
@@ -56,10 +60,31 @@ func TestConfigJSONRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, original.SSH, restored.SSH)
-	assert.Equal(t, original.Docker, restored.Docker)
+	assert.Equal(t, original.Sandbox, restored.Sandbox)
+	assert.Nil(t, restored.Docker)
 	assert.Equal(t, original.LLM, restored.LLM)
 	assert.Equal(t, original.Agent, restored.Agent)
 	assert.Equal(t, original.MCP.Servers, restored.MCP.Servers)
+}
+
+func TestMigrateLegacyDockerConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Sandbox = SandboxConfig{}
+	cfg.Docker = &DockerConfig{
+		Image:       "python:3.11-slim",
+		MemoryLimit: 1024,
+		CPULimit:    1.0,
+		WorkDir:     "/workspace",
+		Network:     false,
+	}
+
+	MigrateLegacyDockerConfig(cfg)
+	NormalizeAppConfig(cfg)
+
+	assert.Nil(t, cfg.Docker)
+	assert.Equal(t, int64(1024), cfg.Sandbox.MemoryLimitMB)
+	assert.False(t, cfg.Sandbox.Network)
+	assert.Equal(t, "workspace", cfg.Sandbox.WorkDirName)
 }
 
 func TestConfigJSONOmitsEmptyFields(t *testing.T) {

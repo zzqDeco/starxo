@@ -39,9 +39,15 @@ func (s *Store) Load() error {
 		return err
 	}
 	cfg := DefaultConfig()
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(data, &raw)
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return err
 	}
+	if _, hasSandbox := raw["sandbox"]; !hasSandbox {
+		MigrateLegacyDockerConfig(cfg)
+	}
+	NormalizeAppConfig(cfg)
 	s.config = cfg
 	return nil
 }
@@ -67,6 +73,7 @@ func (s *Store) Update(fn func(*AppConfig)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fn(s.config)
+	NormalizeAppConfig(s.config)
 	data, err := json.MarshalIndent(s.config, "", "  ")
 	if err != nil {
 		return err

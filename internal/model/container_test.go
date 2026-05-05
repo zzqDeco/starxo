@@ -13,6 +13,7 @@ func TestContainerStatusConstants(t *testing.T) {
 	assert.Equal(t, ContainerStatus("stopped"), ContainerStopped)
 	assert.Equal(t, ContainerStatus("unknown"), ContainerUnknown)
 	assert.Equal(t, ContainerStatus("destroyed"), ContainerDestroyed)
+	assert.Equal(t, ContainerStatus("unavailable"), ContainerUnavailable)
 }
 
 func TestContainerZeroValue(t *testing.T) {
@@ -27,9 +28,12 @@ func TestContainerZeroValue(t *testing.T) {
 func TestContainerJSONRoundTrip(t *testing.T) {
 	original := Container{
 		ID:            "ctr-1",
-		DockerID:      "docker-abc",
-		Name:          "test-container",
-		Image:         "python:3.11-slim",
+		RuntimeID:     "sbx-abc",
+		Runtime:       "bwrap",
+		WorkspacePath: "/home/me/.starxo/sandboxes/sbx-abc/workspace",
+		DockerID:      "sbx-abc",
+		Name:          "test-sandbox",
+		Image:         "bwrap",
 		SSHHost:       "localhost",
 		SSHPort:       2222,
 		Status:        ContainerRunning,
@@ -57,6 +61,7 @@ func TestContainerStatusTransitions(t *testing.T) {
 		{"stopped to running", ContainerStopped, ContainerRunning},
 		{"running to destroyed", ContainerRunning, ContainerDestroyed},
 		{"stopped to destroyed", ContainerStopped, ContainerDestroyed},
+		{"running to unavailable", ContainerRunning, ContainerUnavailable},
 	}
 
 	for _, tt := range tests {
@@ -77,6 +82,7 @@ func TestContainerStatusJSONValues(t *testing.T) {
 		{ContainerStopped, `"stopped"`},
 		{ContainerUnknown, `"unknown"`},
 		{ContainerDestroyed, `"destroyed"`},
+		{ContainerUnavailable, `"unavailable"`},
 	}
 
 	for _, tt := range tests {

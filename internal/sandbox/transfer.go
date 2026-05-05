@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -89,64 +90,23 @@ func (t *FileTransfer) DownloadFile(ctx context.Context, remotePath, localPath s
 	return nil
 }
 
-// UploadToContainer uploads a local file into a Docker container.
-// Flow: local file -> SFTP to remote host /tmp -> docker cp into container.
-func (t *FileTransfer) UploadToContainer(ctx context.Context, localPath, containerPath string, docker *RemoteDockerManager) error {
-	if docker.ContainerID() == "" {
-		return fmt.Errorf("no container is running")
-	}
-
-	// Generate a unique temp path on the remote host
-	baseName := filepath.Base(localPath)
-	tmpPath := fmt.Sprintf("/tmp/eino-upload-%s-%s", docker.ContainerID()[:8], sanitizeFileName(baseName))
-
-	// Step 1: Upload to remote host via SFTP
-	if err := t.UploadFile(ctx, localPath, tmpPath); err != nil {
-		return fmt.Errorf("failed to upload to remote host: %w", err)
-	}
-
-	// Step 2: docker cp from host into container
-	err := docker.CopyToContainer(ctx, tmpPath, containerPath)
-
-	// Step 3: Clean up temp file on remote host
-	cleanupCmd := fmt.Sprintf("rm -f %s", shellQuote(tmpPath))
-	_, _, _, _ = t.ssh.RunCommand(ctx, cleanupCmd)
-
+// UploadToContainer uploads a local file into the active sandbox workspace.
+// The name is kept for Wails/service compatibility with the previous Docker implementation.
+func (t *FileTransfer) UploadToContainer(ctx context.Context, localPath, containerPath string, runtime *RemoteRuntimeManager) error {
+	remotePath, err := workspaceTransferPath(containerPath, runtime)
 	if err != nil {
-		return fmt.Errorf("failed to copy into container: %w", err)
+		return err
 	}
-
-	return nil
+	return t.UploadFile(ctx, localPath, remotePath)
 }
 
-// DownloadFromContainer downloads a file from a Docker container to a local path.
-// Flow: docker cp from container to remote host /tmp -> SFTP download to local.
-func (t *FileTransfer) DownloadFromContainer(ctx context.Context, containerPath, localPath string, docker *RemoteDockerManager) error {
-	if docker.ContainerID() == "" {
-		return fmt.Errorf("no container is running")
-	}
-
-	// Generate a unique temp path on the remote host
-	baseName := filepath.Base(containerPath)
-	tmpPath := fmt.Sprintf("/tmp/eino-download-%s-%s", docker.ContainerID()[:8], sanitizeFileName(baseName))
-
-	// Step 1: docker cp from container to remote host
-	if err := docker.CopyFromContainer(ctx, containerPath, tmpPath); err != nil {
-		return fmt.Errorf("failed to copy from container: %w", err)
-	}
-
-	// Step 2: Download from remote host to local via SFTP
-	err := t.DownloadFile(ctx, tmpPath, localPath)
-
-	// Step 3: Clean up temp file on remote host
-	cleanupCmd := fmt.Sprintf("rm -f %s", shellQuote(tmpPath))
-	_, _, _, _ = t.ssh.RunCommand(ctx, cleanupCmd)
-
+// DownloadFromContainer downloads a file from the active sandbox workspace.
+func (t *FileTransfer) DownloadFromContainer(ctx context.Context, containerPath, localPath string, runtime *RemoteRuntimeManager) error {
+	remotePath, err := workspaceTransferPath(containerPath, runtime)
 	if err != nil {
-		return fmt.Errorf("failed to download from remote host: %w", err)
+		return err
 	}
-
-	return nil
+	return t.DownloadFile(ctx, remotePath, localPath)
 }
 
 // newSFTP creates a new SFTP client from the SSH connection.
@@ -168,4 +128,30 @@ func sanitizeFileName(name string) string {
 	name = strings.ReplaceAll(name, "\\", "_")
 	name = strings.ReplaceAll(name, " ", "_")
 	return name
+}
+
+func workspaceTransferPath(filePath string, runtime *RemoteRuntimeManager) (string, error) {
+	if runtime == nil || !runtime.IsActive() {
+		return "", fmt.Errorf("no sandbox is active")
+	}
+	workspace := cleanRemotePath(runtime.WorkspacePath())
+	if workspace == "" {
+		return "", fmt.Errorf("sandbox workspace is not available")
+	}
+	p := strings.TrimSpace(filePath)
+	if p == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if p == "/workspace" {
+		p = workspace
+	} else if strings.HasPrefix(p, "/workspace/") {
+		p = path.Join(workspace, strings.TrimPrefix(p, "/workspace/"))
+	} else if !strings.HasPrefix(p, "/") {
+		p = path.Join(workspace, p)
+	}
+	p = cleanRemotePath(p)
+	if p != workspace && !strings.HasPrefix(p, workspace+"/") {
+		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, workspace)
+	}
+	return p, nil
 }

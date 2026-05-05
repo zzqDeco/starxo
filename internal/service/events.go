@@ -57,6 +57,10 @@ type FileInfoDTO struct {
 // SandboxStatusDTO represents the current sandbox connection status.
 type SandboxStatusDTO struct {
 	SSHConnected        bool   `json:"sshConnected"`
+	RuntimeAvailable    bool   `json:"runtimeAvailable"`
+	SandboxActive       bool   `json:"sandboxActive"`
+	ActiveSandboxID     string `json:"activeSandboxID"`
+	ActiveSandboxName   string `json:"activeSandboxName"`
 	DockerRunning       bool   `json:"dockerRunning"`
 	ContainerID         string `json:"containerID"`
 	ActiveContainerID   string `json:"activeContainerID"`
