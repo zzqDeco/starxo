@@ -170,6 +170,14 @@ git push origin v0.1.0
 
 发布工作流会构建未签名的 macOS、Windows、Linux 包，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
 
+工作流结束后需要检查：
+
+- Release 页面已公开，并包含 macOS zip、Windows exe、Windows installer、Linux tarball 和 `SHA256SUMS.txt`。
+- `SHA256SUMS.txt` 中的哈希能匹配下载后的产物。
+- 三个平台的包至少能启动一次；v1 未签名，macOS/Windows 的系统安全提示属于预期现象。
+- 设置页可正常打开，SSH 连接测试可用，沙箱运行时检测能返回符合远端环境的状态。
+- Linux 远端可以创建 sandbox 并写入 workspace，且 `network=false` 时外联网络被阻断。
+
 ### 前端独立开发
 
 ```bash
