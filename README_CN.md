@@ -127,6 +127,7 @@ starxo/
 │       └── locales/                 #   i18n 语言包（zh/en）
 │
 ├── build/                           # 平台构建资源（Windows NSIS / macOS plist）
+├── .github/workflows/               # GitHub Actions CI/CD 工作流
 ├── doc/                             # 项目技术文档
 ├── plan/                            # 未来规划文档
 └── logs/                            # 运行日志（agent-YYYY-MM-DD.log）
@@ -156,6 +157,19 @@ wails build
 ```
 
 产物输出至 `build/bin/` 目录。
+
+### Tag 发布
+
+当 `vX.Y.Z` tag 推送到可从 `master` 访问的 commit 时，GitHub Actions 会自动发布桌面安装包。
+
+```bash
+git checkout master
+git pull origin master
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+发布工作流会构建未签名的 macOS、Windows、Linux 包，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
 
 ### 前端独立开发
 
