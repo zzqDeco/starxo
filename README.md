@@ -126,6 +126,7 @@ starxo/
 │       └── locales/                 #   i18n language packs (zh/en)
 │
 ├── build/                           # Platform build assets (Windows NSIS / macOS plist)
+├── .github/workflows/               # GitHub Actions CI/CD workflows
 ├── doc/                             # Technical documentation
 ├── plan/                            # Future roadmap documents
 └── logs/                            # Runtime logs (agent-YYYY-MM-DD.log)
@@ -155,6 +156,19 @@ wails build
 ```
 
 Output goes to `build/bin/`.
+
+### Tagged Release
+
+GitHub Actions publishes desktop packages when a `vX.Y.Z` tag is pushed to a commit reachable from `master`.
+
+```bash
+git checkout master
+git pull origin master
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds unsigned macOS, Windows, and Linux packages, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
 
 ### Frontend-Only Development
 

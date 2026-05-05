@@ -1,0 +1,226 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.24.x"
+  NODE_VERSION: "22.x"
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([._-][0-9A-Za-z][0-9A-Za-z._-]*)?$ ]]; then
+            echo "::error::Release tag must match vX.Y.Z or vX.Y.Z-suffix; got ${tag}"
+            exit 1
+          fi
+
+          git fetch --force origin master:refs/remotes/origin/master
+          commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          if ! git merge-base --is-ancestor "${commit}" origin/master; then
+            echo "::error::Release tag ${tag} points to ${commit}, which is not reachable from origin/master"
+            exit 1
+          fi
+
+          {
+            echo "tag=${tag}"
+            echo "version=${tag#v}"
+            echo "commit=${commit}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-universal
+            os: macos-latest
+            platform: darwin/universal
+          - target: windows-amd64
+            os: windows-latest
+            platform: windows/amd64
+          - target: linux-amd64
+            os: ubuntu-24.04
+            platform: linux/amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          fetch-depth: 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Add Go bin to PATH
+        shell: bash
+        run: echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+
+      - name: Install Wails CLI
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev
+
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install nsis -y --no-progress
+          $nsisDir = @(
+            "${env:ProgramFiles(x86)}\NSIS",
+            "${env:ProgramFiles}\NSIS"
+          ) | Where-Object { Test-Path (Join-Path $_ 'makensis.exe') } | Select-Object -First 1
+          if (-not $nsisDir) {
+            throw "makensis.exe was not found after installing NSIS"
+          }
+          $nsisDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $nsisDir 'makensis.exe') /VERSION
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm ci --prefix frontend
+
+      - name: Build Wails app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            wails build -platform "${{ matrix.platform }}" -tags webkit2_41 -trimpath
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            wails build -platform "${{ matrix.platform }}" -nsis -trimpath
+          else
+            wails build -platform "${{ matrix.platform }}" -trimpath
+          fi
+
+      - name: Package release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          case "${TARGET}" in
+            darwin-universal)
+              test -d build/bin/starxo.app
+              ditto -c -k --keepParent build/bin/starxo.app "dist/starxo-${VERSION}-darwin-universal.zip"
+              ;;
+            windows-amd64)
+              find build/bin -maxdepth 1 -type f -print
+              exe="$(find build/bin -maxdepth 1 -type f -iname 'starxo*.exe' ! -iname '*installer*.exe' | head -n 1)"
+              installer="$(find build/bin -maxdepth 1 -type f -iname '*installer*.exe' | head -n 1)"
+              if [[ -z "${exe}" ]]; then
+                echo "::error::Windows executable was not found in build/bin"
+                exit 1
+              fi
+              if [[ -z "${installer}" ]]; then
+                echo "::error::Windows installer was not found in build/bin; check NSIS/makensis availability"
+                exit 1
+              fi
+              cp "${exe}" "dist/starxo-${VERSION}-windows-amd64.exe"
+              cp "${installer}" "dist/starxo-${VERSION}-windows-amd64-installer.exe"
+              ;;
+            linux-amd64)
+              test -f build/bin/starxo
+              tar -C build/bin -czf "dist/starxo-${VERSION}-linux-amd64.tar.gz" starxo
+              ;;
+            *)
+              echo "::error::Unknown build target ${TARGET}"
+              exit 1
+              ;;
+          esac
+
+          find dist -maxdepth 1 -type f -print
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs:
+      - preflight
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          ls -lah
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          name: Starxo ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.commit }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: release-assets/*
