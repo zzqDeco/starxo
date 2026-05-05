@@ -12,13 +12,14 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Dual Execution Modes** — Default mode (direct execution) + Plan mode (Planner/Replanner structured execution)
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
+- **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
 - **Real-time Event Stream** — Unified `agent:timeline` event stream via Wails Events for live agent activity display, all events tagged with `sessionId` for multi-session isolation
 - **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
-- **File Transfer** — Upload/download support via SFTP directly into each persistent sandbox workspace
+- **File Transfer** — Upload/download support via SFTP directly into each persistent sandbox workspace, with workspace metadata, path copy, and tmp cleanup
 - **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, workspace drawer, persistent runtime dock, and composer-level mode controls
 
 ## Tech Stack
@@ -210,6 +211,12 @@ These environment variables are for development and debugging only:
   - Startup-latched: restart the app after changing it
 
 Both flags are disabled by default and are not intended as production-facing controls.
+
+### Sandbox Diagnostics And Fix Guide
+
+The Sandbox settings tab can run a full remote diagnostics pass before saving settings. Linux checks cover `bwrap`, `python3`, Python venv creation, user namespace sysctls, AppArmor's unprivileged user namespace restriction, and a bwrap smoke command. macOS checks cover `sandbox-exec`, `python3`, and a minimal Seatbelt smoke command.
+
+Normal Linux package dependencies can be installed with the Install runtime button. Host security changes such as `sysctl` or AppArmor adjustments are never executed automatically; Starxo only displays copyable commands so the operator can review and run them manually.
 
 ## Data Storage
 

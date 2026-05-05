@@ -6,6 +6,10 @@ export function CheckSandboxRuntime(arg1) {
   return window['go']['service']['SettingsService']['CheckSandboxRuntime'](arg1);
 }
 
+export function DiagnoseSandboxRuntime(arg1) {
+  return window['go']['service']['SettingsService']['DiagnoseSandboxRuntime'](arg1);
+}
+
 export function GetSettings() {
   return window['go']['service']['SettingsService']['GetSettings']();
 }

@@ -51,7 +51,28 @@ type FileInfoDTO struct {
 	Name     string `json:"name"`
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
+	Modified string `json:"modified,omitempty"`
 	IsOutput bool   `json:"isOutput"`
+}
+
+type WorkspaceInfoDTO struct {
+	SSHConnected  bool   `json:"sshConnected"`
+	Active        bool   `json:"active"`
+	SandboxID     string `json:"sandboxID,omitempty"`
+	SandboxName   string `json:"sandboxName,omitempty"`
+	Runtime       string `json:"runtime,omitempty"`
+	WorkspacePath string `json:"workspacePath,omitempty"`
+	SSHHost       string `json:"sshHost,omitempty"`
+	SSHPort       int    `json:"sshPort,omitempty"`
+	FileCount     int    `json:"fileCount"`
+	TotalSize     int64  `json:"totalSize"`
+	RefreshedAt   int64  `json:"refreshedAt"`
+}
+
+type WorkspaceCleanupResultDTO struct {
+	TmpPath        string `json:"tmpPath"`
+	RemovedEntries int    `json:"removedEntries"`
+	ReclaimedBytes int64  `json:"reclaimedBytes"`
 }
 
 // SandboxStatusDTO represents the current sandbox connection status.
