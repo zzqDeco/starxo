@@ -6,9 +6,8 @@
 
 ## 核心职责
 - 编辑 `settings.sandbox`：runtime、rootDir、workDirName、网络、内存、命令超时、Python 初始化和包列表。
-- 调用 Wails `SettingsService.CheckSandboxRuntime` 检测远端 runtime。
-- 调用 Wails `SettingsService.InstallSandboxRuntime` 在 Linux 上显式安装 bubblewrap/Python 依赖。
+- 嵌入 `SandboxDiagnosticsPanel`，负责运行诊断和安装普通 runtime 依赖。
 
 ## 维护要点
 - 该组件不再暴露 Docker image/cpu/container 配置。
-- 检测和安装使用当前表单中的 SSH + sandbox 配置，允许保存前验证。
+- 诊断和安装使用当前表单中的 SSH + sandbox 配置，允许保存前验证。

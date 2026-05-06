@@ -313,6 +313,12 @@ func (m *SandboxManager) SSH() *SSHClient {
 	return m.ssh
 }
 
+func (m *SandboxManager) SSHHostPort() (string, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.config.SSH.Host, m.config.SSH.Port
+}
+
 func (m *SandboxManager) WorkspacePath() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -1,15 +1,12 @@
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
-import { NAlert, NButton, NForm, NFormItem, NInput, NInputNumber, NSelect, NSwitch } from 'naive-ui'
+import { computed } from 'vue'
+import { NForm, NFormItem, NInput, NInputNumber, NSelect, NSwitch } from 'naive-ui'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useI18n } from 'vue-i18n'
-import { CheckSandboxRuntime, InstallSandboxRuntime } from '../../../wailsjs/go/service/SettingsService'
+import SandboxDiagnosticsPanel from './SandboxDiagnosticsPanel.vue'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
-const checking = ref(false)
-const installing = ref(false)
-const runtimeResult = ref<any | null>(null)
 
 const runtimeOptions = computed(() => [
   { label: t('settings.sandbox.runtimeAuto'), value: 'auto' },
@@ -27,24 +24,6 @@ const packagesText = computed({
   },
 })
 
-async function checkRuntime() {
-  checking.value = true
-  try {
-    runtimeResult.value = await CheckSandboxRuntime(settingsStore.settings as any)
-  } finally {
-    checking.value = false
-  }
-}
-
-async function installRuntime() {
-  installing.value = true
-  try {
-    runtimeResult.value = await InstallSandboxRuntime(settingsStore.settings as any)
-    await checkRuntime()
-  } finally {
-    installing.value = false
-  }
-}
 </script>
 
 <template>
@@ -122,25 +101,7 @@ async function installRuntime() {
       </div>
     </NForm>
 
-    <div class="runtime-actions">
-      <NButton size="small" :loading="checking" @click="checkRuntime">
-        {{ t('settings.sandbox.checkRuntime') }}
-      </NButton>
-      <NButton size="small" type="primary" :loading="installing" @click="installRuntime">
-        {{ t('settings.sandbox.installRuntime') }}
-      </NButton>
-    </div>
-
-    <NAlert v-if="runtimeResult" :type="runtimeResult.available || runtimeResult.installed ? 'success' : 'warning'" class="runtime-result">
-      <div class="result-title">
-        {{ runtimeResult.runtime || settingsStore.settings.sandbox.runtime }}
-        <span v-if="runtimeResult.os">({{ runtimeResult.os }})</span>
-      </div>
-      <div>{{ runtimeResult.message }}</div>
-      <div v-if="runtimeResult.missing?.length" class="result-muted">
-        {{ t('settings.sandbox.missing') }}: {{ runtimeResult.missing.join(', ') }}
-      </div>
-    </NAlert>
+    <SandboxDiagnosticsPanel />
 
     <div class="info-box">
       <p class="info-text">
@@ -161,28 +122,10 @@ async function installRuntime() {
   font-size: 12px !important;
 }
 
-.switch-row,
-.runtime-actions {
+.switch-row {
   display: flex;
   gap: var(--space-md);
   align-items: center;
-}
-
-.runtime-actions {
-  margin-top: 12px;
-}
-
-.runtime-result {
-  margin-top: 12px;
-}
-
-.result-title {
-  font-weight: var(--fw-semibold);
-}
-
-.result-muted {
-  margin-top: 4px;
-  color: var(--text-muted);
 }
 
 .info-box {
