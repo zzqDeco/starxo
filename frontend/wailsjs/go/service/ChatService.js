@@ -18,6 +18,10 @@ export function ClearHistory() {
   return window['go']['service']['ChatService']['ClearHistory']();
 }
 
+export function ClearToolPermissionGrants(arg1) {
+  return window['go']['service']['ChatService']['ClearToolPermissionGrants'](arg1);
+}
+
 export function CtxEngine() {
   return window['go']['service']['ChatService']['CtxEngine']();
 }
@@ -66,6 +70,14 @@ export function ListRuntimeTasks(arg1) {
   return window['go']['service']['ChatService']['ListRuntimeTasks'](arg1);
 }
 
+export function ListToolPermissionGrants(arg1) {
+  return window['go']['service']['ChatService']['ListToolPermissionGrants'](arg1);
+}
+
+export function ListToolPermissionRequests(arg1) {
+  return window['go']['service']['ChatService']['ListToolPermissionRequests'](arg1);
+}
+
 export function PruneDiscoveredToolsForSave(arg1, arg2) {
   return window['go']['service']['ChatService']['PruneDiscoveredToolsForSave'](arg1, arg2);
 }
@@ -92,6 +104,10 @@ export function ResumeWithAnswer(arg1) {
 
 export function ResumeWithChoice(arg1) {
   return window['go']['service']['ChatService']['ResumeWithChoice'](arg1);
+}
+
+export function RevokeToolPermissionGrant(arg1, arg2) {
+  return window['go']['service']['ChatService']['RevokeToolPermissionGrant'](arg1, arg2);
 }
 
 export function SendMessage(arg1) {

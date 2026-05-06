@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -105,6 +106,9 @@ func (s *ChatService) resolvePermissionRequest(requestID, decision string) error
 	resolution := tools.ToolPermissionResolution{Decision: normalizePermissionDecision(decision)}
 	s.permissionMu.Lock()
 	pending, ok := s.permissionRequests[requestID]
+	if ok {
+		delete(s.permissionRequests, requestID)
+	}
 	s.permissionMu.Unlock()
 	if !ok {
 		return fmt.Errorf("permission request %s not found", requestID)
@@ -114,7 +118,7 @@ func (s *ChatService) resolvePermissionRequest(requestID, decision string) error
 	default:
 	}
 	wailsEmit(s.ctx, "runtime:permission_resolved", map[string]string{
-		"requestID": requestID,
+		"requestId": requestID,
 		"decision":  resolution.Decision,
 	})
 	return nil
@@ -155,12 +159,111 @@ func (s *ChatService) addPermissionGrant(sessionID string, entry tools.CatalogEn
 		CreatedAt: s.now().UnixMilli(),
 	}
 	run.stateMu.Unlock()
+	wailsEmit(s.ctx, "runtime:permission_grants_changed", map[string]string{"sessionId": sessionID})
+	s.saveSessionPermissionState(sessionID)
+}
+
+func (s *ChatService) saveSessionPermissionState(sessionID string) {
 	s.mu.Lock()
 	ss := s.sessionService
 	s.mu.Unlock()
 	if ss != nil {
 		go func() { _ = ss.SaveSessionByID(sessionID) }()
 	}
+}
+
+func (s *ChatService) ListToolPermissionRequests(sessionID string) ([]tools.ToolPermissionRequest, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	s.permissionMu.Lock()
+	defer s.permissionMu.Unlock()
+	requests := make([]tools.ToolPermissionRequest, 0, len(s.permissionRequests))
+	for _, pending := range s.permissionRequests {
+		if pending == nil {
+			continue
+		}
+		request := pending.request
+		if sessionID != "" && request.SessionID != "" && request.SessionID != sessionID {
+			continue
+		}
+		requests = append(requests, request)
+	}
+	sort.Slice(requests, func(i, j int) bool {
+		if requests[i].CreatedAt == requests[j].CreatedAt {
+			return requests[i].RequestID < requests[j].RequestID
+		}
+		return requests[i].CreatedAt < requests[j].CreatedAt
+	})
+	return requests, nil
+}
+
+func (s *ChatService) ListToolPermissionGrants(sessionID string) ([]model.RuntimePermissionGrant, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("sessionID is required")
+	}
+	s.mu.Lock()
+	run := s.sessions[sessionID]
+	s.mu.Unlock()
+	if run == nil {
+		return nil, nil
+	}
+	run.stateMu.RLock()
+	defer run.stateMu.RUnlock()
+	grants := make([]model.RuntimePermissionGrant, 0, len(run.permissionGrants))
+	for _, grant := range run.permissionGrants {
+		if grant.Decision == tools.ToolPermissionDecisionAllowSession {
+			grants = append(grants, grant)
+		}
+	}
+	sort.Slice(grants, func(i, j int) bool {
+		if grants[i].CreatedAt == grants[j].CreatedAt {
+			return grants[i].ToolName < grants[j].ToolName
+		}
+		return grants[i].CreatedAt > grants[j].CreatedAt
+	})
+	return grants, nil
+}
+
+func (s *ChatService) RevokeToolPermissionGrant(sessionID string, toolName string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	toolName = strings.TrimSpace(toolName)
+	if sessionID == "" {
+		return fmt.Errorf("sessionID is required")
+	}
+	if toolName == "" {
+		return fmt.Errorf("toolName is required")
+	}
+	s.mu.Lock()
+	run := s.sessions[sessionID]
+	s.mu.Unlock()
+	if run == nil {
+		return nil
+	}
+	run.stateMu.Lock()
+	delete(run.permissionGrants, toolName)
+	run.stateMu.Unlock()
+	wailsEmit(s.ctx, "runtime:permission_grants_changed", map[string]string{"sessionId": sessionID})
+	s.saveSessionPermissionState(sessionID)
+	return nil
+}
+
+func (s *ChatService) ClearToolPermissionGrants(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("sessionID is required")
+	}
+	s.mu.Lock()
+	run := s.sessions[sessionID]
+	s.mu.Unlock()
+	if run == nil {
+		return nil
+	}
+	run.stateMu.Lock()
+	run.permissionGrants = make(map[string]model.RuntimePermissionGrant)
+	run.stateMu.Unlock()
+	wailsEmit(s.ctx, "runtime:permission_grants_changed", map[string]string{"sessionId": sessionID})
+	s.saveSessionPermissionState(sessionID)
+	return nil
 }
 
 func normalizePermissionDecision(decision string) string {

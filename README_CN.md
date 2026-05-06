@@ -14,7 +14,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
 - **Runtime V2 工具面** — 始终可用的 `ToolSearch`、直接文件/搜索/编辑/shell 工具、动态 `Agent` 委派、worktree 隔离、deferred LSP/Skill/Web/Notebook 工具，以及长任务后台输出管理
-- **工具权限审批** — 高风险 runtime 和 MCP 工具调用会弹出审批，可拒绝、允许一次或本会话允许
+- **工具权限审批** — 高风险 runtime 和 MCP 工具调用进入排队审批 UI，可拒绝、允许一次、本会话允许，并可在设置页管理授权
 - **MCP 协议** — 支持 Model Context Protocol 扩展工具（stdio/SSE 传输）
 - **多 LLM 支持** — OpenAI / DeepSeek / 火山引擎 Ark / Ollama
 - **多语言界面** — 中文/英文（vue-i18n）
@@ -170,7 +170,7 @@ wails dev
 
 计划模式只暴露 read-only trusted 工具；写入、编辑和 shell 执行会在计划批准后才进入可见工具面。
 
-高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化。
+高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化，并可在设置页 Permissions 分区查看或撤销。
 
 后台 Bash 和 Agent 任务可在运行任务面板中查看。面板按当前会话列出任务，支持刷新状态/输出、复制输出，并可通过 Runtime V2 task APIs 停止运行中的任务。
 

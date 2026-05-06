@@ -14,7 +14,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
 - **Runtime V2 Tool Surface** — Always-visible `ToolSearch`, direct file/search/edit/shell tools, dynamic `Agent` delegation, worktree isolation, deferred LSP/Skill/Web/Notebook tools, and managed background task output
-- **Tool Permissions** — Risky runtime and MCP tool calls prompt for deny, allow once, or allow for the current session
+- **Tool Permissions** — Risky runtime and MCP tool calls enter a queued approval UI with deny, allow once, session grants, and grant management in Settings
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
@@ -170,7 +170,7 @@ Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`,
 
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 
-Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data.
+Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data and can be reviewed or revoked from Settings / Permissions.
 
 Background Bash and Agent jobs can be inspected from the Runtime Tasks panel. The panel lists tasks for the active session, refreshes task status/output, supports copying output, and can stop running tasks through the Runtime V2 task APIs.
 

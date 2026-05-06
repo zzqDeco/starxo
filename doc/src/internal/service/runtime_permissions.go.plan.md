@@ -8,13 +8,15 @@
 ## 2. 核心职责
 - 实现 Runtime V2 工具执行审批队列。
 - 支持前端审批弹窗、allow once、allow session、deny，以及 session grant 持久化。
+- 暴露 pending request / grant 查询和 grant 撤销 API，支持前端 reload 或切会话后恢复队列状态。
 
 ## 3. 输入与输出
 - 输入来源:
   - `tools.ToolExecutionPermissionProvider.RequestToolPermission(...)`
   - Wails 方法：`ApproveToolPermission`、`DenyToolPermission`
+  - Wails 方法：`ListToolPermissionRequests`、`ListToolPermissionGrants`、`RevokeToolPermissionGrant`、`ClearToolPermissionGrants`
 - 输出结果:
-  - Wails events：`runtime:permission_request`、`runtime:permission_resolved`、`runtime:permission_canceled`
+  - Wails events：`runtime:permission_request`、`runtime:permission_resolved`、`runtime:permission_canceled`、`runtime:permission_grants_changed`
   - `model.RuntimePermissionGrant` 持久化到 `SessionData.PermissionGrants`
 
 ## 4. 关键实现细节
@@ -22,8 +24,11 @@
 - 已存在 `allow_session` grant 的工具直接放行。
 - 无 Wails UI context 时 fail-closed，避免后台测试或 headless 运行静默执行危险工具。
 - 每个请求生成 `perm-<timestamp>` request id，并把请求挂入 `permissionRequests` map。
+- `ListToolPermissionRequests(sessionID)` 会按创建时间排序返回 pending 队列；空 sessionID 返回全部队列。
 - 前端通过 request id 回调 allow once / allow session / deny。
+- resolve 时先从 pending map 删除，再通知等待中的 tool call，避免前端刷新时看到已处理请求。
 - `allow_session` 会写入当前 session 的 `permissionGrants` 并异步保存 session。
+- Settings / Permissions 面板可列出、撤销、清空当前 session 的持久授权。
 - 请求随 tool-call context 取消或 10 分钟超时会发 `runtime:permission_canceled`。
 
 ## 5. 维护建议
