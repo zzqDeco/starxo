@@ -20,14 +20,16 @@
 - `ExitWorktree(action=keep)` 只恢复原 workspace，不删除 worktree。
 - `ExitWorktree(action=remove)` 会先检查 `git status --porcelain`；dirty worktree 必须显式 `discard_changes=true` 才允许删除。
 - `CurrentWorkspace` 被 Runtime V2 core/deferred tools 调用，统一决定当前 session 的实际执行目录。
+- `CompactSnapshot(...)` / `RestoreCompactSnapshot(...)` 让 active worktree routing 可随 Runtime context compact 持久化和恢复。
 
 ## 5. 依赖关系
-- 内部依赖: `internal/tools`
+- 内部依赖: `internal/model`、`internal/tools`
 - 外部依赖: `github.com/cloudwego/eino-ext/components/tool/commandline`
 
 ## 6. 变更影响面
 - Runtime V2 的 Read/Write/Edit/Grep/Glob/Bash 可以透明跟随 active worktree。
 - 需要远端 workspace 是 git repository；否则 `git worktree add` 会失败。
+- Runtime context compact restore 后会恢复 session 的 active worktree path；不重新创建远端 worktree。
 
 ## 7. 维护建议
 - 不要把 active worktree 存到全局 active session；必须继续从 tool context 读取 sessionID。

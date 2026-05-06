@@ -10,6 +10,7 @@ import (
 
 	"github.com/cloudwego/eino-ext/components/tool/commandline"
 
+	"starxo/internal/model"
 	"starxo/internal/tools"
 )
 
@@ -49,6 +50,46 @@ func (m *runtimeWorkspaceManager) CurrentWorkspace(ctx context.Context, defaultW
 		return defaultWorkspace
 	}
 	return state.WorktreePath
+}
+
+func (m *runtimeWorkspaceManager) CompactSnapshot(sessionID string, defaultWorkspace string) *model.RuntimeWorkspaceCompact {
+	if sessionID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	state, ok := m.states[sessionID]
+	m.mu.RUnlock()
+	if !ok {
+		if strings.TrimSpace(defaultWorkspace) == "" {
+			return nil
+		}
+		return &model.RuntimeWorkspaceCompact{
+			Active:        false,
+			WorkspacePath: cleanRuntimeRemotePath(defaultWorkspace),
+		}
+	}
+	return &model.RuntimeWorkspaceCompact{
+		Active:            true,
+		WorkspacePath:     state.WorktreePath,
+		OriginalWorkspace: state.OriginalWorkspace,
+		WorktreePath:      state.WorktreePath,
+		WorktreeBranch:    state.WorktreeBranch,
+	}
+}
+
+func (m *runtimeWorkspaceManager) RestoreCompactSnapshot(sessionID string, compact *model.RuntimeWorkspaceCompact) {
+	if sessionID == "" || compact == nil || !compact.Active || strings.TrimSpace(compact.WorktreePath) == "" {
+		return
+	}
+	m.mu.Lock()
+	m.states[sessionID] = runtimeWorktreeState{
+		SessionID:         sessionID,
+		OriginalWorkspace: cleanRuntimeRemotePath(compact.OriginalWorkspace),
+		WorktreePath:      cleanRuntimeRemotePath(compact.WorktreePath),
+		WorktreeBranch:    compact.WorktreeBranch,
+		Slug:              sanitizeWorktreeSlug(strings.TrimPrefix(compact.WorktreeBranch, "starxo/")),
+	}
+	m.mu.Unlock()
 }
 
 func (m *runtimeWorkspaceManager) EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (tools.WorktreeOutput, error) {

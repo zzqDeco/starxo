@@ -61,8 +61,15 @@ func (e *Engine) PrepareMessages() []*schema.Message {
 //  2. Synthetic pinned prefix messages
 //  3. Windowed conversation history
 func (e *Engine) PrepareMessagesWithPinnedPrefix(pinnedPrefix []*schema.Message) []*schema.Message {
+	return e.PrepareMessagesWithCompact(pinnedPrefix, nil)
+}
+
+// PrepareMessagesWithCompact builds the full message list using token-aware
+// windowing and an optional runtime compact summary.
+func (e *Engine) PrepareMessagesWithCompact(pinnedPrefix []*schema.Message, compact *model.RuntimeContextCompact) []*schema.Message {
 	e.mu.RLock()
 	sysPrompt := e.systemPrompt
+	maxTokens := e.maxTokens
 	e.mu.RUnlock()
 
 	// Build the system message, optionally enriched with file context.
@@ -81,17 +88,12 @@ func (e *Engine) PrepareMessagesWithPinnedPrefix(pinnedPrefix []*schema.Message)
 	prefix = append(prefix, sysMsg)
 	prefix = append(prefix, pinnedPrefix...)
 
-	// Estimate a reasonable message count from token budget.
-	// Rough heuristic: ~200 tokens per message on average.
-	cfg := DefaultWindowConfig()
-	if e.maxTokens > 0 {
-		estimated := e.maxTokens / 200
-		if estimated > 0 && estimated < cfg.MaxMessages {
-			cfg.MaxMessages = estimated
-		}
+	cfg := DefaultTokenWindowConfig()
+	if maxTokens > 0 {
+		cfg.MaxTokens = maxTokens
 	}
 
-	return WindowMessagesWithPinnedPrefix(prefix, historyMsgs, cfg)
+	return WindowMessagesTokenAwareWithPinnedPrefix(prefix, historyMsgs, compact, cfg)
 }
 
 // FileContext returns the file context manager.

@@ -11,6 +11,7 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 
 	"starxo/internal/logger"
+	"starxo/internal/model"
 )
 
 // TodoItem represents a single task in the DAG.
@@ -38,6 +39,45 @@ func ClearTodos() {
 	todoStore.mu.Lock()
 	todoStore.todos = nil
 	todoStore.mu.Unlock()
+}
+
+// SnapshotTodos returns a copy of the current in-memory todo list using the
+// model package shape so it can be persisted with session compact state.
+func SnapshotTodos() []model.RuntimeTodoItem {
+	todoStore.mu.Lock()
+	defer todoStore.mu.Unlock()
+	if len(todoStore.todos) == 0 {
+		return nil
+	}
+	out := make([]model.RuntimeTodoItem, len(todoStore.todos))
+	for i, todo := range todoStore.todos {
+		out[i] = model.RuntimeTodoItem{
+			ID:        todo.ID,
+			Title:     todo.Title,
+			Status:    todo.Status,
+			DependsOn: append([]string(nil), todo.DependsOn...),
+		}
+	}
+	return out
+}
+
+// RestoreTodos replaces the in-memory todo list from persisted compact state.
+func RestoreTodos(items []model.RuntimeTodoItem) {
+	todoStore.mu.Lock()
+	defer todoStore.mu.Unlock()
+	if len(items) == 0 {
+		todoStore.todos = nil
+		return
+	}
+	todoStore.todos = make([]TodoItem, len(items))
+	for i, item := range items {
+		todoStore.todos[i] = TodoItem{
+			ID:        item.ID,
+			Title:     item.Title,
+			Status:    item.Status,
+			DependsOn: append([]string(nil), item.DependsOn...),
+		}
+	}
 }
 
 // NewWriteTodosTool creates a tool that tracks task progress as a DAG.

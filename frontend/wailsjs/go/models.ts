@@ -621,6 +621,124 @@ export namespace model {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
+	export class RuntimeWorkspaceCompact {
+	    active: boolean;
+	    workspacePath?: string;
+	    originalWorkspace?: string;
+	    worktreePath?: string;
+	    worktreeBranch?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeWorkspaceCompact(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.active = source["active"];
+	        this.workspacePath = source["workspacePath"];
+	        this.originalWorkspace = source["originalWorkspace"];
+	        this.worktreePath = source["worktreePath"];
+	        this.worktreeBranch = source["worktreeBranch"];
+	    }
+	}
+	export class RuntimeTodoItem {
+	    id: string;
+	    title: string;
+	    status: string;
+	    depends_on?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTodoItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.status = source["status"];
+	        this.depends_on = source["depends_on"];
+	    }
+	}
+	export class RuntimeDiffSummary {
+	    filePath: string;
+	    toolName?: string;
+	    linesAdded?: number;
+	    linesRemoved?: number;
+	    replacements?: number;
+	    patch?: string;
+	    summary?: string;
+	    updatedAt?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeDiffSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filePath = source["filePath"];
+	        this.toolName = source["toolName"];
+	        this.linesAdded = source["linesAdded"];
+	        this.linesRemoved = source["linesRemoved"];
+	        this.replacements = source["replacements"];
+	        this.patch = source["patch"];
+	        this.summary = source["summary"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class RuntimeFileReadState {
+	    filePath: string;
+	    startLine?: number;
+	    numLines?: number;
+	    totalLines?: number;
+	    contentHash?: string;
+	    lastReadAt?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeFileReadState(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filePath = source["filePath"];
+	        this.startLine = source["startLine"];
+	        this.numLines = source["numLines"];
+	        this.totalLines = source["totalLines"];
+	        this.contentHash = source["contentHash"];
+	        this.lastReadAt = source["lastReadAt"];
+	    }
+	}
+	export class RuntimeTaskCompact {
+	    id: string;
+	    sessionId?: string;
+	    type?: string;
+	    status?: string;
+	    description?: string;
+	    command?: string;
+	    outputPath?: string;
+	    startedAt?: number;
+	    finishedAt?: number;
+	    exitCode?: number;
+	    error?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTaskCompact(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.type = source["type"];
+	        this.status = source["status"];
+	        this.description = source["description"];
+	        this.command = source["command"];
+	        this.outputPath = source["outputPath"];
+	        this.startedAt = source["startedAt"];
+	        this.finishedAt = source["finishedAt"];
+	        this.exitCode = source["exitCode"];
+	        this.error = source["error"];
+	    }
+	}
 	export class RuntimePermissionGrant {
 	    toolName: string;
 	    toolClass?: string;
@@ -641,6 +759,105 @@ export namespace model {
 	        this.createdAt = source["createdAt"];
 	    }
 	}
+	export class RuntimeToolSearchCompact {
+	    discoveredTools?: DiscoveredToolRecord[];
+	    deferredAnnouncementState?: DeferredAnnouncementState;
+	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeToolSearchCompact(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.discoveredTools = this.convertValues(source["discoveredTools"], DiscoveredToolRecord);
+	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
+	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RuntimeContextCompact {
+	    version: number;
+	    createdAt: number;
+	    updatedAt: number;
+	    originalMessageCount: number;
+	    omittedMessageCount: number;
+	    tokenEstimate: number;
+	    summary: string;
+	    toolSearch?: RuntimeToolSearchCompact;
+	    permissionGrants?: RuntimePermissionGrant[];
+	    tasks?: RuntimeTaskCompact[];
+	    fileReadState?: RuntimeFileReadState[];
+	    diffSummaries?: RuntimeDiffSummary[];
+	    todos?: RuntimeTodoItem[];
+	    planDocument?: PlanDocument;
+	    workspace?: RuntimeWorkspaceCompact;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeContextCompact(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.originalMessageCount = source["originalMessageCount"];
+	        this.omittedMessageCount = source["omittedMessageCount"];
+	        this.tokenEstimate = source["tokenEstimate"];
+	        this.summary = source["summary"];
+	        this.toolSearch = this.convertValues(source["toolSearch"], RuntimeToolSearchCompact);
+	        this.permissionGrants = this.convertValues(source["permissionGrants"], RuntimePermissionGrant);
+	        this.tasks = this.convertValues(source["tasks"], RuntimeTaskCompact);
+	        this.fileReadState = this.convertValues(source["fileReadState"], RuntimeFileReadState);
+	        this.diffSummaries = this.convertValues(source["diffSummaries"], RuntimeDiffSummary);
+	        this.todos = this.convertValues(source["todos"], RuntimeTodoItem);
+	        this.planDocument = this.convertValues(source["planDocument"], PlanDocument);
+	        this.workspace = this.convertValues(source["workspace"], RuntimeWorkspaceCompact);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+
+
+
+
+
 	export class Session {
 	    id: string;
 	    title: string;
@@ -690,6 +907,7 @@ export namespace model {
 	    permissionGrants?: RuntimePermissionGrant[];
 	    deferredAnnouncementState?: DeferredAnnouncementState;
 	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
+	    runtimeContextCompact?: RuntimeContextCompact;
 	    mode?: string;
 	    planDocument?: PlanDocument;
 	    pendingPlanApproval?: PendingPlanApproval;
@@ -709,6 +927,7 @@ export namespace model {
 	        this.permissionGrants = this.convertValues(source["permissionGrants"], RuntimePermissionGrant);
 	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
 	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
+	        this.runtimeContextCompact = this.convertValues(source["runtimeContextCompact"], RuntimeContextCompact);
 	        this.mode = source["mode"];
 	        this.planDocument = this.convertValues(source["planDocument"], PlanDocument);
 	        this.pendingPlanApproval = this.convertValues(source["pendingPlanApproval"], PendingPlanApproval);

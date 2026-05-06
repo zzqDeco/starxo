@@ -196,8 +196,7 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 		}
 	}
 
-	// Clear per-session todo state
-	tools.ClearTodos()
+	restoreTodosFromSessionData(sessionData)
 
 	s.activeSession = sess
 
@@ -526,9 +525,18 @@ func (s *SessionService) EnsureDefaultSession() error {
 	}
 	if s.chatService != nil && sessionData != nil {
 		s.chatService.restoreNormalizedSessionData(mostRecent.ID, sessionData)
+		restoreTodosFromSessionData(sessionData)
 	}
 
 	return nil
+}
+
+func restoreTodosFromSessionData(sessionData *model.SessionData) {
+	if sessionData != nil && sessionData.RuntimeContextCompact != nil {
+		tools.RestoreTodos(sessionData.RuntimeContextCompact.Todos)
+		return
+	}
+	tools.ClearTodos()
 }
 
 // EnrichedSession extends Session with live container info for the frontend.

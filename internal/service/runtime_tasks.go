@@ -11,6 +11,7 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"starxo/internal/model"
 	"starxo/internal/tools"
 )
 
@@ -275,6 +276,79 @@ func (m *runtimeTaskManager) List(sessionID string) []tools.RuntimeTaskSnapshot 
 		out = append(out, task.snapshot)
 	}
 	return out
+}
+
+func (m *runtimeTaskManager) CompactSnapshots(sessionID string) []model.RuntimeTaskCompact {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]model.RuntimeTaskCompact, 0, len(m.tasks))
+	for _, task := range m.tasks {
+		snapshot := task.snapshot
+		if sessionID != "" && snapshot.SessionID != sessionID {
+			continue
+		}
+		out = append(out, model.RuntimeTaskCompact{
+			ID:          snapshot.ID,
+			SessionID:   snapshot.SessionID,
+			Type:        snapshot.Type,
+			Status:      snapshot.Status,
+			Description: snapshot.Description,
+			Command:     snapshot.Command,
+			OutputPath:  snapshot.OutputPath,
+			StartedAt:   snapshot.StartedAt,
+			FinishedAt:  snapshot.FinishedAt,
+			ExitCode:    snapshot.ExitCode,
+			Error:       snapshot.Error,
+		})
+	}
+	return out
+}
+
+func (m *runtimeTaskManager) RestoreCompactTasks(sessionID string, tasks []model.RuntimeTaskCompact) {
+	if len(tasks) == 0 {
+		return
+	}
+	now := m.now().UnixMilli()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, task := range tasks {
+		if strings.TrimSpace(task.ID) == "" {
+			continue
+		}
+		if _, exists := m.tasks[task.ID]; exists {
+			continue
+		}
+		taskSessionID := task.SessionID
+		if taskSessionID == "" {
+			taskSessionID = sessionID
+		}
+		if sessionID != "" && taskSessionID != sessionID {
+			continue
+		}
+		status := task.Status
+		finishedAt := task.FinishedAt
+		errText := task.Error
+		if status == runtimeTaskStatusRunning {
+			status = runtimeTaskStatusFailed
+			finishedAt = now
+			if errText == "" {
+				errText = "runtime task was active before reload and is no longer attached"
+			}
+		}
+		m.tasks[task.ID] = &runtimeTask{snapshot: tools.RuntimeTaskSnapshot{
+			ID:          task.ID,
+			SessionID:   taskSessionID,
+			Type:        task.Type,
+			Status:      status,
+			Description: task.Description,
+			Command:     task.Command,
+			OutputPath:  task.OutputPath,
+			StartedAt:   task.StartedAt,
+			FinishedAt:  finishedAt,
+			ExitCode:    task.ExitCode,
+			Error:       errText,
+		}}
+	}
 }
 
 func (m *runtimeTaskManager) getTaskSnapshot(taskID string) (tools.RuntimeTaskSnapshot, bool) {
