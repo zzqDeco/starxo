@@ -11,6 +11,8 @@
 - 实现 `ChatService`，负责多会话聊天、runner 生命周期、事件流转、中断恢复、mode 切换。
 - 维护共享 runner 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
 - 构建并装配 deferred MCP surface：MCP action/resource catalog、`tool_search`、permission gate、per-model-call late binding、announcement 注入。
+- 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
+- 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
 - 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
@@ -18,10 +20,12 @@
 ## 3. 输入与输出
 - 输入来源:
   - Wails 绑定调用：`SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`SetMode`、`BuildRunners`
+  - Runtime V2 绑定调用：`ListRuntimeTasks`、`ReadRuntimeTaskOutput`、`StopRuntimeTask`、`ApproveToolPermission`、`DenyToolPermission`
   - 依赖注入：`config.Store`、`sandbox.SandboxManager`、`SessionService`
   - 运行时上下文：`contextWithSessionID(...)` 注入的 `sessionID`
 - 输出结果:
   - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`、`agent:run_state`
+  - Runtime V2 事件：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`
   - 一致性快照：`ExportSessionSnapshot(sessionID)`
   - discovery 状态操作：`RestoreSessionData`、`AddDiscoveredTool`、`ReplaceDiscoveredTools`、`PruneDiscoveredToolsForSave`
 
@@ -118,8 +122,13 @@
   - catalog / handles 固定到该代 runner
   - discovery 仍从 `SessionRun` 按 session 读取
   - 避免 runner 重建时污染正在运行的旧会话
-  - provider 构造给 `tool_search` 的 `CurrentLoaded` 固定使用 `state.EffectiveDiscovered`，也就是 loaded deferred only，而不是全部 `CurrentLoadedTools`
-  - unknown-tool/fallback handler 与 middleware 复用同一条 `tool_search unavailable` 文案来源，避免多处手写漂移
+  - provider 构造给 `tool_search` 的 `CurrentLoaded` 使用 `state.CurrentLoadedTools`，包含当前 mode/permission 允许的 always-load runtime tools 和已发现 deferred tools
+  - `tool_search` 在 Runtime V2 中始终可见；unknown-tool handler 对 `tool_search` 直接放行，避免空 deferred pool 时误报不可用
+- Runtime V2 core catalog：
+  - runner bundle 安装时先注册 runtime core entries，再注册 MCP entries
+  - runtime entries 同样经过 permission wrapper
+  - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
+  - background `Bash` 任务写入 `runtimeTaskManager`
 - deferred synthetic message 的 phase-2 注入规则：
   - 先注入 deferred tools delta，再按需注入 MCP instructions delta
   - synthetic message 使用 `schema.UserMessage`

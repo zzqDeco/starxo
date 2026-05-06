@@ -6,7 +6,7 @@
 - 所属模块: tools
 
 ## 2. 核心职责
-- 定义 MCP deferred 子集的 permission-first 规则，统一计算 searchable / loadable 判定。
+- 定义 runtime-wide catalog 的 permission-first 规则，统一计算 searchable / loadable 判定。
 
 ## 3. 输入与输出
 - 输入来源: `ToolPermissionContext`、`CatalogEntry`
@@ -17,11 +17,13 @@
 
 ## 4. 关键实现细节
 - `plan mode` 只接受显式且可信的 `ReadOnlyHint=true`
+- 对所有 catalog entry 统一尊重 `PermissionSpec.AllowSearch` / `AllowExecute`
+- plan mode 下所有非 read-only trusted 的 runtime/MCP 工具都不可 search/load
 - `pending` server 只有具备 cached metadata 时才允许贡献 searchable names
 - global resource tools 通过 `SupportsResources` 聚合判定
 
 ## 5. 依赖关系
-- 内部依赖: `catalog.go`、`mcp_runtime.go`
+- 内部依赖: `catalog.go`、`mcp_runtime.go`、`runtime_tools.go`
 
 ## 6. 变更影响面
 - announcement、tool_search、late binding、execution gating 都依赖这一层的 mode / runtime / trust 规则

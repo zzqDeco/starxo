@@ -1146,3 +1146,66 @@ export namespace service {
 
 }
 
+export namespace tools {
+
+	export class RuntimeTaskOutput {
+	    taskId: string;
+	    status: string;
+	    outputPath?: string;
+	    content: string;
+	    offset: number;
+	    nextOffset: number;
+	    size: number;
+	    truncated: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTaskOutput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.taskId = source["taskId"];
+	        this.status = source["status"];
+	        this.outputPath = source["outputPath"];
+	        this.content = source["content"];
+	        this.offset = source["offset"];
+	        this.nextOffset = source["nextOffset"];
+	        this.size = source["size"];
+	        this.truncated = source["truncated"];
+	    }
+	}
+	export class RuntimeTaskSnapshot {
+	    id: string;
+	    sessionId: string;
+	    type: string;
+	    status: string;
+	    description: string;
+	    command?: string;
+	    outputPath?: string;
+	    startedAt: number;
+	    finishedAt?: number;
+	    exitCode?: number;
+	    error?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTaskSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.type = source["type"];
+	        this.status = source["status"];
+	        this.description = source["description"];
+	        this.command = source["command"];
+	        this.outputPath = source["outputPath"];
+	        this.startedAt = source["startedAt"];
+	        this.finishedAt = source["finishedAt"];
+	        this.exitCode = source["exitCode"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+

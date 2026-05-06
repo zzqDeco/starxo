@@ -26,6 +26,8 @@
 - plan mode 下：
   - 只有显式可信的只读 deferred tools 才可搜索和加载
   - 未信任的只读提示或可写工具都会被排除
+  - writable always-load runtime tools 不会进入 `CurrentLoadedTools`
+  - read-only trusted always-load runtime tools 仍可见
 
 ## 5. 依赖关系
 - 内部依赖: `deferred_state.go`、`catalog.go`

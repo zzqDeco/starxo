@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -474,7 +475,7 @@ func TestPrepareDeferredSyntheticMessagesIgnoresRawErrorTextChangesWhenReasonCla
 	}
 }
 
-func TestDeferredMCPProviderToolSearchStateUsesLoadedDeferredOnly(t *testing.T) {
+func TestDeferredMCPProviderToolSearchStateIncludesCurrentRuntimeSurface(t *testing.T) {
 	chat := NewChatService(nil)
 	sessionID := "sess-search-state"
 
@@ -512,8 +513,15 @@ func TestDeferredMCPProviderToolSearchStateUsesLoadedDeferredOnly(t *testing.T) 
 	if err != nil {
 		t.Fatalf("tool search state: %v", err)
 	}
-	if len(state.CurrentLoaded) != 1 || state.CurrentLoaded[0].CanonicalName != deferredLoaded.CanonicalName {
-		t.Fatalf("expected provider current loaded to include only loaded deferred entry, got %#v", state.CurrentLoaded)
+	gotLoaded := make([]string, 0, len(state.CurrentLoaded))
+	for _, entry := range state.CurrentLoaded {
+		gotLoaded = append(gotLoaded, entry.CanonicalName)
+	}
+	sort.Strings(gotLoaded)
+	wantLoaded := []string{alwaysLoaded.CanonicalName, deferredLoaded.CanonicalName}
+	sort.Strings(wantLoaded)
+	if !reflect.DeepEqual(gotLoaded, wantLoaded) {
+		t.Fatalf("expected provider current loaded to include active runtime surface, got %#v", gotLoaded)
 	}
 
 	exactLoaded, exactLoadedRecords := tools.ExecuteToolSearch(tools.ToolSearchInput{Query: deferredLoaded.CanonicalName}, state, time.UnixMilli(100))
@@ -532,9 +540,17 @@ func TestDeferredMCPProviderToolSearchStateUsesLoadedDeferredOnly(t *testing.T) 
 		t.Fatalf("expected loaded deferred select not to rediscover, got %#v", selectLoadedRecords)
 	}
 
+	for _, query := range []string{alwaysLoaded.CanonicalName, "select:" + alwaysLoaded.CanonicalName} {
+		output, records := tools.ExecuteToolSearch(tools.ToolSearchInput{Query: query}, state, time.UnixMilli(102))
+		if len(output.Matches) != 1 || output.Matches[0] != alwaysLoaded.CanonicalName {
+			t.Fatalf("expected query %q to match always-loaded current surface, got %#v", query, output)
+		}
+		if len(records) != 0 {
+			t.Fatalf("expected query %q not to write discovery, got %#v", query, records)
+		}
+	}
+
 	for _, query := range []string{
-		alwaysLoaded.CanonicalName,
-		"select:" + alwaysLoaded.CanonicalName,
 		nonDeferred.CanonicalName,
 		"select:" + nonDeferred.CanonicalName,
 		"+resource index",
@@ -550,7 +566,7 @@ func TestDeferredMCPProviderToolSearchStateUsesLoadedDeferredOnly(t *testing.T) 
 	}
 }
 
-func TestDeferredUnknownToolHandlerReturnsSharedToolSearchUnavailableMessage(t *testing.T) {
+func TestDeferredUnknownToolHandlerAllowsToolSearchEvenWithoutDeferredMatches(t *testing.T) {
 	chat := NewChatService(nil)
 	sessionID := "sess-tool-search-hidden"
 
@@ -586,8 +602,8 @@ func TestDeferredUnknownToolHandlerReturnsSharedToolSearchUnavailableMessage(t *
 	if err != nil {
 		t.Fatalf("unexpected handler error: %v", err)
 	}
-	if got != tools.ToolSearchUnavailableNoDeferredMessage {
-		t.Fatalf("expected shared tool_search unavailable message %q, got %q", tools.ToolSearchUnavailableNoDeferredMessage, got)
+	if got != "" {
+		t.Fatalf("expected tool_search to remain allowed, got %q", got)
 	}
 }
 
@@ -744,8 +760,8 @@ func TestExportSessionSnapshotMissingSessionReturnsEmptyDebugWarningWhenEnabled(
 		debug.PendingMCPServers == nil {
 		t.Fatalf("expected normalized empty slices, got %#v", debug)
 	}
-	if debug.ToolSearchVisible {
-		t.Fatalf("expected tool_search hidden for missing session debug, got %#v", debug)
+	if !debug.ToolSearchVisible {
+		t.Fatalf("expected tool_search visible for missing session debug, got %#v", debug)
 	}
 }
 

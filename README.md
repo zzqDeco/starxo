@@ -13,6 +13,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
+- **Runtime V2 Tool Surface** — Always-visible `ToolSearch`, direct file/search/edit/shell tools, and managed background task output for long-running commands
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
@@ -90,6 +91,8 @@ starxo/
 │   ├── tools/                       # Agent tool definitions
 │   │   ├── registry.go              #   ToolRegistry central registry
 │   │   ├── builtin.go               #   Built-in tool registration
+│   │   ├── runtime_tools.go         #   Runtime V2 tools: Bash/Read/Write/Edit/Glob/Grep/tasks
+│   │   ├── tool_search.go           #   Runtime-wide deferred tool discovery
 │   │   ├── mcp.go                   #   MCP server connection + tool loading
 │   │   ├── followup.go              #   ask_user interrupt tool
 │   │   ├── choice.go                #   ask_choice interrupt tool
@@ -149,6 +152,12 @@ wails dev
 ```
 
 Launches with Vite HMR for frontend hot reload and Go backend hot reload. Frontend dev server URL is auto-detected; Go dev server runs at `http://localhost:34115`.
+
+### Agent Runtime V2
+
+The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, and `ExitPlanMode`; legacy names such as `read_file` and `shell_execute` remain aliases.
+
+Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 
 ### Production Build
 

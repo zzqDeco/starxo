@@ -7,10 +7,10 @@
 - 所属模块: tools
 
 ## 2. 核心职责
-- 提供 metadata-aware `ToolCatalog`，用于统一保存 deferred tools 的 canonical name、aliases、权限提示和展示属性。
+- 提供 metadata-aware `ToolCatalog`，用于统一保存 runtime tools 的 canonical name、aliases、权限提示和展示属性。
 
 ## 3. 输入与输出
-- 输入来源: MCP action/resource tool entries
+- 输入来源: Runtime V2 core tools、MCP action/resource tool entries、dev deferred sample
 - 输出结果: 可查询、可排序、可精确匹配的 catalog
 
 ## 4. 关键实现细节
@@ -19,8 +19,21 @@
 - exact match key 为大小写不敏感的 canonical/alias 精确匹配
 - canonical 冲突、alias 冲突都直接报错
 - `CatalogEntry` phase-2 新增：
+  - `CanonicalName`
+  - `Aliases`
+  - `Title`
+  - `Description`
+  - `SearchHint`
   - `ToolClass`
+  - `Source`
+  - `Kind`
+  - `AlwaysLoad`
+  - `ShouldDefer`
+  - `ReadOnlyHint`
+  - `ReadOnlyTrusted`
+  - `PermissionSpec`
   - `DeferReason`
+- runtime source/class 常量覆盖 runtime core、file、exec、task 等基础分类
 - 非 MCP deferred entry 的命名规则固定为 `CanonicalName == tool name`
 
 ## 5. 依赖关系

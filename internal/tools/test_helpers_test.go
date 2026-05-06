@@ -38,13 +38,15 @@ func stubCatalogEntry(name string) CatalogEntry {
 
 func stubDeferredBuiltinSample(name string) CatalogEntry {
 	return CatalogEntry{
-		CanonicalName: name,
-		Source:        ToolSourceBuiltin,
-		Kind:          ToolKindAction,
-		ToolClass:     ToolClassBuiltin,
-		DeferReason:   "hidden_sample",
-		ShouldDefer:   true,
-		IsMcp:         false,
+		CanonicalName:   name,
+		Source:          ToolSourceBuiltin,
+		Kind:            ToolKindAction,
+		ToolClass:       ToolClassBuiltin,
+		DeferReason:     "hidden_sample",
+		ShouldDefer:     true,
+		IsMcp:           false,
+		ReadOnlyHint:    true,
+		ReadOnlyTrusted: true,
 		PermissionSpec: PermissionSpec{
 			AllowSearch:  true,
 			AllowExecute: true,

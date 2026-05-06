@@ -83,7 +83,7 @@ func TestDynamicMCPSurface_FilterVisibleToolInfos(t *testing.T) {
 	assertStrings(t, got, []string{"ask_user", "tool_search", loaded.CanonicalName})
 }
 
-func TestDynamicMCPSurface_FilterVisibleToolInfos_HidesToolSearchWithoutDeferredButKeepsAlwaysLoadedVisible(t *testing.T) {
+func TestDynamicMCPSurface_FilterVisibleToolInfos_KeepsToolSearchAlwaysVisible(t *testing.T) {
 	catalog := NewToolCatalog()
 	alwaysLoaded := stubCatalogEntry("mcp__alpha__always")
 	alwaysLoaded.AlwaysLoad = true
@@ -109,7 +109,7 @@ func TestDynamicMCPSurface_FilterVisibleToolInfos_HidesToolSearchWithoutDeferred
 	for _, info := range visible {
 		got = append(got, info.Name)
 	}
-	assertStrings(t, got, []string{"ask_user", alwaysLoaded.CanonicalName})
+	assertStrings(t, got, []string{"ask_user", "tool_search", alwaysLoaded.CanonicalName})
 }
 
 func TestDynamicMCPSurface_NormalizeSearchableCanonicalNamesSortsAndDedupes(t *testing.T) {
@@ -204,8 +204,8 @@ func TestDynamicMCPSurface_EnsureToolCallable(t *testing.T) {
 	}
 
 	provider.state = DeferredMCPState{}
-	if err := mw.ensureToolCallable(context.Background(), "tool_search"); err == nil || err.Error() != ToolSearchUnavailableNoDeferredMessage {
-		t.Fatalf("expected hidden tool_search rejection %q, got %v", ToolSearchUnavailableNoDeferredMessage, err)
+	if err := mw.ensureToolCallable(context.Background(), "tool_search"); err != nil {
+		t.Fatalf("expected tool_search to remain callable with empty deferred state, got %v", err)
 	}
 }
 

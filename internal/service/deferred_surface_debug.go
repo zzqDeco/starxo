@@ -259,7 +259,7 @@ func buildDeferredSurfaceComputation(input deferredSurfaceDebugInput) deferredSu
 			LoadablePoolCanonicalNames:            loadablePool,
 			EffectiveDiscoveredCanonicalNames:     effectiveDiscovered,
 			CurrentLoadedCanonicalNames:           currentLoaded,
-			ToolSearchCurrentLoadedCanonicalNames: effectiveDiscovered,
+			ToolSearchCurrentLoadedCanonicalNames: currentLoaded,
 			PendingMCPServers:                     pendingServers,
 			ToolSearchVisible:                     tools.ToolSearchVisible(input.State),
 			AnnouncementState:                     announcementState,

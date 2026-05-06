@@ -16,6 +16,8 @@ const (
 	defaultToolSearchLimit = 12
 	maxToolSearchLimit     = 20
 
+	ToolSearchName = "tool_search"
+
 	ToolSearchUnavailableNoDeferredMessage = "tool_search is unavailable because no deferred tools are currently searchable"
 )
 
@@ -27,6 +29,8 @@ type ToolSearchInput struct {
 type ToolSearchOutput struct {
 	Matches           []string `json:"matches"`
 	Query             string   `json:"query"`
+	Loaded            []string `json:"loaded,omitempty"`
+	PendingSources    []string `json:"pendingSources,omitempty"`
 	PendingMCPServers []string `json:"pending_mcp_servers,omitempty"`
 }
 
@@ -42,7 +46,7 @@ type ToolSearchProvider interface {
 }
 
 func NewToolSearchTool(provider ToolSearchProvider) (tool.InvokableTool, error) {
-	return toolutils.InferTool("tool_search",
+	return toolutils.InferTool(ToolSearchName,
 		"Search deferred tools by canonical name, alias, or keywords. Supports select:<tool>, select:A,B,C, exact name matching, and +required terms.",
 		func(ctx context.Context, input ToolSearchInput) (ToolSearchOutput, error) {
 			state, err := provider.ToolSearchState(ctx)
@@ -70,7 +74,7 @@ func ExecuteToolSearch(input ToolSearchInput, state ToolSearchState, now time.Ti
 
 	query := strings.TrimSpace(input.Query)
 	if query == "" {
-		return ToolSearchOutput{Query: input.Query}, nil
+		return ToolSearchOutput{Query: input.Query, Loaded: loadedNames(state.CurrentLoaded)}, nil
 	}
 
 	if strings.HasPrefix(strings.ToLower(query), "select:") {
@@ -129,9 +133,12 @@ func executeSelectSearch(query, rawQuery string, limit int, state ToolSearchStat
 	output := ToolSearchOutput{
 		Matches: matches,
 		Query:   rawQuery,
+		Loaded:  loadedNames(state.CurrentLoaded),
 	}
 	if len(matches) == 0 && len(state.PendingMCPServer) > 0 {
-		output.PendingMCPServers = cloneStrings(state.PendingMCPServer)
+		pending := cloneStrings(state.PendingMCPServer)
+		output.PendingMCPServers = pending
+		output.PendingSources = pending
 	}
 	return output, records
 }
@@ -141,6 +148,7 @@ func executeExactNameSearch(query, rawQuery string, state ToolSearchState, now t
 		return ToolSearchOutput{
 			Matches: []string{entry.CanonicalName},
 			Query:   rawQuery,
+			Loaded:  loadedNames(state.CurrentLoaded),
 		}, nil, true
 	}
 
@@ -152,6 +160,7 @@ func executeExactNameSearch(query, rawQuery string, state ToolSearchState, now t
 	output := ToolSearchOutput{
 		Matches: []string{entry.CanonicalName},
 		Query:   rawQuery,
+		Loaded:  loadedNames(state.CurrentLoaded),
 	}
 	if entry.AlwaysLoad || !entry.ShouldDefer {
 		return output, nil, true
@@ -209,11 +218,31 @@ func executeKeywordSearch(query, rawQuery string, limit int, state ToolSearchSta
 	output := ToolSearchOutput{
 		Matches: matches,
 		Query:   rawQuery,
+		Loaded:  loadedNames(state.CurrentLoaded),
 	}
 	if len(matches) == 0 && len(state.PendingMCPServer) > 0 {
-		output.PendingMCPServers = cloneStrings(state.PendingMCPServer)
+		pending := cloneStrings(state.PendingMCPServer)
+		output.PendingMCPServers = pending
+		output.PendingSources = pending
 	}
 	return output, records
+}
+
+func loadedNames(entries []CatalogEntry) []string {
+	names := []string{ToolSearchName}
+	seen := map[string]struct{}{ToolSearchName: {}}
+	for _, entry := range entries {
+		if entry.CanonicalName == "" {
+			continue
+		}
+		if _, ok := seen[entry.CanonicalName]; ok {
+			continue
+		}
+		seen[entry.CanonicalName] = struct{}{}
+		names = append(names, entry.CanonicalName)
+	}
+	sort.Strings(names)
+	return names
 }
 
 type rankedCatalogEntry struct {

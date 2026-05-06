@@ -35,6 +35,12 @@ func (e CatalogEntry) ReadOnlyEligible() bool {
 
 func CanSearchCatalogEntry(entry CatalogEntry, ctx ToolPermissionContext) PermissionDecision {
 	if !entry.IsMcp {
+		if !entry.PermissionSpec.AllowSearch {
+			return PermissionDecision{Allowed: false, Reason: "search is disabled"}
+		}
+		if ctx.Mode == "plan" && !entry.ReadOnlyEligible() {
+			return PermissionDecision{Allowed: false, Reason: "tool is not read-only in plan mode"}
+		}
 		return PermissionDecision{Allowed: true}
 	}
 	if !entry.PermissionSpec.AllowSearch {
@@ -81,6 +87,12 @@ func CanSearchCatalogEntry(entry CatalogEntry, ctx ToolPermissionContext) Permis
 
 func CanLoadCatalogEntry(entry CatalogEntry, ctx ToolPermissionContext) PermissionDecision {
 	if !entry.IsMcp {
+		if !entry.PermissionSpec.AllowExecute {
+			return PermissionDecision{Allowed: false, Reason: "execution is disabled"}
+		}
+		if ctx.Mode == "plan" && !entry.ReadOnlyEligible() {
+			return PermissionDecision{Allowed: false, Reason: "tool is not read-only in plan mode"}
+		}
 		return PermissionDecision{Allowed: true}
 	}
 	if !entry.PermissionSpec.AllowExecute {

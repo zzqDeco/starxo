@@ -13,6 +13,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **中断/恢复** — 支持 `ask_user` / `ask_choice` 工具暂停等待用户输入，状态通过 CheckPointStore 保持
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
+- **Runtime V2 工具面** — 始终可用的 `ToolSearch`、直接文件/搜索/编辑/shell 工具，以及长任务后台输出管理
 - **MCP 协议** — 支持 Model Context Protocol 扩展工具（stdio/SSE 传输）
 - **多 LLM 支持** — OpenAI / DeepSeek / 火山引擎 Ark / Ollama
 - **多语言界面** — 中文/英文（vue-i18n）
@@ -90,6 +91,8 @@ starxo/
 │   ├── tools/                       # Agent 工具定义
 │   │   ├── registry.go              #   ToolRegistry 中央注册表
 │   │   ├── builtin.go               #   内置工具注册
+│   │   ├── runtime_tools.go         #   Runtime V2 工具：Bash/Read/Write/Edit/Glob/Grep/tasks
+│   │   ├── tool_search.go           #   Runtime-wide deferred 工具发现
 │   │   ├── mcp.go                   #   MCP 服务器连接 + 工具加载
 │   │   ├── followup.go              #   ask_user 中断工具
 │   │   ├── choice.go                #   ask_choice 中断工具
@@ -149,6 +152,12 @@ wails dev
 ```
 
 启动后自动开启 Vite HMR 前端热重载和 Go 后端热重载。前端开发服务器 URL 自动检测，Go 开发服务器运行在 `http://localhost:34115`。
+
+### Agent Runtime V2
+
+顶层 Agent 现在使用更小的 always-loaded runtime 工具面，并通过 `ToolSearch` 按需发现 deferred tools。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
+
+计划模式只暴露 read-only trusted 工具；写入、编辑和 shell 执行会在计划批准后才进入可见工具面。
 
 ### 生产构建
 

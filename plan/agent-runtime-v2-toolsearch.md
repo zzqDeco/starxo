@@ -1,0 +1,59 @@
+# Agent Runtime V2 + ToolSearch
+
+## Summary
+- Branch: `feature/agent-runtime-v2`, based on latest `dev`.
+- Goal: make ToolSearch a runtime-wide foundation instead of an MCP-only helper.
+- Scope in this implementation: catalog metadata, always-loaded Runtime V2 core tools, permission-aware deferred search/load, background task APIs, and documentation/test coverage.
+- Out of scope for this first slice: full Claude Code parity, LSP/worktree/notebook/web tooling, frontend runtime task panel, full permission approval queue, and token-aware compaction.
+
+## Runtime Surface
+- `tool_search` is always visible and callable.
+- Always-loaded core runtime tools:
+  - `Bash`
+  - `Read`
+  - `Write`
+  - `Edit`
+  - `Glob`
+  - `Grep`
+  - `TaskOutput`
+  - `TaskStop`
+  - `ExitPlanMode`
+- Legacy aliases remain searchable where applicable:
+  - `shell_execute` -> `Bash`
+  - `read_file` -> `Read`
+  - `write_file` -> `Write`
+  - `list_files` -> `Glob`
+  - `str_replace_editor` -> `Edit`
+- Deferred tools continue to use `DiscoveredToolRecord`; ToolSearch only writes records for newly discovered deferred tools.
+- `ToolSearchOutput` now includes `loaded` and `pendingSources` in addition to the legacy `pending_mcp_servers`.
+
+## Permission Model
+- Catalog entries now carry runtime-wide metadata: source, class, kind, aliases, search hints, read-only hints, defer flags, and permission spec.
+- Search and load checks apply to both MCP and non-MCP runtime entries.
+- Plan mode only exposes read-only trusted tools through the visible surface. Writable tools such as `Bash`, `Write`, `Edit`, and `TaskStop` are not loaded in plan mode.
+- ToolSearch visibility is not used as execution permission. Discovery only makes a tool eligible for schema injection; actual execution still passes through load/permission checks.
+
+## Runtime Tasks
+- Background `Bash` calls create managed runtime tasks.
+- `ChatService` exposes:
+  - `ListRuntimeTasks(sessionID)`
+  - `ReadRuntimeTaskOutput(taskID, offset, limit)`
+  - `StopRuntimeTask(taskID)`
+  - `ApproveToolPermission(requestID, decision)`
+  - `DenyToolPermission(requestID)`
+- Task output is persisted under `~/.starxo/sessions/<session>/runtime-tasks/`.
+- Large foreground tool results may be persisted under `~/.starxo/sessions/<session>/tool-results/`.
+
+## Path And Execution Boundaries
+- File/search/edit tools operate through the active remote sandbox operator.
+- Workspace paths are normalized before execution and reject `..` traversal or workspace-external absolute paths.
+- `Bash` runs in the active workspace and supports foreground or background execution.
+- `Read` supports offset/limit by line range.
+- `Grep` and `Glob` prefer remote `rg`/`find` behavior with stable sorted output.
+
+## Follow-Up Work
+- Add frontend Runtime Tasks panel and permission approval dialog.
+- Add deferred LSP/worktree/skill/web/notebook tools through the generalized catalog.
+- Add token-aware compaction that preserves discovered tools, active tasks, permissions, todos, file read state, and diff summaries.
+- Add structured diff UI for `Edit`/`Write`.
+- Expand integration tests against the remote sandbox host.

@@ -27,9 +27,8 @@
   - `added:` / `removed:` 两段始终保留
   - canonical names 稳定排序输出
 - `WrapInvokableToolCall(...)` / `WrapStreamableToolCall(...)`：
-  - `tool_search` 仅在 searchable pool 非空或 pending server 存在时可调用
-  - 只有 always-loaded / non-deferred entry 且无 pending server 时，visible tool list 中 `tool_search` 必须隐藏
-  - 被强行调用时，`tool_search` 的 unavailable 文案来自共享常量/单点 helper，不能在不同路径手写漂移
+  - Runtime V2 中 `tool_search` 始终可调用、始终保留在 visible tool list
+  - 空搜索时返回 loaded tools，避免模型因没有 deferred match 而误判 ToolSearch 不可用
   - 已在 current loaded tools 内的 deferred tool 会直接放行，不会再误导模型先去 `tool_search`
   - 未加载但当前可搜索的 deferred tool 被调用时返回“先用 tool_search”
   - catalog 中存在但当前 mode / permission / runtime 下不可搜索的 tool 会直接返回 unavailable，不再误导去搜
@@ -45,7 +44,7 @@
   - `github.com/cloudwego/eino/components/model`
 
 ## 6. 变更影响面
-- 这是 deferred MCP visible surface 的最终执行点
+- 这是 generic deferred/runtime visible surface 的最终执行点
 
 ## 7. 维护建议
 - deferred tools delta 只显示 canonical names，不要在这里泄漏 schema 或 search hints

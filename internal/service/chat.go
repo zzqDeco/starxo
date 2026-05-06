@@ -527,7 +527,7 @@ func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSe
 	}
 	return tools.ToolSearchState{
 		SearchablePool:   state.SearchablePoolForMode,
-		CurrentLoaded:    state.EffectiveDiscovered,
+		CurrentLoaded:    state.CurrentLoadedTools,
 		PendingMCPServer: state.PendingMCPServers,
 	}, nil
 }
@@ -618,11 +618,8 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 			return "", err
 		}
 
-		if name == "tool_search" {
-			if len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0 {
-				return "", nil
-			}
-			return tools.ToolSearchUnavailableNoDeferredMessage, nil
+		if name == tools.ToolSearchName {
+			return "", nil
 		}
 
 		if entry, ok := provider.LookupCatalogEntry(name); ok {
@@ -652,6 +649,7 @@ type ChatService struct {
 	now             func() time.Time
 	freshnessTTL    time.Duration
 	runtimeOptions  ChatRuntimeOptions
+	runtimeTasks    *runtimeTaskManager
 
 	installedBundle            *RunnerBundle
 	retiredBundles             []*RunnerBundle
@@ -680,7 +678,7 @@ func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatServic
 	if len(opts) > 0 {
 		runtimeOptions = opts[0]
 	}
-	return &ChatService{
+	s := &ChatService{
 		store:           store,
 		checkpointStore: checkpoint.NewInMemoryStore(),
 		sessions:        make(map[string]*SessionRun),
@@ -688,6 +686,10 @@ func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatServic
 		freshnessTTL:    defaultBundleFreshnessTTL,
 		runtimeOptions:  runtimeOptions,
 	}
+	s.runtimeTasks = newRuntimeTaskManager(s.now, func(event string, data any) {
+		wailsEmit(s.ctx, event, data)
+	})
+	return s
 }
 
 // SetContext stores the Wails application context. Called from app.go startup.
@@ -2784,8 +2786,22 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		CachedSurfaceMetadataByServer: cloneSurfaceCache(surface.CachedSurfaceMetadataByServer),
 	}
 	provider := &deferredMCPProvider{chat: s, bundle: bundle}
+	ac := s.buildAgentContext()
 
 	topLevelCatalog := tools.NewToolCatalog()
+	runtimeEntries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build runtime core tools: %w", err)
+	}
+	for _, entry := range runtimeEntries {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to register runtime tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
 	for _, entry := range surface.ActionCatalog.Entries() {
 		wrapped := entry
 		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
@@ -2832,7 +2848,6 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	extraTools = append(extraTools, toolSearchTool)
 	extraTools = append(extraTools, topLevelCatalog.Tools()...)
 
-	ac := s.buildAgentContext()
 	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
 	unknownToolsHandler := newDeferredUnknownToolHandler(provider)
 

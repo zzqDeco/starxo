@@ -77,6 +77,9 @@ func ComputeDeferredMCPState(
 		if !entry.AlwaysLoad {
 			continue
 		}
+		if decision, ok := loadDecisions[entry.CanonicalName]; ok && !decision.Allowed {
+			continue
+		}
 		if _, exists := seenLoaded[entry.CanonicalName]; exists {
 			continue
 		}
