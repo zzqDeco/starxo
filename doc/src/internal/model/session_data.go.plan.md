@@ -14,6 +14,7 @@
 
 ## 4. 关键实现细节
 - `SessionData` 新增 `DiscoveredTools []DiscoveredToolRecord`
+- `SessionData` 新增 `PermissionGrants []RuntimePermissionGrant`，保存用户选择的“本会话允许”工具授权
 - `SessionData` 新增 `DeferredAnnouncementState *DeferredAnnouncementState`
 - `SessionData` 新增 `MCPInstructionsDeltaState *MCPInstructionsDeltaState`
 - `SessionData.Version` 当前固定为 `4`
@@ -33,6 +34,12 @@
   - `Server`
   - `Kind`
   - `DiscoveredAt`
+- `RuntimePermissionGrant` 固定字段：
+  - `ToolName`
+  - `ToolClass`
+  - `Source`
+  - `Decision`
+  - `CreatedAt`
 - `PlanDocument` 固定字段：
   - `Markdown`
   - `UpdatedAt`
@@ -64,9 +71,10 @@
 - 被 `chat.go`、`session_svc.go`、`tool_search.go` 共同消费
 
 ## 6. 变更影响面
-- 成为 deferred discovery 与 plan-mode v2 state 的统一持久化状态源
+- 成为 deferred discovery、permission grants 与 plan-mode v2 state 的统一持久化状态源
 
 ## 7. 维护建议
 - discovery 状态不要迁回 `PersistedMessage`；`SessionData` 是唯一权威落盘位置
+- permission grant 只保存 session scope，不保存 allow-once/deny 这类瞬时审批结果
 - deferred delta state 与 discovery state 语义不同，不要合并成同一个字段
 - normalize / downgrade 规则只能维护在 model 层这一份 helper 里，不要在 storage / service 各写一套

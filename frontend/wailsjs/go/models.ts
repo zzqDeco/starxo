@@ -517,6 +517,26 @@ export namespace model {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
+	export class RuntimePermissionGrant {
+	    toolName: string;
+	    toolClass?: string;
+	    source?: string;
+	    decision: string;
+	    createdAt: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimePermissionGrant(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.toolName = source["toolName"];
+	        this.toolClass = source["toolClass"];
+	        this.source = source["source"];
+	        this.decision = source["decision"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
 	export class Session {
 	    id: string;
 	    title: string;
@@ -563,6 +583,7 @@ export namespace model {
 	    display: DisplayTurn[];
 	    streaming?: StreamingState;
 	    discoveredTools?: DiscoveredToolRecord[];
+	    permissionGrants?: RuntimePermissionGrant[];
 	    deferredAnnouncementState?: DeferredAnnouncementState;
 	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
 	    mode?: string;
@@ -581,6 +602,7 @@ export namespace model {
 	        this.display = this.convertValues(source["display"], DisplayTurn);
 	        this.streaming = this.convertValues(source["streaming"], StreamingState);
 	        this.discoveredTools = this.convertValues(source["discoveredTools"], DiscoveredToolRecord);
+	        this.permissionGrants = this.convertValues(source["permissionGrants"], RuntimePermissionGrant);
 	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
 	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
 	        this.mode = source["mode"];

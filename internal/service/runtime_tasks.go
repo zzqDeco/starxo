@@ -334,28 +334,14 @@ func (s *ChatService) StopRuntimeTask(taskID string) (tools.RuntimeTaskSnapshot,
 }
 
 func (s *ChatService) ApproveToolPermission(requestID string, decision string) error {
-	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("requestID is required")
-	}
 	if strings.TrimSpace(decision) == "" {
-		decision = "allow_once"
+		decision = tools.ToolPermissionDecisionAllowOnce
 	}
-	wailsEmit(s.ctx, "runtime:permission_resolved", map[string]string{
-		"requestID": requestID,
-		"decision":  decision,
-	})
-	return nil
+	return s.resolvePermissionRequest(requestID, decision)
 }
 
 func (s *ChatService) DenyToolPermission(requestID string) error {
-	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("requestID is required")
-	}
-	wailsEmit(s.ctx, "runtime:permission_resolved", map[string]string{
-		"requestID": requestID,
-		"decision":  "deny",
-	})
-	return nil
+	return s.resolvePermissionRequest(requestID, tools.ToolPermissionDecisionDeny)
 }
 
 func wailsEmit(ctx context.Context, event string, data any) {

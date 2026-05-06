@@ -14,6 +14,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
 - **Runtime V2 Tool Surface** — Always-visible `ToolSearch`, direct file/search/edit/shell tools, and managed background task output for long-running commands
+- **Tool Permissions** — Risky runtime and MCP tool calls prompt for deny, allow once, or allow for the current session
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
@@ -158,6 +159,8 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, and `ExitPlanMode`; legacy names such as `read_file` and `shell_execute` remain aliases.
 
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
+
+Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data.
 
 ### Production Build
 

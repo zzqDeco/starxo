@@ -74,6 +74,10 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 	data := &SessionData{
 		Version: SessionDataVersion,
 		Mode:    ModePlan,
+		PermissionGrants: []RuntimePermissionGrant{{
+			ToolName: "Bash",
+			Decision: "allow_session",
+		}},
 		PlanDocument: &PlanDocument{
 			Markdown:  "draft",
 			UpdatedAt: 10,
@@ -100,10 +104,14 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 	if normalized.PendingPlanAttachment == data.PendingPlanAttachment {
 		t.Fatal("expected pending attachment clone")
 	}
+	if len(normalized.PermissionGrants) != 1 || normalized.PermissionGrants[0].ToolName != "Bash" {
+		t.Fatalf("expected permission grant clone, got %#v", normalized.PermissionGrants)
+	}
 
 	normalized.PlanDocument.Markdown = "changed"
 	normalized.PendingPlanApproval.RequestedAt = 99
 	normalized.PendingPlanAttachment.Markdown = "changed too"
+	normalized.PermissionGrants[0].ToolName = "Write"
 
 	if data.PlanDocument.Markdown != "draft" {
 		t.Fatalf("expected original plan document to stay unchanged, got %#v", data.PlanDocument)
@@ -113,5 +121,8 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 	}
 	if data.PendingPlanAttachment.Markdown != "approved plan" {
 		t.Fatalf("expected original pending attachment to stay unchanged, got %#v", data.PendingPlanAttachment)
+	}
+	if data.PermissionGrants[0].ToolName != "Bash" {
+		t.Fatalf("expected original permission grant to stay unchanged, got %#v", data.PermissionGrants)
 	}
 }

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -27,6 +28,33 @@ type PermissionDecision struct {
 
 type ToolPermissionProvider interface {
 	ToolPermissionContext(ctx context.Context) (ToolPermissionContext, error)
+}
+
+const (
+	ToolPermissionDecisionAllowOnce    = "allow_once"
+	ToolPermissionDecisionAllowSession = "allow_session"
+	ToolPermissionDecisionDeny         = "deny"
+)
+
+type ToolPermissionRequest struct {
+	RequestID   string `json:"requestId"`
+	SessionID   string `json:"sessionId,omitempty"`
+	ToolName    string `json:"toolName"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	ToolClass   string `json:"toolClass,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Risk        string `json:"risk"`
+	Input       string `json:"input,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+}
+
+type ToolPermissionResolution struct {
+	Decision string `json:"decision"`
+}
+
+type ToolExecutionPermissionProvider interface {
+	RequestToolPermission(ctx context.Context, entry CatalogEntry, argumentsInJSON string) (ToolPermissionResolution, error)
 }
 
 func (e CatalogEntry) ReadOnlyEligible() bool {
@@ -160,5 +188,29 @@ func (p *permissionedTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	if !decision.Allowed {
 		return "", fmt.Errorf("tool %s is not permitted: %s", p.entry.CanonicalName, decision.Reason)
 	}
+	if err := p.requestExecutionPermission(ctx, argumentsInJSON); err != nil {
+		return "", err
+	}
 	return inv.InvokableRun(ctx, argumentsInJSON, opts...)
+}
+
+func (p *permissionedTool) requestExecutionPermission(ctx context.Context, argumentsInJSON string) error {
+	executionProvider, ok := p.provider.(ToolExecutionPermissionProvider)
+	if !ok || p.entry.ReadOnlyEligible() {
+		return nil
+	}
+	resolution, err := executionProvider.RequestToolPermission(ctx, p.entry, argumentsInJSON)
+	if err != nil {
+		return err
+	}
+	switch strings.TrimSpace(resolution.Decision) {
+	case ToolPermissionDecisionAllowOnce, ToolPermissionDecisionAllowSession:
+		return nil
+	case ToolPermissionDecisionDeny:
+		return fmt.Errorf("tool %s was denied by the user", p.entry.CanonicalName)
+	case "":
+		return fmt.Errorf("tool %s permission request returned an empty decision", p.entry.CanonicalName)
+	default:
+		return fmt.Errorf("tool %s permission request returned unsupported decision %q", p.entry.CanonicalName, resolution.Decision)
+	}
 }

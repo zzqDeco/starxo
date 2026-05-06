@@ -51,8 +51,14 @@
 - `Read` supports offset/limit by line range.
 - `Grep` and `Glob` prefer remote `rg`/`find` behavior with stable sorted output.
 
+## Permission Queue
+- Runtime V2 now emits `runtime:permission_request` for non-read-only trusted tools.
+- Frontend approval supports deny, allow once, and allow session.
+- `allow_session` grants are persisted in `SessionData.PermissionGrants`.
+- Read-only trusted tools bypass the queue; no UI context fails closed for risky tools.
+
 ## Follow-Up Work
-- Add frontend Runtime Tasks panel and permission approval dialog.
+- Add frontend Runtime Tasks panel.
 - Add deferred LSP/worktree/skill/web/notebook tools through the generalized catalog.
 - Add token-aware compaction that preserves discovered tools, active tasks, permissions, todos, file read state, and diff summaries.
 - Add structured diff UI for `Edit`/`Write`.

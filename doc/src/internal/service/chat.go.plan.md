@@ -13,6 +13,7 @@
 - 构建并装配 deferred MCP surface：MCP action/resource catalog、`tool_search`、permission gate、per-model-call late binding、announcement 注入。
 - 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
+- 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
 - 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
@@ -26,6 +27,7 @@
 - 输出结果:
   - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`、`agent:run_state`
   - Runtime V2 事件：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`
+  - Permission 事件：`runtime:permission_request`、`runtime:permission_canceled`
   - 一致性快照：`ExportSessionSnapshot(sessionID)`
   - discovery 状态操作：`RestoreSessionData`、`AddDiscoveredTool`、`ReplaceDiscoveredTools`、`PruneDiscoveredToolsForSave`
 
@@ -129,6 +131,11 @@
   - runtime entries 同样经过 permission wrapper
   - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
   - background `Bash` 任务写入 `runtimeTaskManager`
+- Runtime V2 permission queue：
+  - `WrapMCPToolWithPermissionCheck` 覆盖 runtime 与 MCP catalog entries
+  - 非 read-only trusted 工具执行前调用 `deferredMCPProvider.RequestToolPermission`
+  - `allow_session` grant 写入 `SessionRun.permissionGrants` 并随 snapshot 持久化
+  - 无 Wails UI context 时 fail-closed，避免危险工具在 headless 场景静默执行
 - deferred synthetic message 的 phase-2 注入规则：
   - 先注入 deferred tools delta，再按需注入 MCP instructions delta
   - synthetic message 使用 `schema.UserMessage`

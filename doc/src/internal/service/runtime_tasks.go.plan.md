@@ -16,7 +16,7 @@
 - 输出结果:
   - `tools.RuntimeTaskSnapshot`
   - `tools.RuntimeTaskOutput`
-  - Wails events：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`
+- Wails events：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`
 
 ## 4. 关键实现细节
 - task 状态：`running`、`completed`、`failed`、`killed`
@@ -24,7 +24,7 @@
 - 大型 foreground tool result 可存储在 `~/.starxo/sessions/<session>/tool-results/<id>.txt`
 - `ReadTaskOutput` 支持 byte offset/limit，便于前端增量读取。
 - `StopTask` 对 running task 调用 cancel，并保留明确的 `killed` 状态。
-- permission API 当前是基础事件层：校验 requestID 后发出 resolved event；完整审批队列后续补齐。
+- permission API 方法名仍保留在本文件，但实际队列和 grant 逻辑已下沉到 `runtime_permissions.go`。
 - `wailsEmit` 对 nil context 短路，保证 Go 单测不会触发 Wails runtime fatal。
 
 ## 5. 依赖关系

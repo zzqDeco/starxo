@@ -126,6 +126,7 @@ type SessionRun struct {
 	ctxEngine                 *agentctx.Engine
 	timeline                  *agentctx.TimelineCollector
 	discoveredTools           map[string]model.DiscoveredToolRecord
+	permissionGrants          map[string]model.RuntimePermissionGrant
 	deferredAnnouncementState *model.DeferredAnnouncementState
 	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
 	planDocument              *model.PlanDocument
@@ -197,6 +198,7 @@ func (r *SessionRun) clearSessionState() {
 	r.timeline.Clear()
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
 	r.planDocument = nil
@@ -235,6 +237,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	}
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
 	r.planDocument = nil
@@ -257,6 +260,12 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 		}
 		r.discoveredTools[record.CanonicalName] = record
 	}
+	for _, grant := range data.PermissionGrants {
+		if grant.ToolName == "" || grant.Decision != tools.ToolPermissionDecisionAllowSession {
+			continue
+		}
+		r.permissionGrants[grant.ToolName] = grant
+	}
 }
 
 func (r *SessionRun) snapshot() *SessionSnapshot {
@@ -270,6 +279,13 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 	sort.Slice(discovered, func(i, j int) bool {
 		return discovered[i].CanonicalName < discovered[j].CanonicalName
 	})
+	grants := make([]model.RuntimePermissionGrant, 0, len(r.permissionGrants))
+	for _, grant := range r.permissionGrants {
+		grants = append(grants, grant)
+	}
+	sort.Slice(grants, func(i, j int) bool {
+		return grants[i].ToolName < grants[j].ToolName
+	})
 
 	return &SessionSnapshot{
 		HasSessionRun: true,
@@ -280,6 +296,7 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 			Display:                   r.timeline.Export(),
 			Streaming:                 cloneStreamingState(r.streamingState),
 			DiscoveredTools:           discovered,
+			PermissionGrants:          grants,
 			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
 			Mode:                      r.mode,
@@ -669,6 +686,9 @@ type ChatService struct {
 	sessionService *SessionService
 	onAgentDone    func(sessionID string)
 
+	permissionMu       sync.Mutex
+	permissionRequests map[string]*runtimePermissionRequest
+
 	mu sync.Mutex
 }
 
@@ -679,12 +699,13 @@ func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatServic
 		runtimeOptions = opts[0]
 	}
 	s := &ChatService{
-		store:           store,
-		checkpointStore: checkpoint.NewInMemoryStore(),
-		sessions:        make(map[string]*SessionRun),
-		now:             time.Now,
-		freshnessTTL:    defaultBundleFreshnessTTL,
-		runtimeOptions:  runtimeOptions,
+		store:              store,
+		checkpointStore:    checkpoint.NewInMemoryStore(),
+		sessions:           make(map[string]*SessionRun),
+		now:                time.Now,
+		freshnessTTL:       defaultBundleFreshnessTTL,
+		runtimeOptions:     runtimeOptions,
+		permissionRequests: make(map[string]*runtimePermissionRequest),
 	}
 	s.runtimeTasks = newRuntimeTaskManager(s.now, func(event string, data any) {
 		wailsEmit(s.ctx, event, data)
@@ -752,11 +773,12 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		return run
 	}
 	run := &SessionRun{
-		sessionID:       sessionID,
-		ctxEngine:       agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
-		timeline:        agentctx.NewTimelineCollector(),
-		discoveredTools: make(map[string]model.DiscoveredToolRecord),
-		mode:            model.ModeDefault,
+		sessionID:        sessionID,
+		ctxEngine:        agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
+		timeline:         agentctx.NewTimelineCollector(),
+		discoveredTools:  make(map[string]model.DiscoveredToolRecord),
+		permissionGrants: make(map[string]model.RuntimePermissionGrant),
+		mode:             model.ModeDefault,
 	}
 	s.sessions[sessionID] = run
 	return run
