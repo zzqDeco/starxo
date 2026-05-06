@@ -1,14 +1,15 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NButton, NEmpty, NIcon, NInput, NSpin, NTree, type TreeOption } from 'naive-ui'
-import { CloudDownload, CloudUpload, Refresh, Search } from '@vicons/ionicons5'
-import type { FileInfo } from '@/types/config'
+import { NButton, NEmpty, NIcon, NInput, NSpin, NTooltip, NTree, type TreeOption } from 'naive-ui'
+import { CloudDownload, CloudUpload, CopyOutline, Refresh, Search, TrashOutline } from '@vicons/ionicons5'
+import type { FileInfo, WorkspaceInfo } from '@/types/config'
 import SplitHandle from '@/components/layout/SplitHandle.vue'
 import FileTransfer from './FileTransfer.vue'
 import CodePreview from './CodePreview.vue'
-import { DownloadFile, ListWorkspaceFiles, ReadFilePreview } from '../../../wailsjs/go/service/FileService'
+import { CleanupSandboxTmp, DownloadFile, GetWorkspaceInfo, ListWorkspaceFiles, ReadFilePreview } from '../../../wailsjs/go/service/FileService'
 import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
+import { useUiFeedback } from '@/composables/useUiFeedback'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -27,14 +28,31 @@ const query = ref('')
 const treeWidth = ref(220)
 const showTransfer = ref(false)
 const { t } = useI18n()
+const feedback = useUiFeedback()
+const workspaceInfo = ref<WorkspaceInfo | null>(null)
+const cleaningTmp = ref(false)
 
 const selectedFile = computed(() => files.value.find(f => f.path === selectedPath.value) || null)
+const workspacePath = computed(() => workspaceInfo.value?.workspacePath || '')
+const workspaceHost = computed(() => {
+  const info = workspaceInfo.value
+  if (!info?.sshHost) return '-'
+  return `${info.sshHost}:${info.sshPort || 22}`
+})
 
 const filteredFiles = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return files.value
-  return files.value.filter(f => f.path.toLowerCase().includes(q) || f.name.toLowerCase().includes(q))
+  return files.value.filter(f => f.path.toLowerCase().includes(q) || displayPath(f.path).toLowerCase().includes(q) || f.name.toLowerCase().includes(q))
 })
+
+function displayPath(filePath: string) {
+  const root = workspacePath.value.replace(/\/+$/, '')
+  if (root && (filePath === root || filePath.startsWith(`${root}/`))) {
+    return filePath.slice(root.length).replace(/^\/+/, '') || '.'
+  }
+  return filePath.replace(/^\/+/, '')
+}
 
 function sortNodes(nodes: WorkspaceTreeNode[]) {
   nodes.sort((a, b) => {
@@ -53,7 +71,7 @@ function buildTree(fileList: FileInfo[]): WorkspaceTreeNode[] {
   const index = new Map<string, WorkspaceTreeNode>()
 
   for (const file of fileList) {
-    const parts = file.path.replace(/\\/g, '/').split('/').filter(Boolean)
+    const parts = displayPath(file.path).replace(/\\/g, '/').split('/').filter(Boolean)
     if (parts.length === 0) continue
 
     let currentChildren = root
@@ -99,6 +117,13 @@ const treeData = computed<WorkspaceTreeNode[]>(() => buildTree(filteredFiles.val
 async function refreshFiles() {
   loading.value = true
   try {
+    await refreshWorkspaceInfo()
+    if (!workspaceInfo.value?.active) {
+      files.value = []
+      selectedPath.value = ''
+      previewContent.value = ''
+      return
+    }
     const result = await ListWorkspaceFiles()
     files.value = (result as unknown as FileInfo[]) || []
 
@@ -110,6 +135,15 @@ async function refreshFiles() {
     console.warn('Failed to list files:', e)
   } finally {
     loading.value = false
+  }
+}
+
+async function refreshWorkspaceInfo() {
+  try {
+    workspaceInfo.value = await GetWorkspaceInfo() as WorkspaceInfo
+  } catch (e) {
+    console.warn('Failed to inspect workspace:', e)
+    workspaceInfo.value = null
   }
 }
 
@@ -146,6 +180,42 @@ function handleSelect(keys: Array<string | number>) {
 
 function openUpload() {
   showTransfer.value = true
+}
+
+async function copyWorkspacePath() {
+  if (!workspacePath.value) return
+  await navigator.clipboard.writeText(workspacePath.value)
+  feedback.success(t('workspace.pathCopied'))
+}
+
+async function cleanupTmp() {
+  const confirmed = await feedback.confirmDanger(t('workspace.cleanupTmpConfirm'))
+  if (!confirmed) return
+  cleaningTmp.value = true
+  try {
+    const result = await CleanupSandboxTmp()
+    feedback.success(t('workspace.cleanupTmpDone', {
+      count: result?.removedEntries || 0,
+      size: formatBytes(result?.reclaimedBytes || 0),
+    }))
+    await refreshFiles()
+  } catch (e) {
+    feedback.error(t('workspace.cleanupTmp'), e)
+  } finally {
+    cleaningTmp.value = false
+  }
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes || bytes < 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
 }
 
 async function openPath(path: string) {
@@ -193,8 +263,51 @@ onUnmounted(() => {
           <template #icon><NIcon size="14"><Refresh /></NIcon></template>
           {{ t('workspace.refresh') }}
         </NButton>
+        <NTooltip trigger="hover">
+          <template #trigger>
+            <NButton size="tiny" quaternary :disabled="!workspacePath" @click="copyWorkspacePath">
+              <template #icon><NIcon size="14"><CopyOutline /></NIcon></template>
+            </NButton>
+          </template>
+          {{ t('workspace.copyPath') }}
+        </NTooltip>
+        <NTooltip trigger="hover">
+          <template #trigger>
+            <NButton size="tiny" quaternary :disabled="!workspaceInfo?.active" :loading="cleaningTmp" @click="cleanupTmp">
+              <template #icon><NIcon size="14"><TrashOutline /></NIcon></template>
+            </NButton>
+          </template>
+          {{ t('workspace.cleanupTmp') }}
+        </NTooltip>
       </div>
     </header>
+
+    <div class="workspace-meta">
+      <div class="meta-item">
+        <span>{{ t('workspace.sandbox') }}</span>
+        <strong>{{ workspaceInfo?.sandboxName || t('runtime.noActiveContainer') }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>{{ t('workspace.runtime') }}</span>
+        <strong>{{ workspaceInfo?.runtime || '-' }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>{{ t('workspace.host') }}</span>
+        <strong>{{ workspaceHost }}</strong>
+      </div>
+      <div class="meta-item path">
+        <span>{{ t('workspace.path') }}</span>
+        <strong>{{ workspacePath || '-' }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>{{ t('workspace.files') }}</span>
+        <strong>{{ workspaceInfo?.fileCount || files.length }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>{{ t('workspace.size') }}</span>
+        <strong>{{ formatBytes(workspaceInfo?.totalSize || 0) }}</strong>
+      </div>
+    </div>
 
     <div class="workspace-body">
       <div class="tree-pane" :style="{ width: treeWidth + 'px' }">
@@ -221,7 +334,12 @@ onUnmounted(() => {
               @update:selected-keys="handleSelect"
               class="workspace-tree"
             />
-            <NEmpty v-else size="small" :description="t('workspace.noFiles')" class="tree-empty" />
+            <NEmpty
+              v-else
+              size="small"
+              :description="workspaceInfo?.active ? t('workspace.noFiles') : t('workspace.noActiveWorkspace')"
+              class="tree-empty"
+            />
           </NSpin>
         </div>
       </div>
@@ -280,6 +398,45 @@ onUnmounted(() => {
 .workspace-actions {
   display: flex;
   gap: 4px;
+}
+
+.workspace-meta {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.3fr) repeat(2, minmax(70px, 0.8fr)) minmax(160px, 2fr) repeat(2, minmax(60px, 0.6fr));
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-deepest);
+  flex-shrink: 0;
+}
+
+.meta-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-item span {
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.meta-item strong {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-item.path strong {
+  font-family: var(--font-mono);
+  font-weight: 500;
 }
 
 .workspace-body {
@@ -350,5 +507,11 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+@media (max-width: 900px) {
+  .workspace-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

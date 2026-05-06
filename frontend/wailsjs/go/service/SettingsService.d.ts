@@ -6,6 +6,8 @@ import {context} from '../models';
 
 export function CheckSandboxRuntime(arg1:config.AppConfig):Promise<sandbox.RuntimeCheckResult>;
 
+export function DiagnoseSandboxRuntime(arg1:config.AppConfig):Promise<sandbox.SandboxDiagnosticsResult>;
+
 export function GetSettings():Promise<config.AppConfig>;
 
 export function InstallSandboxRuntime(arg1:config.AppConfig):Promise<sandbox.RuntimeInstallResult>;

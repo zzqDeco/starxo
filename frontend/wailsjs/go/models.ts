@@ -1,41 +1,41 @@
 export namespace agentctx {
-	
+
 	export class Engine {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new Engine(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 	export class TimelineCollector {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new TimelineCollector(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 
 }
 
 export namespace config {
-	
+
 	export class AgentConfig {
 	    maxIterations: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.maxIterations = source["maxIterations"];
@@ -49,11 +49,11 @@ export namespace config {
 	    url?: string;
 	    env?: Record<string, string>;
 	    enabled: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPServerConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -67,16 +67,16 @@ export namespace config {
 	}
 	export class MCPConfig {
 	    servers: MCPServerConfig[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.servers = this.convertValues(source["servers"], MCPServerConfig);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -101,11 +101,11 @@ export namespace config {
 	    apiKey: string;
 	    model: string;
 	    headers?: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LLMConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.type = source["type"];
@@ -121,11 +121,11 @@ export namespace config {
 	    cpuLimit: number;
 	    workDir: string;
 	    network: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DockerConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.image = source["image"];
@@ -144,11 +144,11 @@ export namespace config {
 	    commandTimeoutSec: number;
 	    bootstrapPython: boolean;
 	    pythonPackages: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SandboxConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.runtime = source["runtime"];
@@ -167,11 +167,11 @@ export namespace config {
 	    user: string;
 	    password?: string;
 	    privateKey?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SSHConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.host = source["host"];
@@ -188,11 +188,11 @@ export namespace config {
 	    llm: LLMConfig;
 	    mcp: MCPConfig;
 	    agent: AgentConfig;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ssh = this.convertValues(source["ssh"], SSHConfig);
@@ -202,7 +202,7 @@ export namespace config {
 	        this.mcp = this.convertValues(source["mcp"], MCPConfig);
 	        this.agent = this.convertValues(source["agent"], AgentConfig);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -221,16 +221,16 @@ export namespace config {
 		    return a;
 		}
 	}
-	
-	
-	
-	
-	
+
+
+
+
+
 
 }
 
 export namespace model {
-	
+
 	export class Container {
 	    id: string;
 	    runtimeID?: string;
@@ -246,11 +246,11 @@ export namespace model {
 	    sessionID: string;
 	    createdAt: number;
 	    lastUsedAt: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Container(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -271,11 +271,11 @@ export namespace model {
 	}
 	export class DeferredAnnouncementState {
 	    announcedSearchableCanonicalNames: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeferredAnnouncementState(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.announcedSearchableCanonicalNames = source["announcedSearchableCanonicalNames"];
@@ -286,11 +286,11 @@ export namespace model {
 	    server: string;
 	    kind: string;
 	    discoveredAt: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiscoveredToolRecord(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.canonicalName = source["canonicalName"];
@@ -310,11 +310,11 @@ export namespace model {
 	    toolResult?: string;
 	    timestamp: number;
 	    isStreaming?: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DisplayEvent(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -336,11 +336,11 @@ export namespace model {
 	    agent?: string;
 	    timestamp: number;
 	    events: DisplayEvent[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DisplayTurn(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -350,7 +350,7 @@ export namespace model {
 	        this.timestamp = source["timestamp"];
 	        this.events = this.convertValues(source["events"], DisplayEvent);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -374,11 +374,11 @@ export namespace model {
 	    lastAnnouncedPendingServers: string[];
 	    lastAnnouncedUnavailableServers: string[];
 	    lastInstructionsFingerprint: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPInstructionsDeltaState(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.lastAnnouncedSearchableServers = source["lastAnnouncedSearchableServers"];
@@ -389,11 +389,11 @@ export namespace model {
 	}
 	export class PendingPlanApproval {
 	    requestedAt: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PendingPlanApproval(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.requestedAt = source["requestedAt"];
@@ -404,11 +404,11 @@ export namespace model {
 	    markdown: string;
 	    feedback?: string;
 	    createdAt: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PendingPlanAttachment(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -420,11 +420,11 @@ export namespace model {
 	export class PersistedToolCallFunction {
 	    name: string;
 	    arguments: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PersistedToolCallFunction(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -434,17 +434,17 @@ export namespace model {
 	export class PersistedToolCall {
 	    id: string;
 	    function: PersistedToolCallFunction;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PersistedToolCall(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.function = this.convertValues(source["function"], PersistedToolCallFunction);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -469,11 +469,11 @@ export namespace model {
 	    name?: string;
 	    toolCallId?: string;
 	    toolCalls?: PersistedToolCall[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PersistedMessage(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.role = source["role"];
@@ -482,7 +482,7 @@ export namespace model {
 	        this.toolCallId = source["toolCallId"];
 	        this.toolCalls = this.convertValues(source["toolCalls"], PersistedToolCall);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -501,16 +501,16 @@ export namespace model {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class PlanDocument {
 	    markdown: string;
 	    updatedAt: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PlanDocument(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.markdown = source["markdown"];
@@ -526,11 +526,11 @@ export namespace model {
 	    createdAt: number;
 	    updatedAt: number;
 	    messageCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -546,11 +546,11 @@ export namespace model {
 	export class StreamingState {
 	    partialContent?: string;
 	    agentName?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StreamingState(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.partialContent = source["partialContent"];
@@ -569,11 +569,11 @@ export namespace model {
 	    planDocument?: PlanDocument;
 	    pendingPlanApproval?: PendingPlanApproval;
 	    pendingPlanAttachment?: PendingPlanAttachment;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SessionData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -588,7 +588,7 @@ export namespace model {
 	        this.pendingPlanApproval = this.convertValues(source["pendingPlanApproval"], PendingPlanApproval);
 	        this.pendingPlanAttachment = this.convertValues(source["pendingPlanAttachment"], PendingPlanAttachment);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -611,7 +611,7 @@ export namespace model {
 }
 
 export namespace sandbox {
-	
+
 	export class RuntimeCheckResult {
 	    runtime: string;
 	    os: string;
@@ -625,11 +625,11 @@ export namespace sandbox {
 	    memoryLimitMB: number;
 	    networkEnabled: boolean;
 	    pythonBootstrap: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RuntimeCheckResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.runtime = source["runtime"];
@@ -653,11 +653,11 @@ export namespace sandbox {
 	    stdout?: string;
 	    stderr?: string;
 	    message: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RuntimeInstallResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.runtime = source["runtime"];
@@ -668,33 +668,134 @@ export namespace sandbox {
 	        this.message = source["message"];
 	    }
 	}
+	export class SandboxDiagnosticCheck {
+	    id: string;
+	    label: string;
+	    status: string;
+	    message: string;
+	    details?: string;
+	    command?: string;
+	    output?: string;
+	    fixIDs?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new SandboxDiagnosticCheck(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.status = source["status"];
+	        this.message = source["message"];
+	        this.details = source["details"];
+	        this.command = source["command"];
+	        this.output = source["output"];
+	        this.fixIDs = source["fixIDs"];
+	    }
+	}
+	export class SandboxFixSuggestion {
+	    id: string;
+	    title: string;
+	    description: string;
+	    risk: string;
+	    platform?: string;
+	    commands?: string[];
+	    copyOnly: boolean;
+	    autoRunnable: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new SandboxFixSuggestion(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.risk = source["risk"];
+	        this.platform = source["platform"];
+	        this.commands = source["commands"];
+	        this.copyOnly = source["copyOnly"];
+	        this.autoRunnable = source["autoRunnable"];
+	    }
+	}
+	export class SandboxDiagnosticsResult {
+	    runtime: string;
+	    os: string;
+	    available: boolean;
+	    summary: string;
+	    checks: SandboxDiagnosticCheck[];
+	    fixes: SandboxFixSuggestion[];
+	    workspaceRoot?: string;
+	    commandTimeoutSec: number;
+	    memoryLimitMB: number;
+	    networkEnabled: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new SandboxDiagnosticsResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.runtime = source["runtime"];
+	        this.os = source["os"];
+	        this.available = source["available"];
+	        this.summary = source["summary"];
+	        this.checks = this.convertValues(source["checks"], SandboxDiagnosticCheck);
+	        this.fixes = this.convertValues(source["fixes"], SandboxFixSuggestion);
+	        this.workspaceRoot = source["workspaceRoot"];
+	        this.commandTimeoutSec = source["commandTimeoutSec"];
+	        this.memoryLimitMB = source["memoryLimitMB"];
+	        this.networkEnabled = source["networkEnabled"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 	export class SandboxManager {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new SandboxManager(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 
 }
 
 export namespace service {
-	
+
 	export class ChatService {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new ChatService(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 	export class DeferredAnnouncementPreview {
@@ -702,11 +803,11 @@ export namespace service {
 	    Added: string[];
 	    Removed: string[];
 	    WillEmit: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeferredAnnouncementPreview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Mode = source["Mode"];
@@ -721,11 +822,11 @@ export namespace service {
 	    UnavailableServers: string[];
 	    Fingerprint: string;
 	    WillEmit: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeferredInstructionsSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SearchableServers = source["SearchableServers"];
@@ -752,11 +853,11 @@ export namespace service {
 	    InstructionsSummary: DeferredInstructionsSummary;
 	    ConfigSnapshotError: string;
 	    BuildWarnings: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeferredSurfaceDebug(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.CurrentConfigDigest = source["CurrentConfigDigest"];
@@ -776,7 +877,7 @@ export namespace service {
 	        this.ConfigSnapshotError = source["ConfigSnapshotError"];
 	        this.BuildWarnings = source["BuildWarnings"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -807,11 +908,11 @@ export namespace service {
 	    containerStatus: string;
 	    containerName: string;
 	    containerSSH: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EnrichedSession(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -831,28 +932,30 @@ export namespace service {
 	    name: string;
 	    path: string;
 	    size: number;
+	    modified?: string;
 	    isOutput: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileInfoDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.path = source["path"];
 	        this.size = source["size"];
+	        this.modified = source["modified"];
 	        this.isOutput = source["isOutput"];
 	    }
 	}
 	export class InterruptOption {
 	    label: string;
 	    description: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InterruptOption(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.label = source["label"];
@@ -867,11 +970,11 @@ export namespace service {
 	    options?: InterruptOption[];
 	    question?: string;
 	    sessionId?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InterruptEvent(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.type = source["type"];
@@ -882,7 +985,7 @@ export namespace service {
 	        this.question = source["question"];
 	        this.sessionId = source["sessionId"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -901,7 +1004,7 @@ export namespace service {
 		    return a;
 		}
 	}
-	
+
 	export class SandboxStatusDTO {
 	    sshConnected: boolean;
 	    runtimeAvailable: boolean;
@@ -913,11 +1016,11 @@ export namespace service {
 	    activeContainerID: string;
 	    activeContainerName: string;
 	    dockerAvailable: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SandboxStatusDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sshConnected = source["sshConnected"];
@@ -933,27 +1036,27 @@ export namespace service {
 	    }
 	}
 	export class SessionRun {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new SessionRun(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 	export class SessionService {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new SessionService(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 	export class SessionSnapshot {
@@ -961,11 +1064,11 @@ export namespace service {
 	    MessageCount: number;
 	    HasSessionRun: boolean;
 	    DeferredSurfaceDebug?: DeferredSurfaceDebug;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SessionSnapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SessionData = this.convertValues(source["SessionData"], model.SessionData);
@@ -973,7 +1076,7 @@ export namespace service {
 	        this.HasSessionRun = source["HasSessionRun"];
 	        this.DeferredSurfaceDebug = this.convertValues(source["DeferredSurfaceDebug"], DeferredSurfaceDebug);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -991,6 +1094,54 @@ export namespace service {
 		    }
 		    return a;
 		}
+	}
+	export class WorkspaceCleanupResultDTO {
+	    tmpPath: string;
+	    removedEntries: number;
+	    reclaimedBytes: number;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceCleanupResultDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tmpPath = source["tmpPath"];
+	        this.removedEntries = source["removedEntries"];
+	        this.reclaimedBytes = source["reclaimedBytes"];
+	    }
+	}
+	export class WorkspaceInfoDTO {
+	    sshConnected: boolean;
+	    active: boolean;
+	    sandboxID?: string;
+	    sandboxName?: string;
+	    runtime?: string;
+	    workspacePath?: string;
+	    sshHost?: string;
+	    sshPort?: number;
+	    fileCount: number;
+	    totalSize: number;
+	    refreshedAt: number;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceInfoDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sshConnected = source["sshConnected"];
+	        this.active = source["active"];
+	        this.sandboxID = source["sandboxID"];
+	        this.sandboxName = source["sandboxName"];
+	        this.runtime = source["runtime"];
+	        this.workspacePath = source["workspacePath"];
+	        this.sshHost = source["sshHost"];
+	        this.sshPort = source["sshPort"];
+	        this.fileCount = source["fileCount"];
+	        this.totalSize = source["totalSize"];
+	        this.refreshedAt = source["refreshedAt"];
+	    }
 	}
 
 }

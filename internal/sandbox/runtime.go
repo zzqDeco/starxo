@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,14 @@ const (
 	RuntimeBwrap    = "bwrap"
 	RuntimeSeatbelt = "seatbelt"
 	RuntimeDocker   = "docker"
+)
+
+const (
+	DiagnosticPass    = "pass"
+	DiagnosticWarn    = "warn"
+	DiagnosticFail    = "fail"
+	DiagnosticInfo    = "info"
+	DiagnosticSkipped = "skipped"
 )
 
 type RuntimeCheckResult struct {
@@ -45,6 +54,47 @@ type RuntimeInstallResult struct {
 	Message   string `json:"message"`
 }
 
+type SandboxDiagnosticsResult struct {
+	Runtime           string                   `json:"runtime"`
+	OS                string                   `json:"os"`
+	Available         bool                     `json:"available"`
+	Summary           string                   `json:"summary"`
+	Checks            []SandboxDiagnosticCheck `json:"checks"`
+	Fixes             []SandboxFixSuggestion   `json:"fixes"`
+	WorkspaceRoot     string                   `json:"workspaceRoot,omitempty"`
+	CommandTimeoutSec int                      `json:"commandTimeoutSec"`
+	MemoryLimitMB     int64                    `json:"memoryLimitMB"`
+	NetworkEnabled    bool                     `json:"networkEnabled"`
+}
+
+type SandboxDiagnosticCheck struct {
+	ID      string   `json:"id"`
+	Label   string   `json:"label"`
+	Status  string   `json:"status"`
+	Message string   `json:"message"`
+	Details string   `json:"details,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Output  string   `json:"output,omitempty"`
+	FixIDs  []string `json:"fixIDs,omitempty"`
+}
+
+type SandboxFixSuggestion struct {
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Description  string   `json:"description"`
+	Risk         string   `json:"risk"`
+	Platform     string   `json:"platform,omitempty"`
+	Commands     []string `json:"commands,omitempty"`
+	CopyOnly     bool     `json:"copyOnly"`
+	AutoRunnable bool     `json:"autoRunnable"`
+}
+
+type RuntimeCleanupResult struct {
+	TmpPath        string `json:"tmpPath"`
+	RemovedEntries int    `json:"removedEntries"`
+	ReclaimedBytes int64  `json:"reclaimedBytes"`
+}
+
 type SandboxInstance struct {
 	ID            string
 	Name          string
@@ -56,8 +106,12 @@ type SandboxInstance struct {
 	ProfilePath   string
 }
 
+type remoteCommandRunner interface {
+	RunCommand(ctx context.Context, cmd string) (stdout, stderr string, exitCode int, err error)
+}
+
 type RemoteRuntimeManager struct {
-	ssh      *SSHClient
+	ssh      remoteCommandRunner
 	cfg      config.SandboxConfig
 	kind     string
 	osName   string
@@ -150,6 +204,209 @@ func (m *RemoteRuntimeManager) Install(ctx context.Context) (RuntimeInstallResul
 	result.Installed = true
 	result.Message = "bubblewrap runtime installed"
 	return result, nil
+}
+
+func (m *RemoteRuntimeManager) Diagnose(ctx context.Context) (SandboxDiagnosticsResult, error) {
+	m.mu.Lock()
+	if err := m.ensureKindLocked(ctx); err != nil {
+		m.mu.Unlock()
+		return SandboxDiagnosticsResult{}, err
+	}
+	root, err := m.resolveRootLocked(ctx)
+	if err != nil {
+		m.mu.Unlock()
+		return SandboxDiagnosticsResult{}, err
+	}
+	kind := m.kind
+	osName := m.osName
+	cfg := m.cfg
+	m.mu.Unlock()
+
+	builder := newDiagnosticBuilder(kind, osName, root, cfg)
+	switch kind {
+	case RuntimeBwrap:
+		m.diagnoseBwrap(ctx, builder)
+	case RuntimeSeatbelt:
+		m.diagnoseSeatbelt(ctx, builder)
+	default:
+		builder.addCheck(SandboxDiagnosticCheck{
+			ID:      "runtime.supported",
+			Label:   "Supported runtime",
+			Status:  DiagnosticFail,
+			Message: fmt.Sprintf("unsupported sandbox runtime %q", kind),
+		})
+	}
+	return builder.finish(), nil
+}
+
+func (m *RemoteRuntimeManager) diagnoseBwrap(ctx context.Context, b *diagnosticBuilder) {
+	b.addCheck(SandboxDiagnosticCheck{
+		ID:      "runtime.network",
+		Label:   "Network policy",
+		Status:  DiagnosticInfo,
+		Message: networkPolicyMessage(b.result.NetworkEnabled),
+	})
+
+	bwrapOK := m.checkCommand(ctx, b, "runtime.bwrap", "bubblewrap binary", "bwrap", "install-linux-runtime")
+	pythonOK := m.checkCommand(ctx, b, "runtime.python", "Python binary", "python3", "install-linux-runtime")
+
+	if bwrapOK {
+		m.runDiagnostic(ctx, b, "runtime.bwrap.version", "bubblewrap version", "bwrap --version", DiagnosticPass, "bubblewrap version detected", nil)
+	} else {
+		b.addSkipped("runtime.bwrap.version", "bubblewrap version", "install bubblewrap before checking its version", []string{"install-linux-runtime"})
+	}
+
+	if pythonOK {
+		m.runDiagnostic(ctx, b, "runtime.python.version", "Python version", "python3 --version", DiagnosticPass, "Python version detected", nil)
+		m.runDiagnostic(ctx, b, "runtime.python.venv", "Python venv smoke", "tmp=${TMPDIR:-/tmp}/starxo-venv-check-$$; rm -rf \"$tmp\"; python3 -m venv \"$tmp/.venv\"; rc=$?; rm -rf \"$tmp\"; exit $rc", DiagnosticPass, "python3 can create virtual environments", []string{"install-linux-runtime"})
+	} else {
+		b.addSkipped("runtime.python.version", "Python version", "install python3 before checking its version", []string{"install-linux-runtime"})
+		b.addSkipped("runtime.python.venv", "Python venv smoke", "install python3 before checking venv support", []string{"install-linux-runtime"})
+	}
+
+	m.diagnoseLinuxUserNamespaces(ctx, b)
+
+	if bwrapOK {
+		smokeCmd := bwrapDiagnosticSmokeCommand(b.result.NetworkEnabled)
+		stdout, stderr, exitCode, err := m.ssh.RunCommand(ctx, smokeCmd)
+		check := SandboxDiagnosticCheck{
+			ID:      "runtime.bwrap.smoke",
+			Label:   "bubblewrap smoke",
+			Command: smokeCmd,
+			Output:  diagnosticOutput(stdout, stderr),
+		}
+		if err == nil && exitCode == 0 {
+			check.Status = DiagnosticPass
+			check.Message = "bubblewrap can start an isolated process"
+		} else {
+			check.Status = DiagnosticFail
+			check.Message = "bubblewrap failed to start an isolated process"
+			check.Details = commandFailureDetails(exitCode, err)
+			check.FixIDs = bwrapSmokeFixIDs(stdout, stderr)
+		}
+		b.addCheck(check)
+	} else {
+		b.addSkipped("runtime.bwrap.smoke", "bubblewrap smoke", "install bubblewrap before running the smoke test", []string{"install-linux-runtime"})
+	}
+}
+
+func (m *RemoteRuntimeManager) diagnoseSeatbelt(ctx context.Context, b *diagnosticBuilder) {
+	b.addCheck(SandboxDiagnosticCheck{
+		ID:      "runtime.network",
+		Label:   "Network policy",
+		Status:  DiagnosticInfo,
+		Message: networkPolicyMessage(b.result.NetworkEnabled),
+	})
+
+	seatbeltOK := m.checkCommand(ctx, b, "runtime.seatbelt", "Seatbelt sandbox-exec", "sandbox-exec", "seatbelt-unavailable")
+	pythonOK := m.checkCommand(ctx, b, "runtime.python", "Python binary", "python3", "seatbelt-python")
+	if pythonOK {
+		m.runDiagnostic(ctx, b, "runtime.python.version", "Python version", "python3 --version", DiagnosticPass, "Python version detected", []string{"seatbelt-python"})
+	} else {
+		b.addSkipped("runtime.python.version", "Python version", "install python3 before checking its version", []string{"seatbelt-python"})
+	}
+	if seatbeltOK {
+		m.runDiagnostic(ctx, b, "runtime.seatbelt.smoke", "Seatbelt smoke", "sandbox-exec -p '(version 1) (allow default)' true", DiagnosticPass, "sandbox-exec can evaluate a minimal profile", []string{"seatbelt-unavailable"})
+	} else {
+		b.addSkipped("runtime.seatbelt.smoke", "Seatbelt smoke", "sandbox-exec is unavailable on this macOS host", []string{"seatbelt-unavailable"})
+	}
+}
+
+func (m *RemoteRuntimeManager) diagnoseLinuxUserNamespaces(ctx context.Context, b *diagnosticBuilder) {
+	stdout, stderr, exitCode, err := m.ssh.RunCommand(ctx, "if [ -r /proc/sys/kernel/unprivileged_userns_clone ]; then cat /proc/sys/kernel/unprivileged_userns_clone; else echo unavailable; fi")
+	value := strings.TrimSpace(stdout)
+	check := SandboxDiagnosticCheck{
+		ID:      "runtime.userns",
+		Label:   "Unprivileged user namespaces",
+		Command: "cat /proc/sys/kernel/unprivileged_userns_clone",
+		Output:  diagnosticOutput(stdout, stderr),
+	}
+	switch {
+	case err != nil || exitCode != 0:
+		check.Status = DiagnosticWarn
+		check.Message = "could not read user namespace sysctl"
+		check.Details = commandFailureDetails(exitCode, err)
+	case value == "0":
+		check.Status = DiagnosticFail
+		check.Message = "unprivileged user namespaces are disabled"
+		check.FixIDs = []string{"enable-userns"}
+	case value == "1":
+		check.Status = DiagnosticPass
+		check.Message = "unprivileged user namespaces are enabled"
+	default:
+		check.Status = DiagnosticInfo
+		check.Message = "user namespace sysctl is not exposed on this host"
+	}
+	b.addCheck(check)
+
+	stdout, stderr, exitCode, err = m.ssh.RunCommand(ctx, "if command -v sysctl >/dev/null 2>&1; then sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo unavailable; else echo unavailable; fi")
+	value = strings.TrimSpace(stdout)
+	check = SandboxDiagnosticCheck{
+		ID:      "runtime.apparmor.userns",
+		Label:   "AppArmor userns restriction",
+		Command: "sysctl -n kernel.apparmor_restrict_unprivileged_userns",
+		Output:  diagnosticOutput(stdout, stderr),
+	}
+	switch {
+	case err != nil || exitCode != 0:
+		check.Status = DiagnosticWarn
+		check.Message = "could not read AppArmor user namespace restriction"
+		check.Details = commandFailureDetails(exitCode, err)
+	case value == "1":
+		check.Status = DiagnosticFail
+		check.Message = "AppArmor is blocking unprivileged user namespaces for bubblewrap"
+		check.FixIDs = []string{"relax-apparmor-userns"}
+	case value == "0":
+		check.Status = DiagnosticPass
+		check.Message = "AppArmor user namespace restriction is disabled"
+	default:
+		check.Status = DiagnosticInfo
+		check.Message = "AppArmor user namespace restriction is not exposed on this host"
+	}
+	b.addCheck(check)
+}
+
+func (m *RemoteRuntimeManager) checkCommand(ctx context.Context, b *diagnosticBuilder, id, label, commandName, fixID string) bool {
+	cmd := fmt.Sprintf("command -v %s", shellQuote(commandName))
+	stdout, stderr, exitCode, err := m.ssh.RunCommand(ctx, cmd)
+	check := SandboxDiagnosticCheck{
+		ID:      id,
+		Label:   label,
+		Command: cmd,
+		Output:  diagnosticOutput(stdout, stderr),
+	}
+	if err == nil && exitCode == 0 {
+		check.Status = DiagnosticPass
+		check.Message = fmt.Sprintf("%s is available", commandName)
+		b.addCheck(check)
+		return true
+	}
+	check.Status = DiagnosticFail
+	check.Message = fmt.Sprintf("%s is missing", commandName)
+	check.Details = commandFailureDetails(exitCode, err)
+	check.FixIDs = []string{fixID}
+	b.addCheck(check)
+	return false
+}
+
+func (m *RemoteRuntimeManager) runDiagnostic(ctx context.Context, b *diagnosticBuilder, id, label, cmd, passStatus, passMessage string, fixIDs []string) {
+	stdout, stderr, exitCode, err := m.ssh.RunCommand(ctx, cmd)
+	check := SandboxDiagnosticCheck{
+		ID:      id,
+		Label:   label,
+		Command: cmd,
+		Output:  diagnosticOutput(stdout, stderr),
+	}
+	if err == nil && exitCode == 0 {
+		check.Status = passStatus
+		check.Message = passMessage
+	} else {
+		check.Status = DiagnosticFail
+		check.Message = fmt.Sprintf("%s failed", label)
+		check.Details = commandFailureDetails(exitCode, err)
+		check.FixIDs = fixIDs
+	}
+	b.addCheck(check)
 }
 
 func (m *RemoteRuntimeManager) CreateSandbox(ctx context.Context, excludeIDs []string) (*SandboxInstance, error) {
@@ -375,10 +632,68 @@ func (m *RemoteRuntimeManager) WorkspacePath() string {
 	return m.instance.WorkspacePath
 }
 
+func (m *RemoteRuntimeManager) TmpPath() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.instance == nil {
+		return ""
+	}
+	return m.instance.TmpPath
+}
+
+func (m *RemoteRuntimeManager) SandboxRootPath() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.instance == nil {
+		return ""
+	}
+	return m.instance.RootPath
+}
+
 func (m *RemoteRuntimeManager) IsActive() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.instance != nil
+}
+
+func (m *RemoteRuntimeManager) CleanupTmp(ctx context.Context) (RuntimeCleanupResult, error) {
+	m.mu.Lock()
+	inst := m.instance
+	m.mu.Unlock()
+	if inst == nil {
+		return RuntimeCleanupResult{}, fmt.Errorf("no sandbox is active")
+	}
+	root := cleanRemotePath(inst.RootPath)
+	tmp := cleanRemotePath(inst.TmpPath)
+	if root == "" || root == "/" || root == "." {
+		return RuntimeCleanupResult{}, fmt.Errorf("refusing to clean unsafe sandbox root %q", root)
+	}
+	if tmp == "" || tmp == "/" || tmp == "." || tmp == root || !strings.HasPrefix(tmp, root+"/") {
+		return RuntimeCleanupResult{}, fmt.Errorf("refusing to clean unsafe sandbox tmp path %q", tmp)
+	}
+
+	cmd := fmt.Sprintf("if [ ! -d %s ]; then printf '0 0\\n'; exit 0; fi; "+
+		"count=$(find %s -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' '); "+
+		"kb=$(du -sk %s 2>/dev/null | awk '{print $1}'); "+
+		"find %s -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; "+
+		"printf '%%s %%s\\n' \"${count:-0}\" \"$(( ${kb:-0} * 1024 ))\"",
+		shellQuote(tmp), shellQuote(tmp), shellQuote(tmp), shellQuote(tmp))
+	stdout, stderr, exitCode, err := m.ssh.RunCommand(ctx, cmd)
+	if err != nil {
+		return RuntimeCleanupResult{}, err
+	}
+	if exitCode != 0 {
+		return RuntimeCleanupResult{}, fmt.Errorf("failed to clean sandbox tmp directory: %s", stderr)
+	}
+	fields := strings.Fields(strings.TrimSpace(stdout))
+	result := RuntimeCleanupResult{TmpPath: tmp}
+	if len(fields) >= 1 {
+		result.RemovedEntries, _ = strconv.Atoi(fields[0])
+	}
+	if len(fields) >= 2 {
+		result.ReclaimedBytes, _ = strconv.ParseInt(fields[1], 10, 64)
+	}
+	return result, nil
 }
 
 // Legacy method names kept for callers that are migrated separately.
@@ -626,4 +941,177 @@ func shellQuoteArgs(args []string) []string {
 // shellQuote wraps a string in single quotes for safe POSIX shell usage.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+type diagnosticBuilder struct {
+	result   SandboxDiagnosticsResult
+	fixes    map[string]SandboxFixSuggestion
+	fixOrder []string
+}
+
+func newDiagnosticBuilder(kind, osName, root string, cfg config.SandboxConfig) *diagnosticBuilder {
+	return &diagnosticBuilder{
+		result: SandboxDiagnosticsResult{
+			Runtime:           kind,
+			OS:                osName,
+			WorkspaceRoot:     root,
+			CommandTimeoutSec: cfg.CommandTimeoutSec,
+			MemoryLimitMB:     cfg.MemoryLimitMB,
+			NetworkEnabled:    cfg.Network,
+		},
+		fixes: make(map[string]SandboxFixSuggestion),
+	}
+}
+
+func (b *diagnosticBuilder) addCheck(check SandboxDiagnosticCheck) {
+	for _, fixID := range check.FixIDs {
+		b.addKnownFix(fixID)
+	}
+	b.result.Checks = append(b.result.Checks, check)
+}
+
+func (b *diagnosticBuilder) addSkipped(id, label, message string, fixIDs []string) {
+	b.addCheck(SandboxDiagnosticCheck{
+		ID:      id,
+		Label:   label,
+		Status:  DiagnosticSkipped,
+		Message: message,
+		FixIDs:  fixIDs,
+	})
+}
+
+func (b *diagnosticBuilder) addKnownFix(id string) {
+	var fix SandboxFixSuggestion
+	switch id {
+	case "install-linux-runtime":
+		fix = SandboxFixSuggestion{
+			ID:           id,
+			Title:        "Install Linux sandbox dependencies",
+			Description:  "Installs bubblewrap plus Python runtime packages using the detected Linux package manager.",
+			Risk:         "sudo",
+			Platform:     "linux",
+			Commands:     []string{linuxInstallCommand()},
+			CopyOnly:     false,
+			AutoRunnable: true,
+		}
+	case "enable-userns":
+		fix = SandboxFixSuggestion{
+			ID:          id,
+			Title:       "Enable unprivileged user namespaces",
+			Description: "Allows non-root users to create user namespaces, which bubblewrap needs for isolation.",
+			Risk:        "security",
+			Platform:    "linux",
+			Commands: []string{
+				"sudo sysctl -w kernel.unprivileged_userns_clone=1",
+				"printf 'kernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/99-starxo-sandbox.conf && sudo sysctl --system",
+			},
+			CopyOnly:     true,
+			AutoRunnable: false,
+		}
+	case "relax-apparmor-userns":
+		fix = SandboxFixSuggestion{
+			ID:          id,
+			Title:       "Relax AppArmor userns restriction",
+			Description: "Ubuntu AppArmor can block unprivileged user namespaces even when bubblewrap is installed. This lowers that host-level restriction.",
+			Risk:        "security",
+			Platform:    "linux",
+			Commands: []string{
+				"sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0",
+				"printf 'kernel.apparmor_restrict_unprivileged_userns=0\\n' | sudo tee /etc/sysctl.d/99-starxo-sandbox.conf && sudo sysctl --system",
+			},
+			CopyOnly:     true,
+			AutoRunnable: false,
+		}
+	case "seatbelt-unavailable":
+		fix = SandboxFixSuggestion{
+			ID:           id,
+			Title:        "Use a macOS host with sandbox-exec",
+			Description:  "Seatbelt uses Apple's sandbox-exec tool. Starxo cannot install it automatically when the host does not provide it.",
+			Risk:         "safe",
+			Platform:     "darwin",
+			CopyOnly:     true,
+			AutoRunnable: false,
+		}
+	case "seatbelt-python":
+		fix = SandboxFixSuggestion{
+			ID:           id,
+			Title:        "Install Python 3 on macOS",
+			Description:  "Seatbelt sandboxes still need python3 for agent tooling and workspace file inspection.",
+			Risk:         "safe",
+			Platform:     "darwin",
+			Commands:     []string{"brew install python"},
+			CopyOnly:     true,
+			AutoRunnable: false,
+		}
+	default:
+		return
+	}
+	if _, exists := b.fixes[id]; exists {
+		return
+	}
+	b.fixes[id] = fix
+	b.fixOrder = append(b.fixOrder, id)
+}
+
+func (b *diagnosticBuilder) finish() SandboxDiagnosticsResult {
+	failures := 0
+	warnings := 0
+	for _, check := range b.result.Checks {
+		switch check.Status {
+		case DiagnosticFail:
+			failures++
+		case DiagnosticWarn:
+			warnings++
+		}
+	}
+	b.result.Available = failures == 0
+	switch {
+	case failures > 0:
+		b.result.Summary = fmt.Sprintf("%d blocking sandbox runtime issue(s) found", failures)
+	case warnings > 0:
+		b.result.Summary = fmt.Sprintf("sandbox runtime is available with %d warning(s)", warnings)
+	default:
+		b.result.Summary = "sandbox runtime diagnostics passed"
+	}
+	for _, id := range b.fixOrder {
+		b.result.Fixes = append(b.result.Fixes, b.fixes[id])
+	}
+	return b.result
+}
+
+func diagnosticOutput(stdout, stderr string) string {
+	combined := strings.TrimSpace(strings.TrimSpace(stdout) + "\n" + strings.TrimSpace(stderr))
+	if len(combined) <= 4096 {
+		return combined
+	}
+	return combined[:4096] + "\n... (truncated)"
+}
+
+func commandFailureDetails(exitCode int, err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("exit code %d", exitCode)
+}
+
+func bwrapSmokeFixIDs(stdout, stderr string) []string {
+	output := strings.ToLower(stdout + "\n" + stderr)
+	if strings.Contains(output, "setting up uid map") || strings.Contains(output, "permission denied") || strings.Contains(output, "operation not permitted") {
+		return []string{"enable-userns", "relax-apparmor-userns"}
+	}
+	return []string{"install-linux-runtime"}
+}
+
+func bwrapDiagnosticSmokeCommand(networkEnabled bool) string {
+	if networkEnabled {
+		return "bwrap --die-with-parent --ro-bind / / --tmpfs /tmp --proc /proc --dev /dev sh -lc 'true'"
+	}
+	return "bwrap --die-with-parent --unshare-net --ro-bind / / --tmpfs /tmp --proc /proc --dev /dev sh -lc 'true'"
+}
+
+func networkPolicyMessage(enabled bool) string {
+	if enabled {
+		return "sandbox commands may use the remote host network"
+	}
+	return "sandbox commands run with network namespace isolation when the runtime supports it"
 }

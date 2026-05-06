@@ -8,10 +8,10 @@
 - 所属模块: frontend/src/components/files
 
 ## 2. 核心职责
-- 工作区主面板，提供文件树浏览、搜索、上传/下载、预览联动。
+- 工作区主面板，提供文件树浏览、搜索、上传/下载、预览联动、sandbox 元信息和 tmp 清理。
 
 ## 3. 输入与输出
-- 输入来源: FileService (`ListWorkspaceFiles`, `ReadFilePreview`, `DownloadFile`)、`useWorkspaceBridge` 路径打开事件
+- 输入来源: FileService (`GetWorkspaceInfo`, `ListWorkspaceFiles`, `ReadFilePreview`, `DownloadFile`, `CleanupSandboxTmp`)、`useWorkspaceBridge` 路径打开事件
 - 输出结果: 渲染文件树与代码预览，触发上传下载行为
 
 ## 4. 关键实现细节
@@ -19,7 +19,8 @@
   - 将 `FileInfo[]` 构造成目录/文件混合树节点
   - 目录优先排序，名称字典序排序
 - 交互:
-  - 顶部按钮：上传、下载、刷新
+  - 顶部按钮：上传、下载、刷新、复制 workspace 路径、清理 tmp
+  - 元信息栏展示 active sandbox、runtime、SSH host、workspace path、文件数量和大小
   - 搜索过滤：按 `path/name` 匹配
   - 选择文件后加载预览内容
   - 收到工具时间线发来的 workspace path 后，自动选择路径并加载预览
@@ -47,3 +48,4 @@
 ## 7. 维护建议
 - 若加入大目录懒加载，优先在 `buildTree` 层做虚拟化或按需展开。
 - 下载/预览失败建议后续统一接入 message 提示。
+- tmp 清理只调用后端受保护方法，前端不得传入任意删除路径。
