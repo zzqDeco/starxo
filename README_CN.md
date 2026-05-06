@@ -164,7 +164,7 @@ wails dev
 
 顶层 Agent 现在使用更小的 always-loaded runtime 工具面，并通过 `ToolSearch` 按需发现 deferred tools。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
 
-当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 worktree 隔离。
+当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
 
 `WebSearch` 默认使用 DuckDuckGo HTML 搜索，也可以通过 `agent.webSearch.providers` 切换 provider。`type: "tinyfish"` 是专用 TinyFish Search API 适配器，对齐 `GET https://api.search.tinyfish.ai`，默认从 `TINYFISH_API_KEY` 读取 API key 并写入 `X-API-Key`，支持 TinyFish `query`、`location`、`language`、`page` 参数，并解析 `results[].title/url/snippet`。`type: "http"` 继续用于自定义 GET/POST provider，支持 headers、body template 和 JSON path 提取。
 

@@ -81,3 +81,24 @@ func TestRuntimeWorkspaceManagerRefusesDirtyRemoveWithoutDiscard(t *testing.T) {
 		t.Fatalf("expected failed remove to keep active worktree, got %q", got)
 	}
 }
+
+func TestRuntimeWorkspaceManagerIsolatedWorktreeDoesNotSwitchSession(t *testing.T) {
+	manager := newRuntimeWorkspaceManager(func() time.Time { return time.Unix(20, 0) })
+	op := &fakeWorktreeOperator{}
+	ctx := contextWithSessionID(context.Background(), "sess-worktree")
+
+	out, err := manager.CreateIsolatedWorktree(ctx, op, "/workspace", "agent/a")
+	if err != nil {
+		t.Fatalf("create isolated worktree: %v", err)
+	}
+	if out.WorktreePath != "/workspace/.starxo/worktrees/agent-a" {
+		t.Fatalf("unexpected isolated worktree path: %#v", out)
+	}
+	if got := manager.CurrentWorkspace(ctx, "/workspace"); got != "/workspace" {
+		t.Fatalf("isolated worktree should not switch session workspace, got %q", got)
+	}
+	overrideCtx := contextWithRuntimeWorkspaceOverride(ctx, out.WorktreePath)
+	if got := manager.CurrentWorkspace(overrideCtx, "/workspace"); got != out.WorktreePath {
+		t.Fatalf("expected context override workspace, got %q", got)
+	}
+}
