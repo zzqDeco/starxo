@@ -75,6 +75,7 @@ starxo/
 │   │
 │   ├── service/                     # Wails 绑定服务（前端 API）
 │   │   ├── chat.go                  #   ChatService：Per-Session Agent 生命周期（SessionRun）、消息收发、流式输出
+│   │   ├── runtime_context_compact.go # Runtime V2 上下文压缩状态
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 动态 Agent 工具
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 常驻 language server 管理
 │   │   ├── runtime_workspaces.go    #   Runtime V2 会话级 worktree workspace 管理
@@ -172,6 +173,8 @@ wails dev
 高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化。
 
 后台 Bash 和 Agent 任务可在运行任务面板中查看。面板按当前会话列出任务，支持刷新状态/输出、复制输出，并可通过 Runtime V2 task APIs 停止运行中的任务。
+
+长会话使用 token-aware context compaction。Starxo 会完整保留最近轮次，并注入一段 compact runtime summary，用于保留已发现工具、本会话权限、后台任务 output pointer、文件读取范围、最近编辑摘要、todos、plan 状态和 active worktree routing。完整消息历史仍保存在 `session_data.json`。
 
 ### 生产构建
 

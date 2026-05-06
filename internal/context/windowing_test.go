@@ -7,6 +7,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"starxo/internal/model"
 )
 
 func TestDefaultWindowConfig(t *testing.T) {
@@ -158,6 +160,67 @@ func TestWindowMessagesToolResultAtCutPoint(t *testing.T) {
 		}
 	}
 	assert.True(t, hasAssistantWithTools, "assistant message with ToolCalls should be preserved with its group")
+}
+
+func TestWindowMessagesTokenAwareInjectsCompactAndKeepsRecentTail(t *testing.T) {
+	prefix := []*schema.Message{schema.SystemMessage("sys")}
+	history := []*schema.Message{
+		schema.UserMessage(strings.Repeat("old ", 200)),
+		schema.AssistantMessage(strings.Repeat("old answer ", 200), nil),
+		schema.UserMessage("recent user"),
+		schema.AssistantMessage("recent assistant", nil),
+	}
+	compact := &model.RuntimeContextCompact{
+		Summary:              "Earlier work inspected the repository.",
+		OriginalMessageCount: 20,
+		OmittedMessageCount:  16,
+		ToolSearch: model.RuntimeToolSearchCompact{
+			DiscoveredTools: []model.DiscoveredToolRecord{{CanonicalName: "WebSearch"}},
+		},
+		FileReadState: []model.RuntimeFileReadState{{
+			FilePath:    "/workspace/main.go",
+			StartLine:   1,
+			NumLines:    10,
+			TotalLines:  100,
+			ContentHash: "abc",
+		}},
+	}
+
+	result := WindowMessagesTokenAwareWithPinnedPrefix(prefix, history, compact, TokenWindowConfig{
+		MaxTokens:         80,
+		MaxContentLen:     4000,
+		MinRecentMessages: 2,
+	})
+
+	require.GreaterOrEqual(t, len(result), 4)
+	assert.Equal(t, "sys", result[0].Content)
+	assert.Contains(t, result[1].Content, "[Runtime context compact]")
+	assert.Contains(t, result[1].Content, "WebSearch")
+	assert.Contains(t, result[1].Content, "/workspace/main.go")
+	assert.Equal(t, "recent user", result[len(result)-2].Content)
+	assert.Equal(t, "recent assistant", result[len(result)-1].Content)
+}
+
+func TestFormatRuntimeContextCompactIncludesPreservedRuntimeState(t *testing.T) {
+	content := FormatRuntimeContextCompact(&model.RuntimeContextCompact{
+		Summary: "summary",
+		ToolSearch: model.RuntimeToolSearchCompact{
+			DiscoveredTools: []model.DiscoveredToolRecord{{CanonicalName: "LSP"}},
+		},
+		PermissionGrants: []model.RuntimePermissionGrant{{ToolName: "Bash"}},
+		Tasks:            []model.RuntimeTaskCompact{{ID: "task-1", Status: "running", OutputPath: "/tmp/out"}},
+		Todos:            []model.RuntimeTodoItem{{Status: "in_progress"}},
+		PlanDocument:     &model.PlanDocument{Markdown: "do the work"},
+		Workspace:        &model.RuntimeWorkspaceCompact{Active: true, WorktreePath: "/workspace/.starxo/worktrees/a", WorktreeBranch: "starxo/a"},
+	})
+
+	assert.Contains(t, content, "summary")
+	assert.Contains(t, content, "LSP")
+	assert.Contains(t, content, "Bash")
+	assert.Contains(t, content, "task-1")
+	assert.Contains(t, content, "1 in_progress")
+	assert.Contains(t, content, "do the work")
+	assert.Contains(t, content, "starxo/a")
 }
 
 // --- TruncateContent tests ---

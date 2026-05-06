@@ -17,6 +17,7 @@
 - `SessionData` 新增 `PermissionGrants []RuntimePermissionGrant`，保存用户选择的“本会话允许”工具授权
 - `SessionData` 新增 `DeferredAnnouncementState *DeferredAnnouncementState`
 - `SessionData` 新增 `MCPInstructionsDeltaState *MCPInstructionsDeltaState`
+- `SessionData` 新增 `RuntimeContextCompact *RuntimeContextCompact`，保存长会话 token-aware compact 所需运行时上下文
 - `SessionData.Version` 当前固定为 `4`
 - `SessionData` 新增 plan-mode v2 persisted fields：
   - `Mode string`
@@ -40,6 +41,8 @@
   - `Source`
   - `Decision`
   - `CreatedAt`
+- `RuntimeContextCompact` 的详细 schema 定义在 `runtime_compact.go`：
+  - 保存 discovered tools、permission grants、runtime tasks、file read state、diff summaries、todos、plan 和 workspace compact
 - `PlanDocument` 固定字段：
   - `Markdown`
   - `UpdatedAt`
@@ -71,10 +74,11 @@
 - 被 `chat.go`、`session_svc.go`、`tool_search.go` 共同消费
 
 ## 6. 变更影响面
-- 成为 deferred discovery、permission grants 与 plan-mode v2 state 的统一持久化状态源
+- 成为 deferred discovery、permission grants、plan-mode v2 state 与 Runtime context compact 的统一持久化状态源
 
 ## 7. 维护建议
 - discovery 状态不要迁回 `PersistedMessage`；`SessionData` 是唯一权威落盘位置
 - permission grant 只保存 session scope，不保存 allow-once/deny 这类瞬时审批结果
 - deferred delta state 与 discovery state 语义不同，不要合并成同一个字段
+- compact state 是 prompt 压缩辅助状态，不应替代完整 `Messages` 审计历史
 - normalize / downgrade 规则只能维护在 model 层这一份 helper 里，不要在 storage / service 各写一套

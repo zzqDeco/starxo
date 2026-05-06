@@ -9,13 +9,14 @@
 
 ## 2. 核心职责
 - 维护对话历史与文件上下文，并在发送给模型前生成消息列表。
-- 现在额外支持 synthetic pinned prefix 注入位点，供 deferred MCP announcement 这类“非持久化、非 timeline”提示使用。
+- 现在额外支持 synthetic pinned prefix 注入位点和 Runtime compact 注入位点，供 deferred MCP announcement / 长会话压缩提示使用。
 
 ## 3. 输入与输出
 - 输入来源: 历史消息、文件上下文、系统提示词、可选 pinned prefix
 - 输出结果:
   - `PrepareMessages()`
   - `PrepareMessagesWithPinnedPrefix(...)`
+  - `PrepareMessagesWithCompact(...)`
   - `ExportMessages()` / `ImportMessages(...)`
 
 ## 4. 关键实现细节
@@ -24,6 +25,7 @@
   - system prompt
   - pinned prefix
   - windowed history
+- `PrepareMessagesWithCompact(...)` 在 pinned prefix 之后、history 之前注入 runtime compact synthetic message，并使用 token-aware windowing。
 - pinned prefix 只参与当前发送给模型的输入，不应被持久化为普通历史消息。
 
 ## 5. 依赖关系
@@ -36,7 +38,7 @@
   - `github.com/cloudwego/eino/schema`
 
 ## 6. 变更影响面
-- 为 deferred MCP announcement、后续 memory summary / policy reminder 预留了统一前缀注入通道。
+- 为 deferred MCP announcement、runtime context compact、后续 memory summary / policy reminder 预留了统一前缀注入通道。
 - `ExportMessages()` 仍只导出真实历史，不包含 pinned prefix。
 
 ## 7. 维护建议

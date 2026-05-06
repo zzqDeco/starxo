@@ -2,8 +2,11 @@ package agentctx
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/schema"
+
+	"starxo/internal/model"
 )
 
 // WindowConfig controls how conversation messages are windowed to fit
@@ -13,11 +16,26 @@ type WindowConfig struct {
 	MaxContentLen int // max content length per message before truncation (default 4000)
 }
 
+// TokenWindowConfig controls token-aware prompt compaction.
+type TokenWindowConfig struct {
+	MaxTokens         int
+	MaxContentLen     int
+	MinRecentMessages int
+}
+
 // DefaultWindowConfig returns the default windowing configuration.
 func DefaultWindowConfig() WindowConfig {
 	return WindowConfig{
 		MaxMessages:   20,
 		MaxContentLen: 4000,
+	}
+}
+
+func DefaultTokenWindowConfig() TokenWindowConfig {
+	return TokenWindowConfig{
+		MaxTokens:         8000,
+		MaxContentLen:     4000,
+		MinRecentMessages: 6,
 	}
 }
 
@@ -86,6 +104,245 @@ func WindowMessagesWithPinnedPrefix(pinnedPrefix []*schema.Message, history []*s
 	}
 
 	return result
+}
+
+// WindowMessagesTokenAwareWithPinnedPrefix preserves pinnedPrefix, injects a
+// compact runtime summary when available, and keeps the newest history tail
+// within an approximate token budget.
+func WindowMessagesTokenAwareWithPinnedPrefix(pinnedPrefix []*schema.Message, history []*schema.Message, compact *model.RuntimeContextCompact, cfg TokenWindowConfig) []*schema.Message {
+	defaults := DefaultTokenWindowConfig()
+	if cfg.MaxTokens <= 0 {
+		cfg.MaxTokens = defaults.MaxTokens
+	}
+	if cfg.MaxContentLen <= 0 {
+		cfg.MaxContentLen = defaults.MaxContentLen
+	}
+	if cfg.MinRecentMessages <= 0 {
+		cfg.MinRecentMessages = defaults.MinRecentMessages
+	}
+
+	prefix := truncateAll(pinnedPrefix, cfg.MaxContentLen)
+	result := make([]*schema.Message, 0, len(prefix)+len(history)+1)
+	result = append(result, prefix...)
+
+	compactMsg := runtimeCompactMessage(compact, cfg.MaxContentLen)
+	if compactMsg != nil {
+		result = append(result, compactMsg)
+	}
+	if len(history) == 0 {
+		return result
+	}
+
+	remaining := cfg.MaxTokens - EstimateMessagesTokens(result)
+	if remaining <= 0 {
+		remaining = cfg.MaxTokens / 4
+	}
+
+	tailStart := len(history)
+	tailTokens := 0
+	minStart := len(history) - cfg.MinRecentMessages
+	if minStart < 0 {
+		minStart = 0
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		msg := truncateMsg(history[i], cfg.MaxContentLen)
+		msgTokens := EstimateMessageTokens(msg)
+		if tailTokens+msgTokens > remaining && i < minStart {
+			break
+		}
+		tailStart = i
+		tailTokens += msgTokens
+	}
+	tailStart = adjustForToolCallGroups(history, tailStart)
+
+	if tailStart > 0 && compactMsg == nil {
+		result = append(result, schema.UserMessage(fmt.Sprintf("[Earlier conversation with %d messages omitted for brevity]", tailStart)))
+	}
+	for _, msg := range history[tailStart:] {
+		result = append(result, truncateMsg(msg, cfg.MaxContentLen))
+	}
+	return result
+}
+
+// EstimateMessageTokens is a cheap, deterministic token approximation. It is
+// intentionally conservative enough for windowing decisions without coupling
+// this package to a tokenizer for every model.
+func EstimateMessageTokens(msg *schema.Message) int {
+	if msg == nil {
+		return 0
+	}
+	tokens := estimateTextTokens(string(msg.Role)) + estimateTextTokens(msg.Name) + estimateTextTokens(msg.ToolCallID) + estimateTextTokens(msg.Content)
+	for _, tc := range msg.ToolCalls {
+		tokens += estimateTextTokens(tc.ID)
+		tokens += estimateTextTokens(tc.Function.Name)
+		tokens += estimateTextTokens(tc.Function.Arguments)
+	}
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
+}
+
+func EstimateMessagesTokens(messages []*schema.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += EstimateMessageTokens(msg)
+	}
+	return total
+}
+
+func EstimatePersistedMessagesTokens(messages []model.PersistedMessage) int {
+	total := 0
+	for _, msg := range messages {
+		total += estimateTextTokens(msg.Role)
+		total += estimateTextTokens(msg.Name)
+		total += estimateTextTokens(msg.ToolCallID)
+		total += estimateTextTokens(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			total += estimateTextTokens(tc.ID)
+			total += estimateTextTokens(tc.Function.Name)
+			total += estimateTextTokens(tc.Function.Arguments)
+		}
+	}
+	return total
+}
+
+func estimateTextTokens(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	// A rough English/code average of 4 chars per token, plus a small message
+	// overhead so many short turns are not undercounted.
+	return len(text)/4 + 1
+}
+
+func runtimeCompactMessage(compact *model.RuntimeContextCompact, maxContentLen int) *schema.Message {
+	if compact == nil {
+		return nil
+	}
+	content := FormatRuntimeContextCompact(compact)
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	return schema.UserMessage(TruncateContent(content, maxContentLen))
+}
+
+func FormatRuntimeContextCompact(compact *model.RuntimeContextCompact) string {
+	if compact == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[Runtime context compact]\n")
+	if compact.Summary != "" {
+		b.WriteString(compact.Summary)
+		b.WriteString("\n")
+	}
+	if compact.OmittedMessageCount > 0 {
+		b.WriteString(fmt.Sprintf("Earlier conversation messages omitted from the prompt: %d of %d.\n", compact.OmittedMessageCount, compact.OriginalMessageCount))
+	}
+	if len(compact.ToolSearch.DiscoveredTools) > 0 {
+		names := make([]string, 0, len(compact.ToolSearch.DiscoveredTools))
+		for _, record := range compact.ToolSearch.DiscoveredTools {
+			if record.CanonicalName != "" {
+				names = append(names, record.CanonicalName)
+			}
+		}
+		if len(names) > 0 {
+			b.WriteString("- Discovered tools: ")
+			b.WriteString(strings.Join(names, ", "))
+			b.WriteString("\n")
+		}
+	}
+	if len(compact.PermissionGrants) > 0 {
+		names := make([]string, 0, len(compact.PermissionGrants))
+		for _, grant := range compact.PermissionGrants {
+			if grant.ToolName != "" {
+				names = append(names, grant.ToolName)
+			}
+		}
+		if len(names) > 0 {
+			b.WriteString("- Session permission grants: ")
+			b.WriteString(strings.Join(names, ", "))
+			b.WriteString("\n")
+		}
+	}
+	if compact.PlanDocument != nil && strings.TrimSpace(compact.PlanDocument.Markdown) != "" {
+		b.WriteString("- Active plan: ")
+		b.WriteString(oneLine(compact.PlanDocument.Markdown, 280))
+		b.WriteString("\n")
+	}
+	if len(compact.Todos) > 0 {
+		b.WriteString("- Todos: ")
+		b.WriteString(formatTodoCounts(compact.Todos))
+		b.WriteString("\n")
+	}
+	if compact.Workspace != nil && compact.Workspace.Active {
+		b.WriteString("- Active worktree: ")
+		b.WriteString(compact.Workspace.WorktreePath)
+		if compact.Workspace.WorktreeBranch != "" {
+			b.WriteString(" on ")
+			b.WriteString(compact.Workspace.WorktreeBranch)
+		}
+		b.WriteString("\n")
+	}
+	if len(compact.Tasks) > 0 {
+		b.WriteString("- Runtime tasks:\n")
+		for _, task := range compact.Tasks {
+			if task.ID == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("  - %s [%s] %s output=%s\n", task.ID, task.Status, oneLine(task.Description, 120), task.OutputPath))
+		}
+	}
+	if len(compact.FileReadState) > 0 {
+		b.WriteString("- Recent file reads:\n")
+		for _, file := range compact.FileReadState {
+			if file.FilePath == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("  - %s lines %d-%d/%d hash=%s\n", file.FilePath, file.StartLine, file.StartLine+max(0, file.NumLines)-1, file.TotalLines, file.ContentHash))
+		}
+	}
+	if len(compact.DiffSummaries) > 0 {
+		b.WriteString("- Recent edits:\n")
+		for _, diff := range compact.DiffSummaries {
+			if diff.FilePath == "" {
+				continue
+			}
+			summary := diff.Summary
+			if summary == "" {
+				summary = fmt.Sprintf("%s +%d -%d", diff.ToolName, diff.LinesAdded, diff.LinesRemoved)
+			}
+			b.WriteString(fmt.Sprintf("  - %s: %s\n", diff.FilePath, oneLine(summary, 180)))
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatTodoCounts(todos []model.RuntimeTodoItem) string {
+	counts := map[string]int{}
+	for _, todo := range todos {
+		counts[todo.Status]++
+	}
+	parts := make([]string, 0, 5)
+	for _, status := range []string{"pending", "in_progress", "done", "failed", "blocked"} {
+		if counts[status] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[status], status))
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d items", len(todos))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func oneLine(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return TruncateContent(text, limit)
 }
 
 // adjustForToolCallGroups ensures the window cut point does not land inside

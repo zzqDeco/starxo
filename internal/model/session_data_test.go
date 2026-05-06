@@ -126,3 +126,83 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 		t.Fatalf("expected original permission grant to stay unchanged, got %#v", data.PermissionGrants)
 	}
 }
+
+func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
+	data := &SessionData{
+		Version: SessionDataVersion,
+		Mode:    ModeDefault,
+		RuntimeContextCompact: &RuntimeContextCompact{
+			Version:              RuntimeContextCompactVersion,
+			OriginalMessageCount: 30,
+			OmittedMessageCount:  18,
+			ToolSearch: RuntimeToolSearchCompact{
+				DiscoveredTools: []DiscoveredToolRecord{{
+					CanonicalName: "WebSearch",
+					Kind:          "action",
+				}},
+				DeferredAnnouncementState: &DeferredAnnouncementState{
+					AnnouncedSearchableCanonicalNames: []string{"LSP"},
+				},
+				MCPInstructionsDeltaState: &MCPInstructionsDeltaState{
+					LastAnnouncedSearchableServers: []string{"alpha"},
+				},
+			},
+			PermissionGrants: []RuntimePermissionGrant{{
+				ToolName: "Bash",
+				Decision: "allow_session",
+			}},
+			Tasks: []RuntimeTaskCompact{{
+				ID:     "task-1",
+				Status: "running",
+			}},
+			FileReadState: []RuntimeFileReadState{{
+				FilePath: "/workspace/main.go",
+			}},
+			DiffSummaries: []RuntimeDiffSummary{{
+				FilePath: "/workspace/main.go",
+				Summary:  "edited",
+			}},
+			Todos: []RuntimeTodoItem{{
+				ID:        "todo-1",
+				Title:     "ship",
+				Status:    "pending",
+				DependsOn: []string{"todo-0"},
+			}},
+			PlanDocument: &PlanDocument{Markdown: "plan"},
+			Workspace:    &RuntimeWorkspaceCompact{Active: true, WorktreePath: "/workspace/.starxo/worktrees/a"},
+		},
+	}
+
+	normalized, warnings := NormalizeSessionData(data)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+	if normalized.RuntimeContextCompact == nil {
+		t.Fatal("expected runtime compact state")
+	}
+
+	normalized.RuntimeContextCompact.ToolSearch.DiscoveredTools[0].CanonicalName = "mutated"
+	normalized.RuntimeContextCompact.ToolSearch.DeferredAnnouncementState.AnnouncedSearchableCanonicalNames[0] = "mutated"
+	normalized.RuntimeContextCompact.ToolSearch.MCPInstructionsDeltaState.LastAnnouncedSearchableServers[0] = "mutated"
+	normalized.RuntimeContextCompact.PermissionGrants[0].ToolName = "Write"
+	normalized.RuntimeContextCompact.Tasks[0].Status = "failed"
+	normalized.RuntimeContextCompact.FileReadState[0].FilePath = "changed"
+	normalized.RuntimeContextCompact.DiffSummaries[0].Summary = "changed"
+	normalized.RuntimeContextCompact.Todos[0].DependsOn[0] = "changed"
+	normalized.RuntimeContextCompact.PlanDocument.Markdown = "changed"
+	normalized.RuntimeContextCompact.Workspace.WorktreePath = "changed"
+
+	orig := data.RuntimeContextCompact
+	if orig.ToolSearch.DiscoveredTools[0].CanonicalName != "WebSearch" ||
+		orig.ToolSearch.DeferredAnnouncementState.AnnouncedSearchableCanonicalNames[0] != "LSP" ||
+		orig.ToolSearch.MCPInstructionsDeltaState.LastAnnouncedSearchableServers[0] != "alpha" ||
+		orig.PermissionGrants[0].ToolName != "Bash" ||
+		orig.Tasks[0].Status != "running" ||
+		orig.FileReadState[0].FilePath != "/workspace/main.go" ||
+		orig.DiffSummaries[0].Summary != "edited" ||
+		orig.Todos[0].DependsOn[0] != "todo-0" ||
+		orig.PlanDocument.Markdown != "plan" ||
+		orig.Workspace.WorktreePath != "/workspace/.starxo/worktrees/a" {
+		t.Fatalf("expected original compact state to stay unchanged, got %#v", orig)
+	}
+}

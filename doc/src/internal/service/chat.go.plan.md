@@ -17,6 +17,7 @@
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
+- 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、后台任务、文件 read state、diff summary、todos、plan 和 worktree state。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
 - 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
@@ -42,6 +43,9 @@
   - `discoveredTools map[string]model.DiscoveredToolRecord`
   - `deferredAnnouncementState`
   - `mcpInstructionsDeltaState`
+  - `runtimeContextCompact`
+  - `fileReadState`
+  - `diffSummaries`
   - `mode`
   - `planDocument`
   - `pendingPlanApproval`
@@ -154,6 +158,12 @@
   - 非 read-only trusted 工具执行前调用 `deferredMCPProvider.RequestToolPermission`
   - `allow_session` grant 写入 `SessionRun.permissionGrants` 并随 snapshot 持久化
   - 无 Wails UI context 时 fail-closed，避免危险工具在 headless 场景静默执行
+- Runtime context compact：
+  - 每次新 run 前通过 `prepareMessagesForRun(...)` 刷新 compact state
+  - `Read`/`Write`/`Edit` tool result 会被解析为 file read state / diff summary
+  - `ExportSessionSnapshot(...)` 保存 compact state 到 `SessionData.RuntimeContextCompact`
+  - `RestoreSessionData(...)` 会恢复 compact state、task snapshots、todo state 和 active worktree routing
+  - 运行中的 task 只恢复为可见 snapshot；reload 后不会假装原进程仍附着
 - deferred synthetic message 的 phase-2 注入规则：
   - 先注入 deferred tools delta，再按需注入 MCP instructions delta
   - synthetic message 使用 `schema.UserMessage`

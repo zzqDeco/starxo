@@ -23,6 +23,8 @@
   - `todoStore` — 包级全局变量，内存中的任务存储（`sync.Mutex` + `[]TodoItem`）
 - 导出函数/方法:
   - `ClearTodos()` — **新增**，重置内存中的 todo 存储。在会话切换（`SessionService.SwitchSession`、`SessionService.CreateSession`）和清除历史（`ChatService.ClearHistory`）时调用，确保 todo 状态不跨会话泄漏
+  - `SnapshotTodos()` — 返回 `model.RuntimeTodoItem` 深拷贝，供 Runtime context compact 持久化
+  - `RestoreTodos(...)` — 从 `SessionData.RuntimeContextCompact.Todos` 恢复内存 todo 状态
   - `NewWriteTodosTool() tool.BaseTool` — 创建 `write_todos` 工具
     - 验证 DAG 有效性：检查所有 `DependsOn` 引用的 ID 是否存在
     - 全量替换 todoStore 中的任务列表
@@ -38,7 +40,9 @@
 - 事件发射: 无（前端通过解析工具返回的 JSON 渲染 DAG）
 
 ## 5. 依赖关系
-- 内部依赖: `starxo/internal/logger` — 诊断日志（`write_todos` 存储确认、`update_todo` 查找调试）
+- 内部依赖:
+  - `starxo/internal/logger` — 诊断日志（`write_todos` 存储确认、`update_todo` 查找调试）
+  - `starxo/internal/model` — Runtime compact todo DTO
 - 外部依赖:
   - `github.com/cloudwego/eino/components/tool` — `BaseTool` 接口
   - `github.com/cloudwego/eino/components/tool/utils` — `InferTool`
@@ -47,6 +51,7 @@
 
 ## 6. 变更影响面
 - `ClearTodos()` 被 `internal/service/session_svc.go`（CreateSession、SwitchSession）和 `internal/service/chat.go`（ClearHistory）调用
+- `SnapshotTodos()` / `RestoreTodos()` 被 Runtime context compact 和 session restore 调用
 - `internal/tools/registry.go` — 通过 `RegisterBuiltin` 注册到工具注册表
 - 前端 DAG 组件 — 依赖工具返回的 JSON 格式（`TodoItem` 结构），字段变更需同步前端解析逻辑
 - `internal/agent/` — Agent 在多步骤任务中调用这两个工具追踪进度

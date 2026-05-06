@@ -10,11 +10,14 @@
 ## 2. 核心职责
 - 对消息做窗口化裁剪与内容截断。
 - 现在支持显式 pinned prefix：始终保留 prefix，再裁剪普通 history。
+- 新增 token-aware windowing：可注入 Runtime compact synthetic message，并按近似 token budget 保留最近 history tail。
 
 ## 3. 输入与输出
 - 输入来源:
   - `WindowMessages(messages, cfg)`
   - `WindowMessagesWithPinnedPrefix(pinnedPrefix, history, cfg)`
+  - `WindowMessagesTokenAwareWithPinnedPrefix(pinnedPrefix, history, compact, cfg)`
+  - `FormatRuntimeContextCompact(compact)`
 - 输出结果: 裁剪后的 `[]*schema.Message`
 
 ## 4. 关键实现细节
@@ -23,15 +26,20 @@
   - history 按原有窗口规则裁剪
   - tool-call group 保留逻辑继续生效
 - 不再依赖“保留前两条消息”之类的硬编码特殊 case。
+- `TokenWindowConfig` 使用近似 token 预算，避免继续只按 message count 裁剪。
+- Runtime compact message 包含 discovered tools、permission grants、active tasks、file read state、diff summaries、todos、plan 和 worktree state。
 
 ## 5. 依赖关系
 - 外部依赖:
   - `github.com/cloudwego/eino/schema`
   - `fmt`
+  - `strings`
+  - `internal/model`
 
 ## 6. 变更影响面
 - deferred MCP announcement 可以稳定地位于 system prompt 之后、windowed history 之前。
 - 为未来额外的 pinned meta hint 留出扩展空间。
+- Agent Runtime V2 长会话会在 prompt 中保留 compact runtime context，减少因旧消息被裁剪导致的工具/权限/任务状态丢失。
 
 ## 7. 维护建议
 - 若后续新增 pinned 内容，优先扩展 prefix 机制，不要再次引入按位置硬编码的保留规则。

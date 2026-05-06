@@ -75,6 +75,7 @@ starxo/
 │   │
 │   ├── service/                     # Wails-bound services (frontend API)
 │   │   ├── chat.go                  #   ChatService: per-session agent lifecycle (SessionRun), messaging, streaming
+│   │   ├── runtime_context_compact.go # Runtime V2 context compact state
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 dynamic Agent tool
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 persistent language server manager
 │   │   ├── runtime_workspaces.go    #   Runtime V2 session-scoped worktree workspace manager
@@ -172,6 +173,8 @@ Plan mode keeps only read-only trusted tools visible. Writable tools and shell e
 Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data.
 
 Background Bash and Agent jobs can be inspected from the Runtime Tasks panel. The panel lists tasks for the active session, refreshes task status/output, supports copying output, and can stop running tasks through the Runtime V2 task APIs.
+
+Long sessions use token-aware context compaction. Starxo keeps recent turns in full and injects a compact runtime summary that preserves discovered tools, session permission grants, task output pointers, file read ranges, recent edit summaries, todos, plan state, and active worktree routing. Full message history remains persisted in `session_data.json`.
 
 ### Production Build
 

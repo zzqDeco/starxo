@@ -23,6 +23,7 @@ type SessionData struct {
 	PermissionGrants          []RuntimePermissionGrant   `json:"permissionGrants,omitempty"`          // per-session runtime tool grants
 	DeferredAnnouncementState *DeferredAnnouncementState `json:"deferredAnnouncementState,omitempty"` // persisted deferred tools delta state
 	MCPInstructionsDeltaState *MCPInstructionsDeltaState `json:"mcpInstructionsDeltaState,omitempty"` // persisted MCP instructions summary state
+	RuntimeContextCompact     *RuntimeContextCompact     `json:"runtimeContextCompact,omitempty"`     // runtime-aware compact state for long sessions
 	Mode                      string                     `json:"mode,omitempty"`                      // persisted session mode
 	PlanDocument              *PlanDocument              `json:"planDocument,omitempty"`              // persisted plan document
 	PendingPlanApproval       *PendingPlanApproval       `json:"pendingPlanApproval,omitempty"`       // persisted approval gate state
@@ -142,6 +143,7 @@ func NormalizeSessionData(data *SessionData) (*SessionData, []string) {
 		PermissionGrants:          cloneRuntimePermissionGrants(data.PermissionGrants),
 		DeferredAnnouncementState: cloneDeferredAnnouncementState(data.DeferredAnnouncementState),
 		MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState),
+		RuntimeContextCompact:     CloneRuntimeContextCompact(data.RuntimeContextCompact),
 		Mode:                      data.Mode,
 		PlanDocument:              ClonePlanDocument(data.PlanDocument),
 		PendingPlanApproval:       ClonePendingPlanApproval(data.PendingPlanApproval),

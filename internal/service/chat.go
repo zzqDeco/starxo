@@ -129,6 +129,9 @@ type SessionRun struct {
 	permissionGrants          map[string]model.RuntimePermissionGrant
 	deferredAnnouncementState *model.DeferredAnnouncementState
 	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
+	runtimeContextCompact     *model.RuntimeContextCompact
+	fileReadState             map[string]model.RuntimeFileReadState
+	diffSummaries             []model.RuntimeDiffSummary
 	planDocument              *model.PlanDocument
 	pendingPlanApproval       *model.PendingPlanApproval
 	pendingPlanAttachment     *model.PendingPlanAttachment
@@ -186,9 +189,13 @@ func (r *SessionRun) addUserTurn(id, content string, timestamp int64) {
 }
 
 func (r *SessionRun) prepareMessages() []*schema.Message {
+	return r.prepareMessagesWithCompact(nil)
+}
+
+func (r *SessionRun) prepareMessagesWithCompact(compact *model.RuntimeContextCompact) []*schema.Message {
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
-	return r.ctxEngine.PrepareMessages()
+	return r.ctxEngine.PrepareMessagesWithCompact(nil, compact)
 }
 
 func (r *SessionRun) clearSessionState() {
@@ -201,6 +208,9 @@ func (r *SessionRun) clearSessionState() {
 	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
+	r.runtimeContextCompact = nil
+	r.fileReadState = make(map[string]model.RuntimeFileReadState)
+	r.diffSummaries = nil
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
@@ -240,6 +250,9 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
+	r.runtimeContextCompact = nil
+	r.fileReadState = make(map[string]model.RuntimeFileReadState)
+	r.diffSummaries = nil
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
@@ -251,9 +264,18 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.mode = data.Mode
 	r.deferredAnnouncementState = cloneDeferredAnnouncementState(data.DeferredAnnouncementState)
 	r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState)
+	r.runtimeContextCompact = model.CloneRuntimeContextCompact(data.RuntimeContextCompact)
 	r.planDocument = model.ClonePlanDocument(data.PlanDocument)
 	r.pendingPlanApproval = model.ClonePendingPlanApproval(data.PendingPlanApproval)
 	r.pendingPlanAttachment = model.ClonePendingPlanAttachment(data.PendingPlanAttachment)
+	if data.RuntimeContextCompact != nil {
+		for _, state := range data.RuntimeContextCompact.FileReadState {
+			if state.FilePath != "" {
+				r.fileReadState[state.FilePath] = state
+			}
+		}
+		r.diffSummaries = append([]model.RuntimeDiffSummary(nil), data.RuntimeContextCompact.DiffSummaries...)
+	}
 	for _, record := range data.DiscoveredTools {
 		if record.CanonicalName == "" {
 			continue
@@ -299,6 +321,7 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 			PermissionGrants:          grants,
 			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
+			RuntimeContextCompact:     model.CloneRuntimeContextCompact(r.runtimeContextCompact),
 			Mode:                      r.mode,
 			PlanDocument:              model.ClonePlanDocument(r.planDocument),
 			PendingPlanApproval:       model.ClonePendingPlanApproval(r.pendingPlanApproval),
@@ -790,6 +813,7 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		timeline:         agentctx.NewTimelineCollector(),
 		discoveredTools:  make(map[string]model.DiscoveredToolRecord),
 		permissionGrants: make(map[string]model.RuntimePermissionGrant),
+		fileReadState:    make(map[string]model.RuntimeFileReadState),
 		mode:             model.ModeDefault,
 	}
 	s.sessions[sessionID] = run
@@ -1494,7 +1518,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	startCancel()
 
 	// Prepare messages
-	messages := run.prepareMessages()
+	messages := s.prepareMessagesForRun(sessionID, run)
 	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 
 	// Launch the agent run in a goroutine
@@ -1651,7 +1675,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	lastContentByAgent := make(map[string]string) // dedup
 
 	// Track pending tool_call_ids to detect orphans (tool calls without results)
-	pendingToolCalls := make(map[string]bool)
+	pendingToolCalls := make(map[string]pendingRuntimeToolCall)
 
 	sessionID := run.sessionID
 
@@ -1799,7 +1823,10 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				})
 				// Track pending tool call IDs
 				for _, tc := range msg.ToolCalls {
-					pendingToolCalls[tc.ID] = true
+					pendingToolCalls[tc.ID] = pendingRuntimeToolCall{
+						name: tc.Function.Name,
+						args: tc.Function.Arguments,
+					}
 				}
 				continue // Don't fall through to allContents — tool call content is already stored
 			}
@@ -1817,6 +1844,9 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 
 				// Store tool result in session's context history
 				run.addToolResult(msg.ToolCallID, msg.Content)
+				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
+					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
+				}
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
 
@@ -2413,6 +2443,7 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 		}, nil
 	}
 
+	s.refreshRuntimeContextCompact(sessionID, run)
 	snapshot := run.snapshot()
 	debug, err := s.exportDeferredSurfaceDebugForSnapshot(sessionID)
 	if err != nil {
@@ -2435,8 +2466,21 @@ func logSessionDataNormalizeWarnings(sessionID, source string, warnings []string
 func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model.SessionData) {
 	s.mu.Lock()
 	run := s.getOrCreateRun(sessionID)
+	tasks := s.runtimeTasks
+	workspaces := s.runtimeWorkspaces
 	s.mu.Unlock()
 	run.importSessionData(data)
+	if data != nil && data.RuntimeContextCompact != nil {
+		if tasks != nil {
+			tasks.RestoreCompactTasks(sessionID, data.RuntimeContextCompact.Tasks)
+		}
+		if workspaces != nil {
+			workspaces.RestoreCompactSnapshot(sessionID, data.RuntimeContextCompact.Workspace)
+		}
+		tools.RestoreTodos(data.RuntimeContextCompact.Todos)
+	} else {
+		tools.ClearTodos()
+	}
 }
 
 func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
