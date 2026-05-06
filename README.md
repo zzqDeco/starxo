@@ -76,6 +76,7 @@ starxo/
 │   ├── service/                     # Wails-bound services (frontend API)
 │   │   ├── chat.go                  #   ChatService: per-session agent lifecycle (SessionRun), messaging, streaming
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 dynamic Agent tool
+│   │   ├── runtime_lsp_manager.go   #   Runtime V2 persistent language server manager
 │   │   ├── runtime_workspaces.go    #   Runtime V2 session-scoped worktree workspace manager
 │   │   ├── runtime_web_tools.go     #   Runtime V2 WebFetch/WebSearch tool implementations
 │   │   ├── sandbox_svc.go           #   SandboxService: connect/disconnect/reconnect, health monitor (RWMutex)
@@ -162,7 +163,7 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 
 The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
 
-Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` is a lightweight `rg`/`sed` fallback rather than a persistent language server in this version. `Agent` can run focused subagents synchronously or in the background, and can request worktree isolation for bounded tasks.
+Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `Agent` can run focused subagents synchronously or in the background, and can request worktree isolation for bounded tasks.
 
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 

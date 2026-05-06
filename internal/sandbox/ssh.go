@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -24,6 +25,17 @@ type SSHClient struct {
 	cfg    config.SSHConfig
 	client *ssh.Client
 	mu     sync.Mutex
+}
+
+// SSHProcess is a long-running remote process started over an SSH session.
+type SSHProcess struct {
+	session  *ssh.Session
+	stdin    io.WriteCloser
+	stdout   io.Reader
+	stderr   io.Reader
+	waitDone chan struct{}
+	waitErr  error
+	killOnce sync.Once
 }
 
 // NewSSHClient creates a new SSHClient from the given SSH configuration.
@@ -116,6 +128,87 @@ func (c *SSHClient) RunCommand(ctx context.Context, cmd string) (stdout, stderr 
 		}
 		return stdout, stderr, 0, nil
 	}
+}
+
+// StartCommand starts a long-running command over SSH and returns its stdio pipes.
+func (c *SSHClient) StartCommand(ctx context.Context, cmd string) (*SSHProcess, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("SSH client is not connected")
+	}
+
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("failed to open process stdin: %w", err)
+	}
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("failed to open process stdout: %w", err)
+	}
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("failed to open process stderr: %w", err)
+	}
+	if err := session.Start(cmd); err != nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("failed to start process: %w", err)
+	}
+
+	proc := &SSHProcess{
+		session:  session,
+		stdin:    stdin,
+		stdout:   stdout,
+		stderr:   stderr,
+		waitDone: make(chan struct{}),
+	}
+	go func() {
+		proc.waitErr = session.Wait()
+		_ = session.Close()
+		close(proc.waitDone)
+	}()
+	return proc, nil
+}
+
+func (p *SSHProcess) Stdin() io.WriteCloser { return p.stdin }
+
+func (p *SSHProcess) Stdout() io.Reader { return p.stdout }
+
+func (p *SSHProcess) Stderr() io.Reader { return p.stderr }
+
+func (p *SSHProcess) Wait() error {
+	<-p.waitDone
+	return p.waitErr
+}
+
+func (p *SSHProcess) Kill() error {
+	var err error
+	p.killOnce.Do(func() {
+		_ = p.stdin.Close()
+		if signalErr := p.session.Signal(ssh.SIGKILL); signalErr != nil {
+			err = signalErr
+		}
+		if closeErr := p.session.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	})
+	return err
 }
 
 // NewSFTPClient creates a new SFTP client over the existing SSH connection.

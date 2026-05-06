@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 
@@ -18,6 +19,15 @@ type RemoteOperator struct {
 }
 
 var _ commandline.Operator = (*RemoteOperator)(nil)
+
+// RuntimeProcess is a long-running process inside the active sandbox.
+type RuntimeProcess interface {
+	Stdin() io.WriteCloser
+	Stdout() io.Reader
+	Stderr() io.Reader
+	Wait() error
+	Kill() error
+}
 
 func NewRemoteOperator(runtime *RemoteRuntimeManager) *RemoteOperator {
 	return &RemoteOperator{runtime: runtime}
@@ -101,6 +111,10 @@ func (o *RemoteOperator) RunCommand(ctx context.Context, command []string) (*com
 		o.onOutput(stdout, stderr, exitCode)
 	}
 	return &commandline.CommandOutput{Stdout: stdout, Stderr: stderr, ExitCode: exitCode}, nil
+}
+
+func (o *RemoteOperator) StartProcess(ctx context.Context, command []string) (RuntimeProcess, error) {
+	return o.runtime.StartProcessInSandbox(ctx, command)
 }
 
 func (o *RemoteOperator) workspacePath(filePath string) (string, error) {

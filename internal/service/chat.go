@@ -668,6 +668,7 @@ type ChatService struct {
 	runtimeOptions    ChatRuntimeOptions
 	runtimeTasks      *runtimeTaskManager
 	runtimeWorkspaces *runtimeWorkspaceManager
+	runtimeLSP        *runtimeLSPManager
 
 	installedBundle            *RunnerBundle
 	retiredBundles             []*RunnerBundle
@@ -712,6 +713,7 @@ func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatServic
 		wailsEmit(s.ctx, event, data)
 	})
 	s.runtimeWorkspaces = newRuntimeWorkspaceManager(s.now)
+	s.runtimeLSP = newRuntimeLSPManager(s.now)
 	return s
 }
 
@@ -732,16 +734,24 @@ func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, _ *agentctx.E
 // UpdateSandbox updates the sandbox manager reference.
 func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.sandbox = sbx
 	s.invalidateRunners()
+	lsp := s.runtimeLSP
+	s.mu.Unlock()
+	if lsp != nil {
+		lsp.CloseAll()
+	}
 }
 
 // InvalidateRunner forces runners to be rebuilt on the next message.
 func (s *ChatService) InvalidateRunner() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.invalidateRunners()
+	lsp := s.runtimeLSP
+	s.mu.Unlock()
+	if lsp != nil {
+		lsp.CloseAll()
+	}
 }
 
 func (s *ChatService) invalidateRunners() {
@@ -2836,7 +2846,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to register runtime Agent tool: %w", err)
 	}
-	runtimeDeferredEntries, err := tools.NewRuntimeDeferredCatalogEntries(op, ac.WorkspacePath, s.runtimeWorkspaces)
+	runtimeDeferredEntries, err := tools.NewRuntimeDeferredCatalogEntries(op, ac.WorkspacePath, s.runtimeWorkspaces, s.runtimeLSP)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred runtime tools: %w", err)

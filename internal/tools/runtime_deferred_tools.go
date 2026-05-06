@@ -25,15 +25,20 @@ type LSPInput struct {
 	Operation string `json:"operation" jsonschema:"description=definition, references, hover, document_symbol, or workspace_symbol"`
 	Symbol    string `json:"symbol,omitempty" jsonschema:"description=symbol or text to search for"`
 	FilePath  string `json:"file_path,omitempty" jsonschema:"description=file path inside the workspace"`
-	Line      int    `json:"line,omitempty" jsonschema:"description=1-based line for hover"`
+	Line      int    `json:"line,omitempty" jsonschema:"description=1-based line for position-based operations"`
+	Character int    `json:"character,omitempty" jsonschema:"description=1-based character for position-based operations; defaults to 1"`
+	Language  string `json:"language,omitempty" jsonschema:"description=optional language override: go, typescript, javascript, python, or rust"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"description=max result lines"`
 }
 
 type LSPOutput struct {
-	Operation   string `json:"operation"`
-	Result      string `json:"result"`
-	FilePath    string `json:"filePath,omitempty"`
-	ResultCount int    `json:"resultCount,omitempty"`
+	Operation      string `json:"operation"`
+	Engine         string `json:"engine,omitempty"`
+	Language       string `json:"language,omitempty"`
+	Result         string `json:"result"`
+	FilePath       string `json:"filePath,omitempty"`
+	ResultCount    int    `json:"resultCount,omitempty"`
+	FallbackReason string `json:"fallbackReason,omitempty"`
 }
 
 type SkillInput struct {
@@ -63,9 +68,13 @@ type NotebookEditOutput struct {
 	Summary  string `json:"summary"`
 }
 
-func NewRuntimeDeferredCatalogEntries(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) ([]CatalogEntry, error) {
+type RuntimeLSPManager interface {
+	Query(ctx context.Context, op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, input LSPInput) (LSPOutput, bool, error)
+}
+
+func NewRuntimeDeferredCatalogEntries(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, lsp RuntimeLSPManager) ([]CatalogEntry, error) {
 	builders := []func() (CatalogEntry, error){
-		func() (CatalogEntry, error) { return newLSPCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newLSPCatalogEntry(op, workspacePath, workspaces, lsp) },
 		func() (CatalogEntry, error) { return newSkillCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newNotebookEditCatalogEntry(op, workspacePath, workspaces) },
 	}
@@ -88,67 +97,25 @@ func RuntimeWebSearchCatalogEntry(t tool.BaseTool) CatalogEntry {
 	return deferredRuntimeCatalogEntry(RuntimeToolWebSearch, "Web Search", "Search the web and return compact result links.", ToolClassRuntime, true, t)
 }
 
-func newLSPCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+func newLSPCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, lsp RuntimeLSPManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolLSP,
-		"Lightweight code intelligence fallback for definitions, references, hover, document symbols, and workspace symbols.",
+		"Persistent language-server code intelligence with rg/sed fallback for definitions, references, hover, document symbols, and workspace symbols.",
 		func(ctx context.Context, input LSPInput) (LSPOutput, error) {
-			opName := strings.TrimSpace(input.Operation)
-			if opName == "" {
-				opName = "workspace_symbol"
-			}
-			limit := input.Limit
-			if limit <= 0 {
-				limit = 80
-			}
-			searchPath, err := safeSearchPath(input.FilePath)
-			if err != nil {
-				return LSPOutput{}, err
-			}
-			workspace := currentWorkspace(ctx, workspacePath, workspaces)
-			var cmd string
-			switch opName {
-			case "definition":
-				if input.Symbol == "" {
-					return LSPOutput{}, fmt.Errorf("symbol is required for definition")
+			var fallbackReason string
+			if lsp != nil {
+				output, handled, err := lsp.Query(ctx, op, workspacePath, workspaces, input)
+				if handled {
+					return output, err
 				}
-				pattern := `(func|type|class|def|const|var|let)\s+` + input.Symbol + `\b|` + input.Symbol + `\s*[:=]`
-				cmd = "cd " + shellQuote(workspace) + " && rg --color never --line-number --no-heading " + shellQuote(pattern) + " " + shellQuote(searchPath) + " | head -n " + strconv.Itoa(limit)
-			case "references", "workspace_symbol":
-				if input.Symbol == "" {
-					return LSPOutput{}, fmt.Errorf("symbol is required for %s", opName)
-				}
-				cmd = "cd " + shellQuote(workspace) + " && rg --color never --line-number --no-heading --fixed-strings " + shellQuote(input.Symbol) + " " + shellQuote(searchPath) + " | head -n " + strconv.Itoa(limit)
-			case "document_symbol":
-				pattern := `^\s*(func|type|class|def|const|var|let|interface|struct)\s+`
-				cmd = "cd " + shellQuote(workspace) + " && rg --color never --line-number --no-heading " + shellQuote(pattern) + " " + shellQuote(searchPath) + " | head -n " + strconv.Itoa(limit)
-			case "hover":
-				if input.FilePath == "" || input.Line <= 0 {
-					return LSPOutput{}, fmt.Errorf("file_path and positive line are required for hover")
-				}
-				target, err := workspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
 				if err != nil {
-					return LSPOutput{}, err
+					fallbackReason = err.Error()
 				}
-				start := input.Line - 3
-				if start < 1 {
-					start = 1
-				}
-				end := input.Line + 3
-				cmd = "sed -n " + shellQuote(fmt.Sprintf("%d,%dp", start, end)) + " " + shellQuote(target)
-			default:
-				return LSPOutput{}, fmt.Errorf("unsupported LSP operation %q", opName)
 			}
-			output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd + " || test $? -eq 1"})
-			if err != nil {
-				return LSPOutput{}, err
+			output, err := runFallbackLSP(ctx, op, workspacePath, workspaces, input)
+			if output.FallbackReason == "" {
+				output.FallbackReason = fallbackReason
 			}
-			lines := nonEmptyLines(output.Stdout)
-			return LSPOutput{
-				Operation:   opName,
-				Result:      strings.Join(lines, "\n"),
-				FilePath:    input.FilePath,
-				ResultCount: len(lines),
-			}, nil
+			return output, err
 		})
 	if err != nil {
 		return CatalogEntry{}, err
@@ -156,6 +123,98 @@ func newLSPCatalogEntry(op commandline.Operator, workspacePath string, workspace
 	entry := deferredRuntimeCatalogEntry(RuntimeToolLSP, "LSP", "Code intelligence operations over the workspace.", ToolClassRuntimeFile, true, t)
 	entry.SearchHint = "definition references hover symbols code intelligence language server"
 	return entry, nil
+}
+
+func runFallbackLSP(ctx context.Context, op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, input LSPInput) (LSPOutput, error) {
+	opName := strings.TrimSpace(input.Operation)
+	if opName == "" {
+		opName = "workspace_symbol"
+	}
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 80
+	}
+	searchPath, err := safeSearchPath(input.FilePath)
+	if err != nil {
+		return LSPOutput{}, err
+	}
+	workspace := currentWorkspace(ctx, workspacePath, workspaces)
+	var cmd string
+	switch opName {
+	case "definition":
+		if input.Symbol == "" {
+			return runFallbackLSPLineContext(ctx, op, workspacePath, workspaces, input, opName)
+		}
+		pattern := `(func|type|class|def|const|var|let)\s+` + input.Symbol + `\b|` + input.Symbol + `\s*[:=]`
+		cmd = "cd " + shellQuote(workspace) + " && rg --color never --line-number --no-heading " + shellQuote(pattern) + " " + shellQuote(searchPath) + " | head -n " + strconv.Itoa(limit)
+	case "references", "workspace_symbol":
+		if opName == "references" && input.Symbol == "" {
+			return runFallbackLSPLineContext(ctx, op, workspacePath, workspaces, input, opName)
+		}
+		if input.Symbol == "" {
+			return LSPOutput{}, fmt.Errorf("symbol is required for %s", opName)
+		}
+		cmd = "cd " + shellQuote(workspace) + " && rg --color never --line-number --no-heading --fixed-strings " + shellQuote(input.Symbol) + " " + shellQuote(searchPath) + " | head -n " + strconv.Itoa(limit)
+	case "document_symbol":
+		pattern := `^\s*(func|type|class|def|const|var|let|interface|struct)\s+`
+		cmd = "cd " + shellQuote(workspace) + " && rg --color never --line-number --no-heading " + shellQuote(pattern) + " " + shellQuote(searchPath) + " | head -n " + strconv.Itoa(limit)
+	case "hover":
+		if input.FilePath == "" || input.Line <= 0 {
+			return LSPOutput{}, fmt.Errorf("file_path and positive line are required for hover")
+		}
+		target, err := workspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
+		if err != nil {
+			return LSPOutput{}, err
+		}
+		start := input.Line - 3
+		if start < 1 {
+			start = 1
+		}
+		end := input.Line + 3
+		cmd = "sed -n " + shellQuote(fmt.Sprintf("%d,%dp", start, end)) + " " + shellQuote(target)
+	default:
+		return LSPOutput{}, fmt.Errorf("unsupported LSP operation %q", opName)
+	}
+	output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd + " || test $? -eq 1"})
+	if err != nil {
+		return LSPOutput{}, err
+	}
+	lines := nonEmptyLines(output.Stdout)
+	return LSPOutput{
+		Operation:   opName,
+		Engine:      "fallback:rg",
+		Result:      strings.Join(lines, "\n"),
+		FilePath:    input.FilePath,
+		ResultCount: len(lines),
+	}, nil
+}
+
+func runFallbackLSPLineContext(ctx context.Context, op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, input LSPInput, operation string) (LSPOutput, error) {
+	if input.FilePath == "" || input.Line <= 0 {
+		return LSPOutput{}, fmt.Errorf("symbol is required for %s", operation)
+	}
+	target, err := workspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
+	if err != nil {
+		return LSPOutput{}, err
+	}
+	start := input.Line - 3
+	if start < 1 {
+		start = 1
+	}
+	end := input.Line + 3
+	cmd := "sed -n " + shellQuote(fmt.Sprintf("%d,%dp", start, end)) + " " + shellQuote(target)
+	output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
+	if err != nil {
+		return LSPOutput{}, err
+	}
+	lines := nonEmptyLines(output.Stdout)
+	return LSPOutput{
+		Operation:   operation,
+		Engine:      "fallback:sed",
+		Result:      strings.Join(lines, "\n"),
+		FilePath:    input.FilePath,
+		ResultCount: len(lines),
+	}, nil
 }
 
 func newSkillCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {

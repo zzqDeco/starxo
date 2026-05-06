@@ -76,6 +76,7 @@ starxo/
 │   ├── service/                     # Wails 绑定服务（前端 API）
 │   │   ├── chat.go                  #   ChatService：Per-Session Agent 生命周期（SessionRun）、消息收发、流式输出
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 动态 Agent 工具
+│   │   ├── runtime_lsp_manager.go   #   Runtime V2 常驻 language server 管理
 │   │   ├── runtime_workspaces.go    #   Runtime V2 会话级 worktree workspace 管理
 │   │   ├── runtime_web_tools.go     #   Runtime V2 WebFetch/WebSearch 工具实现
 │   │   ├── sandbox_svc.go           #   SandboxService：连接/断开/重连、健康监控（RWMutex 并发安全）
@@ -162,7 +163,7 @@ wails dev
 
 顶层 Agent 现在使用更小的 always-loaded runtime 工具面，并通过 `ToolSearch` 按需发现 deferred tools。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
 
-当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。本版本的 `LSP` 是基于 `rg`/`sed` 的轻量 fallback，还不是常驻 language server。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 worktree 隔离。
+当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 worktree 隔离。
 
 计划模式只暴露 read-only trusted 工具；写入、编辑和 shell 执行会在计划批准后才进入可见工具面。
 

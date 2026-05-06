@@ -3,8 +3,8 @@
 ## Summary
 - Branch: `feature/agent-runtime-v2`, based on latest `dev`.
 - Goal: make ToolSearch a runtime-wide foundation instead of an MCP-only helper.
-- Scope in this implementation: catalog metadata, always-loaded Runtime V2 core tools, permission-aware deferred search/load, permission queue, background task APIs, dynamic Agent tool, worktree isolation, initial LSP/Skill/Web/Notebook deferred tools, and documentation/test coverage.
-- Out of scope for this slice: full Claude Code parity, a persistent language-server-backed LSP engine, dedicated frontend runtime task panel, structured diff UI, and token-aware compaction.
+- Scope in this implementation: catalog metadata, always-loaded Runtime V2 core tools, permission-aware deferred search/load, permission queue, background task APIs, dynamic Agent tool, worktree isolation, persistent language-server-backed LSP with fallback, Skill/Web/Notebook deferred tools, and documentation/test coverage.
+- Out of scope for this slice: full Claude Code parity, dedicated frontend runtime task panel, structured diff UI, writable LSP actions, and token-aware compaction.
 
 ## Runtime Surface
 - `tool_search` is always visible and callable.
@@ -65,7 +65,8 @@
 
 ## Dynamic Agent And Deferred Tools
 - `Agent` spawns a focused subagent for bounded tasks. It can run synchronously or in the background and can request `isolation=worktree`.
-- `LSP` is a lightweight `rg`/`sed` fallback for definitions, references, hover, and symbols; it is not yet a persistent language server.
+- `LSP` uses a persistent language server per session/workspace/language when available, with `rg`/`sed` fallback when the remote server is missing or the request lacks position data.
+- Supported server commands are `gopls serve`, `typescript-language-server --stdio`, `pyright-langserver --stdio`, and `rust-analyzer`.
 - `Skill` lists/reads `.starxo/skills` and `.claude/skills` prompts inside the workspace.
 - `NotebookEdit` edits `.ipynb` cells through parsed JSON and the normal workspace guard.
 - `WebFetch` and `WebSearch` are deferred runtime tools executed by the local app process.
@@ -78,7 +79,8 @@
 
 ## Follow-Up Work
 - Add frontend Runtime Tasks panel.
-- Replace lightweight LSP fallback with optional persistent language server adapters.
+- Add diagnostics/install guidance for missing language servers.
+- Add writable LSP operations such as rename, format, and code action apply behind the permission queue.
 - Add token-aware compaction that preserves discovered tools, active tasks, permissions, todos, file read state, and diff summaries.
 - Add structured diff UI for `Edit`/`Write`.
 - Expand integration tests against the remote sandbox host.

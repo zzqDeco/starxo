@@ -188,7 +188,7 @@ func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
 }
 
 func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
-	entries, err := NewRuntimeDeferredCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil)
+	entries, err := NewRuntimeDeferredCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil, nil)
 	if err != nil {
 		t.Fatalf("runtime deferred entries: %v", err)
 	}

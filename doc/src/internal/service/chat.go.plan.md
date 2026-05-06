@@ -15,6 +15,7 @@
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
+- 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
@@ -139,10 +140,15 @@
   - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册
   - runtime deferred tools 和 MCP deferred tools 共用 ToolSearch、session discovery 和 permission pipeline
   - web tools 当前由本地应用进程执行 HTTP 请求；其他 runtime tools 使用远端 sandbox operator
+  - `LSP` tool 会先尝试常驻 language server；server 缺失或启动失败时由 tools 层 fallback 到 `rg`/`sed`
 - Runtime workspace manager：
   - 按 sessionID 记录 active worktree
   - 后续 Runtime V2 file/search/edit/shell 工具通过 context sessionID 解析当前 workspace
   - worktree 状态不依赖全局 active session，支持多会话并行
+- Runtime LSP manager：
+  - 按 `sessionID + workspacePath + language` 复用远端常驻进程
+  - `UpdateSandbox` / `InvalidateRunner` 会关闭所有 LSP server，避免跨 SSH/sandbox 配置复用旧进程
+  - 支持 Go/TypeScript/JavaScript/Python/Rust 的 server command 映射
 - Runtime V2 permission queue：
   - `WrapMCPToolWithPermissionCheck` 覆盖 runtime 与 MCP catalog entries
   - 非 read-only trusted 工具执行前调用 `deferredMCPProvider.RequestToolPermission`
