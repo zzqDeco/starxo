@@ -110,6 +110,10 @@ type remoteCommandRunner interface {
 	RunCommand(ctx context.Context, cmd string) (stdout, stderr string, exitCode int, err error)
 }
 
+type remoteProcessRunner interface {
+	StartCommand(ctx context.Context, cmd string) (*SSHProcess, error)
+}
+
 type RemoteRuntimeManager struct {
 	ssh      remoteCommandRunner
 	cfg      config.SandboxConfig
@@ -597,6 +601,37 @@ func (m *RemoteRuntimeManager) ExecInSandbox(ctx context.Context, command []stri
 		return "", "", -1, fmt.Errorf("unsupported sandbox runtime %q", kind)
 	}
 	return m.ssh.RunCommand(runCtx, remoteCmd)
+}
+
+func (m *RemoteRuntimeManager) StartProcessInSandbox(ctx context.Context, command []string) (RuntimeProcess, error) {
+	m.mu.Lock()
+	inst := m.instance
+	kind := m.kind
+	cfg := m.cfg
+	m.mu.Unlock()
+
+	if inst == nil {
+		return nil, fmt.Errorf("no sandbox is active")
+	}
+	if len(command) == 0 {
+		return nil, fmt.Errorf("command is empty")
+	}
+
+	inner := m.innerShell(command, inst, cfg)
+	var remoteCmd string
+	switch kind {
+	case RuntimeBwrap:
+		remoteCmd = m.bwrapCommand(inst, cfg, inner)
+	case RuntimeSeatbelt:
+		remoteCmd = m.seatbeltCommand(inst, cfg, inner)
+	default:
+		return nil, fmt.Errorf("unsupported sandbox runtime %q", kind)
+	}
+	starter, ok := m.ssh.(remoteProcessRunner)
+	if !ok {
+		return nil, fmt.Errorf("SSH runner does not support long-running processes")
+	}
+	return starter.StartCommand(ctx, remoteCmd)
 }
 
 func (m *RemoteRuntimeManager) RuntimeID() string {

@@ -8,8 +8,8 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 这是 `ChatService` deferred MCP / runner bundle 体系的回归保护主测试文件。
-- 它覆盖 runner generation、freshness task、discovery pruning、fallback 语义、startup 引用和 detached build 生命周期。
+- 这是 `ChatService` deferred/runtime tool surface / runner bundle 体系的回归保护主测试文件。
+- 它覆盖 runner generation、freshness task、discovery pruning、ToolSearch state、fallback 语义、startup 引用和 detached build 生命周期。
 
 ## 3. 输入与输出
 - 输入来源:
@@ -42,6 +42,9 @@
   - stop 只取消等待
   - detached build 继续
   - startup 放弃或 session 删除时会清理 pending start 引用
+- Runtime V2 ToolSearch state：
+  - provider 的 current loaded 包含当前 runtime surface，而不是只包含已发现 deferred entries
+  - `tool_search` 在没有 deferred match 时仍保持可见/可调用
 
 ## 5. 依赖关系
 - 内部依赖: `chat.go`、`session_svc.go`、`internal/tools/*`

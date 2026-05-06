@@ -150,6 +150,48 @@ func TestComputeDeferredMCPState_PlanModeDoesNotFilterHiddenNonMCPSample(t *test
 	assertCatalogNames(t, state.CurrentLoadedTools, []string{hiddenSample.CanonicalName})
 }
 
+func TestComputeDeferredMCPState_PlanModeFiltersWritableRuntimeTools(t *testing.T) {
+	catalog := NewToolCatalog()
+
+	readOnlyRuntime := CatalogEntry{
+		CanonicalName:   "Read",
+		Source:          ToolSourceRuntime,
+		Kind:            ToolKindAction,
+		ToolClass:       ToolClassRuntimeFile,
+		AlwaysLoad:      true,
+		ReadOnlyHint:    true,
+		ReadOnlyTrusted: true,
+		PermissionSpec:  PermissionSpec{AllowSearch: true, AllowExecute: true},
+		Tool:            &stubInvokableTool{name: "Read"},
+	}
+	writableRuntime := CatalogEntry{
+		CanonicalName:  "Write",
+		Source:         ToolSourceRuntime,
+		Kind:           ToolKindAction,
+		ToolClass:      ToolClassRuntimeFile,
+		AlwaysLoad:     true,
+		PermissionSpec: PermissionSpec{AllowSearch: true, AllowExecute: true},
+		Tool:           &stubInvokableTool{name: "Write"},
+	}
+
+	for _, entry := range []CatalogEntry{readOnlyRuntime, writableRuntime} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register %s: %v", entry.CanonicalName, err)
+		}
+	}
+
+	state := ComputeDeferredMCPState(catalog, nil, ToolPermissionContext{
+		SessionID: "sess-plan",
+		Mode:      "plan",
+		Servers:   map[string]MCPServerPermissionState{},
+	})
+
+	assertCatalogNames(t, state.CurrentLoadedTools, []string{"Read"})
+	if decision := state.LoadDecisions["Write"]; decision.Allowed || decision.Reason == "" {
+		t.Fatalf("expected writable runtime tool to be blocked in plan mode, got %#v", decision)
+	}
+}
+
 func assertCatalogNames(t *testing.T, entries []CatalogEntry, want []string) {
 	t.Helper()
 	got := make([]string, 0, len(entries))

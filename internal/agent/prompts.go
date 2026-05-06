@@ -27,6 +27,9 @@ You have two ways to handle tasks:
      the user informed about what you are currently doing or what progress you have made.
    - tool_search: Discover deferred tools by canonical name or keywords. The model may receive
      deferred-tools-delta messages before model calls; use tool_search to load deferred tools before calling them.
+   - Runtime V2 tools are available at the top level when permitted:
+     Agent, Bash, Read, Write, Edit, Glob, Grep, TaskOutput, TaskStop, ExitPlanMode.
+     Prefer Read/Grep/Glob over shell commands for file inspection and search. Prefer Edit/Write over ad hoc shell redirection for file changes.
 
 2. DEFERRED TOOLS:
    - Deferred tools are NOT exposed up front with full schemas.
@@ -34,6 +37,7 @@ You have two ways to handle tasks:
    - You may receive an mcp-instructions-delta message describing searchable, pending, and unavailable MCP servers.
    - If you need one of those tools, call tool_search first, then call the loaded tool by its announced canonical name.
    - Do not invent deferred tool names. Use announced names or tool_search results.
+   - Common deferred runtime tools include EnterWorktree, ExitWorktree, LSP, Skill, NotebookEdit, WebFetch, and WebSearch when available.
 
 3. SUB-AGENTS (delegate via transfer_to_agent for specialized work):
    - code_writer: For ALL code-related tasks — reading, creating, editing, and refactoring files. This is your primary workhorse.
@@ -54,8 +58,9 @@ DECISION RULES:
 
 IMPORTANT:
 - Always explain your approach before taking action.
-- Top-level direct access to shell_execute, python_execute, read_file, write_file, list_files, and str_replace_editor is intentionally unavailable.
-- Use sub-agents for built-in file, shell, and editor operations.
+- Runtime V2 direct tools are the preferred top-level path for targeted file, search, command, and background-task operations.
+- Use Agent for bounded side tasks that benefit from an isolated focused subagent; use background=true for long-running delegation.
+- You may still delegate to sub-agents when the task benefits from focused implementation or execution work.
 - Be efficient: delegate to the right sub-agent on the first try.
 - After a sub-agent returns, provide a clear summary to the user.`, ac.SSHUser, ac.SSHHost, ac.SSHPort, ac.ContainerName, ac.ContainerID, ac.WorkspacePath)
 }
@@ -100,13 +105,15 @@ COMMUNICATION TOOLS:
 - ask_choice: present alternatives when needed.
 - notify_user: short progress updates.
 - tool_search: discover deferred tools before calling them.
+- Read, Grep, Glob, TaskOutput, and ExitPlanMode may be available for read-only inspection and plan approval.
 
 DEFERRED TOOLS POLICY:
 - Deferred tools may be described by deferred-tools-delta messages before model calls.
 - MCP runtime changes may be described by mcp-instructions-delta messages before model calls.
 - You must call tool_search before using a deferred tool that is not already loaded.
 - In PLAN MODE, deferred MCP tools are limited to entries that are explicitly and trustworthily read-only.
-- Top-level built-in file, shell, and editor tools are intentionally unavailable here; concrete work must go through sub-agents.
+- In PLAN MODE, write/edit/shell/destructive runtime tools are hidden or denied until the plan is approved.
+- Concrete implementation work should still go through sub-agents after approval.
 
 IMPORTANT:
 - Do not skip planning + delegation + acceptance chain.

@@ -25,6 +25,19 @@ func TestExecuteToolSearch_ExactNamePrefersCurrentLoadedAndDoesNotWriteDiscovery
 	if len(records) != 0 {
 		t.Fatalf("expected no discovery records for already loaded tool, got %#v", records)
 	}
+	if len(output.Loaded) != 2 || output.Loaded[0] != loaded.CanonicalName || output.Loaded[1] != ToolSearchName {
+		t.Fatalf("expected loaded tools in output, got %#v", output.Loaded)
+	}
+}
+
+func TestExecuteToolSearch_EmptyQueryReturnsToolSearchAsLoaded(t *testing.T) {
+	output, records := ExecuteToolSearch(ToolSearchInput{}, ToolSearchState{}, time.UnixMilli(124))
+	if len(records) != 0 {
+		t.Fatalf("expected empty query not to discover tools, got %#v", records)
+	}
+	if len(output.Loaded) != 1 || output.Loaded[0] != ToolSearchName {
+		t.Fatalf("expected tool_search in loaded output, got %#v", output.Loaded)
+	}
 }
 
 func TestExecuteToolSearch_ReturnsCanonicalNamesForAliasMatches(t *testing.T) {
@@ -75,6 +88,9 @@ func TestExecuteToolSearch_ZeroMatchesIncludesPendingServers(t *testing.T) {
 	}
 	if len(output.PendingMCPServers) != 2 {
 		t.Fatalf("expected pending servers on zero-match path, got %#v", output.PendingMCPServers)
+	}
+	if len(output.PendingSources) != 2 {
+		t.Fatalf("expected generic pending sources on zero-match path, got %#v", output.PendingSources)
 	}
 	if len(records) != 0 {
 		t.Fatalf("expected no discovery records, got %#v", records)

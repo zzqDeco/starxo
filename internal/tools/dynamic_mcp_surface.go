@@ -83,11 +83,8 @@ func (m *dynamicMCPSurfaceMiddleware) ensureToolCallable(ctx context.Context, to
 	if err != nil {
 		return err
 	}
-	if toolName == "tool_search" {
-		if ToolSearchVisible(state) {
-			return nil
-		}
-		return fmt.Errorf(ToolSearchUnavailableNoDeferredMessage)
+	if toolName == ToolSearchName {
+		return nil
 	}
 	entry, ok := m.provider.LookupCatalogEntry(toolName)
 	if !ok {
@@ -147,7 +144,7 @@ func (w *dynamicMCPModelWrapper) Stream(ctx context.Context, input []*schema.Mes
 }
 
 func ToolSearchVisible(state DeferredMCPState) bool {
-	return len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0
+	return true
 }
 
 func NormalizeSearchableCanonicalNames(entries []CatalogEntry) []string {
@@ -393,10 +390,8 @@ func filterVisibleToolInfos(all []*schema.ToolInfo, state DeferredMCPState, prov
 		if info == nil {
 			continue
 		}
-		if info.Name == "tool_search" {
-			if ToolSearchVisible(state) {
-				visible = append(visible, info)
-			}
+		if info.Name == ToolSearchName {
+			visible = append(visible, info)
 			continue
 		}
 		if entry, ok := provider.LookupCatalogEntry(info.Name); ok {

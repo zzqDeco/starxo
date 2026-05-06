@@ -29,8 +29,91 @@ export namespace agentctx {
 
 export namespace config {
 
+	export class WebSearchProviderConfig {
+	    name: string;
+	    type?: string;
+	    endpoint?: string;
+	    method?: string;
+	    headers?: Record<string, string>;
+	    apiKeyEnv?: string;
+	    queryParam?: string;
+	    limitParam?: string;
+	    bodyTemplate?: string;
+	    resultsPath?: string;
+	    titlePath?: string;
+	    urlPath?: string;
+	    snippetPath?: string;
+	    location?: string;
+	    language?: string;
+	    page?: number;
+	    timeoutMs?: number;
+	    maxResults?: number;
+	    disabled?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new WebSearchProviderConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.endpoint = source["endpoint"];
+	        this.method = source["method"];
+	        this.headers = source["headers"];
+	        this.apiKeyEnv = source["apiKeyEnv"];
+	        this.queryParam = source["queryParam"];
+	        this.limitParam = source["limitParam"];
+	        this.bodyTemplate = source["bodyTemplate"];
+	        this.resultsPath = source["resultsPath"];
+	        this.titlePath = source["titlePath"];
+	        this.urlPath = source["urlPath"];
+	        this.snippetPath = source["snippetPath"];
+	        this.location = source["location"];
+	        this.language = source["language"];
+	        this.page = source["page"];
+	        this.timeoutMs = source["timeoutMs"];
+	        this.maxResults = source["maxResults"];
+	        this.disabled = source["disabled"];
+	    }
+	}
+	export class WebSearchConfig {
+	    enabled?: boolean;
+	    defaultProvider?: string;
+	    providers?: WebSearchProviderConfig[];
+
+	    static createFrom(source: any = {}) {
+	        return new WebSearchConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.defaultProvider = source["defaultProvider"];
+	        this.providers = this.convertValues(source["providers"], WebSearchProviderConfig);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AgentConfig {
 	    maxIterations: number;
+	    webSearch: WebSearchConfig;
 
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -39,7 +122,26 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.maxIterations = source["maxIterations"];
+	        this.webSearch = this.convertValues(source["webSearch"], WebSearchConfig);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class MCPServerConfig {
 	    name: string;
@@ -221,6 +323,8 @@ export namespace config {
 		    return a;
 		}
 	}
+
+
 
 
 
@@ -517,6 +621,26 @@ export namespace model {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
+	export class RuntimePermissionGrant {
+	    toolName: string;
+	    toolClass?: string;
+	    source?: string;
+	    decision: string;
+	    createdAt: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimePermissionGrant(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.toolName = source["toolName"];
+	        this.toolClass = source["toolClass"];
+	        this.source = source["source"];
+	        this.decision = source["decision"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
 	export class Session {
 	    id: string;
 	    title: string;
@@ -563,6 +687,7 @@ export namespace model {
 	    display: DisplayTurn[];
 	    streaming?: StreamingState;
 	    discoveredTools?: DiscoveredToolRecord[];
+	    permissionGrants?: RuntimePermissionGrant[];
 	    deferredAnnouncementState?: DeferredAnnouncementState;
 	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
 	    mode?: string;
@@ -581,6 +706,7 @@ export namespace model {
 	        this.display = this.convertValues(source["display"], DisplayTurn);
 	        this.streaming = this.convertValues(source["streaming"], StreamingState);
 	        this.discoveredTools = this.convertValues(source["discoveredTools"], DiscoveredToolRecord);
+	        this.permissionGrants = this.convertValues(source["permissionGrants"], RuntimePermissionGrant);
 	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
 	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
 	        this.mode = source["mode"];
@@ -1141,6 +1267,69 @@ export namespace service {
 	        this.fileCount = source["fileCount"];
 	        this.totalSize = source["totalSize"];
 	        this.refreshedAt = source["refreshedAt"];
+	    }
+	}
+
+}
+
+export namespace tools {
+
+	export class RuntimeTaskOutput {
+	    taskId: string;
+	    status: string;
+	    outputPath?: string;
+	    content: string;
+	    offset: number;
+	    nextOffset: number;
+	    size: number;
+	    truncated: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTaskOutput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.taskId = source["taskId"];
+	        this.status = source["status"];
+	        this.outputPath = source["outputPath"];
+	        this.content = source["content"];
+	        this.offset = source["offset"];
+	        this.nextOffset = source["nextOffset"];
+	        this.size = source["size"];
+	        this.truncated = source["truncated"];
+	    }
+	}
+	export class RuntimeTaskSnapshot {
+	    id: string;
+	    sessionId: string;
+	    type: string;
+	    status: string;
+	    description: string;
+	    command?: string;
+	    outputPath?: string;
+	    startedAt: number;
+	    finishedAt?: number;
+	    exitCode?: number;
+	    error?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTaskSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.type = source["type"];
+	        this.status = source["status"];
+	        this.description = source["description"];
+	        this.command = source["command"];
+	        this.outputPath = source["outputPath"];
+	        this.startedAt = source["startedAt"];
+	        this.finishedAt = source["finishedAt"];
+	        this.exitCode = source["exitCode"];
+	        this.error = source["error"];
 	    }
 	}
 

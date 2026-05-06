@@ -21,6 +21,7 @@
 - 日志、snapshot debug 计算、Wails explicit debug API 都复用同一个纯计算核心，但 snapshot export 与 explicit debug API 保持不同的暴露语义。
 - helper 只读输入快照，不调用 `PrepareDeferredSyntheticMessages(...)`，不推进任何 delta state。
 - `DeferredSurfaceDebug` 是 best-effort runtime debug view，不是强一致落盘快照。
+- Runtime V2 中 `ToolSearchCurrentLoadedCanonicalNames` 与 `CurrentLoadedCanonicalNames` 对齐，表示当前 permission/mode 下可注入的 runtime surface。
 - 组装约束固定为：
   - 先分别复制 run / bundle / config 输入
   - 再在锁外纯计算

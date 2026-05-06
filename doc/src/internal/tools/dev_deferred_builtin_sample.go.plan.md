@@ -21,6 +21,8 @@
   - `AlwaysLoad=false`
   - `IsMcp=false`
   - `ToolClass=builtin`
+  - `ReadOnlyHint=true`
+  - `ReadOnlyTrusted=true`
   - `DeferReason=dev_experimental`
 - sample 本身必须无副作用，适合开发态手工 smoke 和回归测试。
 

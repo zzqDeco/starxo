@@ -126,6 +126,7 @@ type SessionRun struct {
 	ctxEngine                 *agentctx.Engine
 	timeline                  *agentctx.TimelineCollector
 	discoveredTools           map[string]model.DiscoveredToolRecord
+	permissionGrants          map[string]model.RuntimePermissionGrant
 	deferredAnnouncementState *model.DeferredAnnouncementState
 	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
 	planDocument              *model.PlanDocument
@@ -197,6 +198,7 @@ func (r *SessionRun) clearSessionState() {
 	r.timeline.Clear()
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
 	r.planDocument = nil
@@ -235,6 +237,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	}
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
+	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
 	r.planDocument = nil
@@ -257,6 +260,12 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 		}
 		r.discoveredTools[record.CanonicalName] = record
 	}
+	for _, grant := range data.PermissionGrants {
+		if grant.ToolName == "" || grant.Decision != tools.ToolPermissionDecisionAllowSession {
+			continue
+		}
+		r.permissionGrants[grant.ToolName] = grant
+	}
 }
 
 func (r *SessionRun) snapshot() *SessionSnapshot {
@@ -270,6 +279,13 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 	sort.Slice(discovered, func(i, j int) bool {
 		return discovered[i].CanonicalName < discovered[j].CanonicalName
 	})
+	grants := make([]model.RuntimePermissionGrant, 0, len(r.permissionGrants))
+	for _, grant := range r.permissionGrants {
+		grants = append(grants, grant)
+	}
+	sort.Slice(grants, func(i, j int) bool {
+		return grants[i].ToolName < grants[j].ToolName
+	})
 
 	return &SessionSnapshot{
 		HasSessionRun: true,
@@ -280,6 +296,7 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 			Display:                   r.timeline.Export(),
 			Streaming:                 cloneStreamingState(r.streamingState),
 			DiscoveredTools:           discovered,
+			PermissionGrants:          grants,
 			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
 			Mode:                      r.mode,
@@ -527,7 +544,7 @@ func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSe
 	}
 	return tools.ToolSearchState{
 		SearchablePool:   state.SearchablePoolForMode,
-		CurrentLoaded:    state.EffectiveDiscovered,
+		CurrentLoaded:    state.CurrentLoadedTools,
 		PendingMCPServer: state.PendingMCPServers,
 	}, nil
 }
@@ -618,11 +635,8 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 			return "", err
 		}
 
-		if name == "tool_search" {
-			if len(state.SearchablePoolForMode) > 0 || len(state.PendingMCPServers) > 0 {
-				return "", nil
-			}
-			return tools.ToolSearchUnavailableNoDeferredMessage, nil
+		if name == tools.ToolSearchName {
+			return "", nil
 		}
 
 		if entry, ok := provider.LookupCatalogEntry(name); ok {
@@ -646,12 +660,15 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 type ChatService struct {
 	ctx context.Context
 
-	sandbox         *sandbox.SandboxManager
-	store           *config.Store
-	checkpointStore compose.CheckPointStore
-	now             func() time.Time
-	freshnessTTL    time.Duration
-	runtimeOptions  ChatRuntimeOptions
+	sandbox           *sandbox.SandboxManager
+	store             *config.Store
+	checkpointStore   compose.CheckPointStore
+	now               func() time.Time
+	freshnessTTL      time.Duration
+	runtimeOptions    ChatRuntimeOptions
+	runtimeTasks      *runtimeTaskManager
+	runtimeWorkspaces *runtimeWorkspaceManager
+	runtimeLSP        *runtimeLSPManager
 
 	installedBundle            *RunnerBundle
 	retiredBundles             []*RunnerBundle
@@ -671,6 +688,9 @@ type ChatService struct {
 	sessionService *SessionService
 	onAgentDone    func(sessionID string)
 
+	permissionMu       sync.Mutex
+	permissionRequests map[string]*runtimePermissionRequest
+
 	mu sync.Mutex
 }
 
@@ -680,14 +700,21 @@ func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatServic
 	if len(opts) > 0 {
 		runtimeOptions = opts[0]
 	}
-	return &ChatService{
-		store:           store,
-		checkpointStore: checkpoint.NewInMemoryStore(),
-		sessions:        make(map[string]*SessionRun),
-		now:             time.Now,
-		freshnessTTL:    defaultBundleFreshnessTTL,
-		runtimeOptions:  runtimeOptions,
+	s := &ChatService{
+		store:              store,
+		checkpointStore:    checkpoint.NewInMemoryStore(),
+		sessions:           make(map[string]*SessionRun),
+		now:                time.Now,
+		freshnessTTL:       defaultBundleFreshnessTTL,
+		runtimeOptions:     runtimeOptions,
+		permissionRequests: make(map[string]*runtimePermissionRequest),
 	}
+	s.runtimeTasks = newRuntimeTaskManager(s.now, func(event string, data any) {
+		wailsEmit(s.ctx, event, data)
+	})
+	s.runtimeWorkspaces = newRuntimeWorkspaceManager(s.now)
+	s.runtimeLSP = newRuntimeLSPManager(s.now)
+	return s
 }
 
 // SetContext stores the Wails application context. Called from app.go startup.
@@ -707,16 +734,24 @@ func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, _ *agentctx.E
 // UpdateSandbox updates the sandbox manager reference.
 func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.sandbox = sbx
 	s.invalidateRunners()
+	lsp := s.runtimeLSP
+	s.mu.Unlock()
+	if lsp != nil {
+		lsp.CloseAll()
+	}
 }
 
 // InvalidateRunner forces runners to be rebuilt on the next message.
 func (s *ChatService) InvalidateRunner() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.invalidateRunners()
+	lsp := s.runtimeLSP
+	s.mu.Unlock()
+	if lsp != nil {
+		lsp.CloseAll()
+	}
 }
 
 func (s *ChatService) invalidateRunners() {
@@ -750,11 +785,12 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		return run
 	}
 	run := &SessionRun{
-		sessionID:       sessionID,
-		ctxEngine:       agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
-		timeline:        agentctx.NewTimelineCollector(),
-		discoveredTools: make(map[string]model.DiscoveredToolRecord),
-		mode:            model.ModeDefault,
+		sessionID:        sessionID,
+		ctxEngine:        agentctx.NewEngine(defaultSystemPrompt, defaultMaxTokens),
+		timeline:         agentctx.NewTimelineCollector(),
+		discoveredTools:  make(map[string]model.DiscoveredToolRecord),
+		permissionGrants: make(map[string]model.RuntimePermissionGrant),
+		mode:             model.ModeDefault,
 	}
 	s.sessions[sessionID] = run
 	return run
@@ -2784,8 +2820,50 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		CachedSurfaceMetadataByServer: cloneSurfaceCache(surface.CachedSurfaceMetadataByServer),
 	}
 	provider := &deferredMCPProvider{chat: s, bundle: bundle}
+	ac := s.buildAgentContext()
 
 	topLevelCatalog := tools.NewToolCatalog()
+	runtimeEntries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build runtime core tools: %w", err)
+	}
+	for _, entry := range runtimeEntries {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to register runtime tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
+	agentEntry, err := s.newRuntimeAgentCatalogEntry(ctx, mdl, op, provider, ac)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build runtime Agent tool: %w", err)
+	}
+	agentEntry.Tool = tools.WrapMCPToolWithPermissionCheck(agentEntry, provider)
+	if err := topLevelCatalog.Register(agentEntry); err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to register runtime Agent tool: %w", err)
+	}
+	runtimeDeferredEntries, err := tools.NewRuntimeDeferredCatalogEntries(op, ac.WorkspacePath, s.runtimeWorkspaces, s.runtimeLSP)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build deferred runtime tools: %w", err)
+	}
+	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch)
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build deferred web tools: %w", err)
+	}
+	for _, entry := range append(runtimeDeferredEntries, runtimeWebEntries...) {
+		wrapped := entry
+		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
+		if err := topLevelCatalog.Register(wrapped); err != nil {
+			s.closeMCPHandlesLocked(surface.Handles)
+			return nil, fmt.Errorf("failed to register deferred runtime tool %s: %w", wrapped.CanonicalName, err)
+		}
+	}
 	for _, entry := range surface.ActionCatalog.Entries() {
 		wrapped := entry
 		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
@@ -2832,7 +2910,6 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	extraTools = append(extraTools, toolSearchTool)
 	extraTools = append(extraTools, topLevelCatalog.Tools()...)
 
-	ac := s.buildAgentContext()
 	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
 	unknownToolsHandler := newDeferredUnknownToolHandler(provider)
 
@@ -3123,35 +3200,9 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 		task := s.freshnessTask
 		if task != nil {
 			s.mu.Unlock()
-			if err := s.waitDetachedTask(ctx, task); err != nil {
-				return nil, err
-			}
-			_, latestDigest, err := s.currentConfigSnapshot()
-			if err != nil {
-				return nil, err
-			}
-			if latestDigest != task.TargetConfigDigest {
-				continue
-			}
-			if task.err != nil {
-				if task.fallbackToCurrent {
-					s.mu.Lock()
-					if err := ctx.Err(); err != nil {
-						s.mu.Unlock()
-						return nil, err
-					}
-					if s.installedBundle == nil {
-						s.mu.Unlock()
-						return nil, fmt.Errorf("current installed bundle is unavailable after freshness fallback")
-					}
-					reserved, err := s.reserveInstalledBundleLocked(sessionID)
-					s.mu.Unlock()
-					if err != nil {
-						return nil, err
-					}
-					return reserved, nil
-				}
-				return nil, task.err
+			reserved, done, err := s.finishFreshnessTaskForRun(ctx, task, sessionID)
+			if err != nil || done {
+				return reserved, err
 			}
 			continue
 		}
@@ -3170,7 +3221,46 @@ func (s *ChatService) ensureBundleReadyForNewRun(ctx context.Context, sessionID 
 		s.mu.Unlock()
 
 		go s.runFreshnessTask(task, cfg, expectedFingerprint, prevCache)
+		reserved, done, err := s.finishFreshnessTaskForRun(ctx, task, sessionID)
+		if err != nil || done {
+			return reserved, err
+		}
 	}
+}
+
+func (s *ChatService) finishFreshnessTaskForRun(ctx context.Context, task *detachedBundleTask, sessionID string) (*RunnerBundle, bool, error) {
+	if err := s.waitDetachedTask(ctx, task); err != nil {
+		return nil, true, err
+	}
+	_, latestDigest, err := s.currentConfigSnapshot()
+	if err != nil {
+		return nil, true, err
+	}
+	if latestDigest != task.TargetConfigDigest {
+		return nil, false, nil
+	}
+	if task.err == nil {
+		return nil, false, nil
+	}
+	if !task.fallbackToCurrent {
+		return nil, true, task.err
+	}
+
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, true, err
+	}
+	if s.installedBundle == nil {
+		s.mu.Unlock()
+		return nil, true, fmt.Errorf("current installed bundle is unavailable after freshness fallback")
+	}
+	reserved, err := s.reserveInstalledBundleLocked(sessionID)
+	s.mu.Unlock()
+	if err != nil {
+		return nil, true, err
+	}
+	return reserved, true, nil
 }
 
 func (s *ChatService) runFreshnessTask(task *detachedBundleTask, cfg *config.AppConfig, expectedFingerprint string, prevCache map[string]cachedMCPServerSurface) {

@@ -15,7 +15,7 @@
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: Wails 事件（session:switched, ssh:progress, ssh:connected, ssh:disconnected, container:progress, container:ready, container:activated, container:deactivated, agent:timeline, agent:done, agent:error, agent:interrupt, agent:mode_changed, agent:run_state）
+- 输入来源: Wails 事件（session:switched, ssh:progress, ssh:connected, ssh:disconnected, container:progress, container:ready, container:activated, container:deactivated, agent:timeline, agent:done, agent:error, agent:interrupt, agent:mode_changed, agent:run_state, runtime:permission_request, runtime:permission_canceled）
 - 输出结果: 渲染 NConfigProvider 包裹的 MainLayout 组件；将 Wails 事件数据分发到对应 Store
 
 ## 4. 关键实现细节
@@ -43,6 +43,12 @@
   - `agent:interrupt` -> **过滤 sessionId**，仅处理活跃会话中断
   - `agent:mode_changed` -> **过滤 sessionId**，仅处理活跃会话模式变更
   - `agent:run_state` -> 写入 `chatStore.sessionRunStates`；若属于活跃会话，同步 mode 和 generating 状态
+  - `runtime:permission_request` -> **过滤 sessionId**，展示工具审批弹窗
+  - `runtime:permission_canceled` -> 当前请求被后端取消时关闭审批弹窗
+- **Runtime permission modal**:
+  - 展示 tool name、source、tool class、risk 和 JSON input
+  - 操作按钮固定为“拒绝 / 允许一次 / 本会话允许”
+  - 调用 `ChatService.DenyToolPermission(...)` 或 `ChatService.ApproveToolPermission(...)`
 - **会话恢复 (`restoreActiveMessages`)**:
   - 优先通过 `sessionStore.loadSessionData()` 从后端 `session_data.json` 加载统一的 display 数据
   - 如有 `streaming` 中途状态，追加 `[streaming interrupted]` 标记的不完整消息
@@ -56,7 +62,7 @@
 ## 5. 依赖关系
 - 内部依赖: MainLayout.vue、settingsStore、connectionStore、chatStore、sessionStore、containerStore、types (Session, Message, TurnEvent, InterruptEvent, ModeChangedEvent)
 - 外部依赖: naive-ui、vue、wailsjs/runtime
-- Wails 绑定: `wailsjs/go/service/SessionService` (LoadSessionData), `wailsjs/go/service/ChatService` (GetMode)
+- Wails 绑定: `wailsjs/go/service/SessionService` (LoadSessionData), `wailsjs/go/service/ChatService` (GetMode, ApproveToolPermission, DenyToolPermission)
 
 ## 6. 变更影响面
 - `isActiveSession()` 过滤逻辑确保后台会话事件不影响前端显示，是 per-session 并发安全的前端核心保障

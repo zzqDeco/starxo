@@ -20,19 +20,23 @@
   - 关键词搜索
   - `+term` 必选词
 - exact-name 对 canonical 和 aliases 做大小写无关匹配
-- provider 传入的 `CurrentLoaded` 语义固定为 loaded deferred only，不直接复用全部 current loaded tools
-- 命中当前已加载 deferred tool 时直接返回 canonical name，不再重复写 discovery
+- provider 传入的 `CurrentLoaded` 语义是当前 runtime surface：已加载 deferred tools + permission 允许的 always-load tools
+- 命中当前已加载工具时直接返回 canonical name，不再重复写 discovery
 - `matches` 一律返回 canonical name
-- 零命中时才返回 `pending_mcp_servers`
+- 输出同时包含 `loaded`、`pendingSources`，并保留旧 JSON 字段 `pending_mcp_servers`
+- `loaded` 始终包含 `tool_search` 自身，因为 Runtime V2 把它作为基础 always-load 工具
+- 零命中时才返回 pending source/server 信息
 - 只有新发现 deferred tool 才产生 `DiscoveredToolRecord`
 - 对非 MCP deferred sample，`CanonicalName == tool name`
 - exact-name、`select:`、keyword search 对非 MCP sample 也返回同一个名字
-- `AlwaysLoad == true` 和 `ShouldDefer == false` 的 entry 不应通过 `tool_search` 暴露；它们的可见性由正常工具面决定，不走 deferred activation
+- `AlwaysLoad == true` 的 entry 可以作为 current loaded result 被 exact/select 命中，但不会写 discovery
+- `ShouldDefer == false && AlwaysLoad == false` 的 entry 不通过 `tool_search` 暴露
 - `ToolSearchUnavailableNoDeferredMessage` 是共享 contract，unknown-tool fallback 与 middleware 都复用同一来源
 - dev-only experimental sample 走和其它非 MCP deferred builtin 相同的名字语义：`CanonicalName == tool name`
+- Runtime V2 中 `tool_search` 始终可见、可调用；空搜索返回当前 `loaded` 列表，方便模型理解已加载工具面
 
 ## 5. 依赖关系
-- 内部依赖: `catalog.go`、`session_data.go`
+- 内部依赖: `catalog.go`、`runtime_tools.go`、`session_data.go`
 
 ## 6. 变更影响面
 - 决定 generic deferred discovery 的写入边界和模型与工具面的交互稳定性

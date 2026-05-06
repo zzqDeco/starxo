@@ -32,7 +32,12 @@ const defaultSettings: AppSettings = {
     servers: []
   },
   agent: {
-    maxIterations: 30
+    maxIterations: 30,
+    webSearch: {
+      enabled: true,
+      defaultProvider: 'duckduckgo',
+      providers: []
+    }
   }
 }
 

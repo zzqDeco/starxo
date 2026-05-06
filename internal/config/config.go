@@ -62,10 +62,40 @@ type MCPServerConfig struct {
 }
 
 type AgentConfig struct {
-	MaxIterations int `json:"maxIterations"`
+	MaxIterations int             `json:"maxIterations"`
+	WebSearch     WebSearchConfig `json:"webSearch"`
+}
+
+type WebSearchConfig struct {
+	Enabled         *bool                     `json:"enabled,omitempty"`
+	DefaultProvider string                    `json:"defaultProvider,omitempty"`
+	Providers       []WebSearchProviderConfig `json:"providers,omitempty"`
+}
+
+type WebSearchProviderConfig struct {
+	Name         string            `json:"name"`
+	Type         string            `json:"type,omitempty"`
+	Endpoint     string            `json:"endpoint,omitempty"`
+	Method       string            `json:"method,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	APIKeyEnv    string            `json:"apiKeyEnv,omitempty"`
+	QueryParam   string            `json:"queryParam,omitempty"`
+	LimitParam   string            `json:"limitParam,omitempty"`
+	BodyTemplate string            `json:"bodyTemplate,omitempty"`
+	ResultsPath  string            `json:"resultsPath,omitempty"`
+	TitlePath    string            `json:"titlePath,omitempty"`
+	URLPath      string            `json:"urlPath,omitempty"`
+	SnippetPath  string            `json:"snippetPath,omitempty"`
+	Location     string            `json:"location,omitempty"`
+	Language     string            `json:"language,omitempty"`
+	Page         int               `json:"page,omitempty"`
+	TimeoutMS    int               `json:"timeoutMs,omitempty"`
+	MaxResults   int               `json:"maxResults,omitempty"`
+	Disabled     bool              `json:"disabled,omitempty"`
 }
 
 func DefaultConfig() *AppConfig {
+	webSearchEnabled := true
 	return &AppConfig{
 		SSH: SSHConfig{Port: 22, User: "root"},
 		Sandbox: SandboxConfig{
@@ -78,8 +108,14 @@ func DefaultConfig() *AppConfig {
 			BootstrapPython:   true,
 			PythonPackages:    []string{"pandas", "numpy", "matplotlib", "openpyxl"},
 		},
-		LLM:   LLMConfig{Type: "openai", Model: "gpt-4o"},
-		Agent: AgentConfig{MaxIterations: 30},
+		LLM: LLMConfig{Type: "openai", Model: "gpt-4o"},
+		Agent: AgentConfig{
+			MaxIterations: 30,
+			WebSearch: WebSearchConfig{
+				Enabled:         &webSearchEnabled,
+				DefaultProvider: "duckduckgo",
+			},
+		},
 	}
 }
 
@@ -123,6 +159,13 @@ func NormalizeAppConfig(cfg *AppConfig) {
 	}
 	if cfg.Agent.MaxIterations == 0 {
 		cfg.Agent.MaxIterations = defaults.Agent.MaxIterations
+	}
+	if cfg.Agent.WebSearch.Enabled == nil {
+		enabled := true
+		cfg.Agent.WebSearch.Enabled = &enabled
+	}
+	if cfg.Agent.WebSearch.DefaultProvider == "" {
+		cfg.Agent.WebSearch.DefaultProvider = defaults.Agent.WebSearch.DefaultProvider
 	}
 
 	cfg.Docker = nil

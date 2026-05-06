@@ -8,17 +8,19 @@
 - 所属模块: frontend/src/components/layout
 
 ## 2. 核心职责
-- 顶部工作台导航栏组件，展示应用标题、命令面板入口、连接状态、工作区抽屉开关、语言切换与设置按钮。
+- 顶部工作台导航栏组件，展示应用标题、命令面板入口、连接状态、运行任务入口、工作区抽屉开关、语言切换与设置按钮。
 - 作为 Wails 可拖拽标题区域（`wails-drag`）。
 
 ## 3. 输入与输出
-- 输入来源: `Props.workspaceDrawerVisible`
-- 输出结果: `toggle-workspace-drawer`、`toggle-settings`、`open-command-palette` 事件
+- 输入来源: `Props.workspaceDrawerVisible`、`Props.runtimeTasksVisible`
+- 输出结果: `toggle-runtime-tasks`、`toggle-workspace-drawer`、`toggle-settings`、`open-command-palette` 事件
 
 ## 4. 关键实现细节
 - Props:
   - `workspaceDrawerVisible: boolean` — 工作区抽屉是否打开
+  - `runtimeTasksVisible: boolean` — 运行任务面板是否打开
 - Emits:
+  - `toggle-runtime-tasks`
   - `toggle-workspace-drawer`
   - `toggle-settings`
   - `open-command-palette`
@@ -29,6 +31,7 @@
   - 显示当前会话标题、当前模式和 `Cmd/Ctrl+K` 提示
   - 点击后由父组件打开 CommandPalette
 - 右上工具按钮:
+  - 运行任务按钮（List 图标）按状态显示 `header.runtimeTasksOpen / header.runtimeTasksClose`
   - 工作区按钮（FolderOpen 图标）按状态显示 `header.workspaceOpen / header.workspaceClose`
   - 语言按钮
   - 设置按钮
@@ -37,7 +40,7 @@
 - 内部依赖: `@/components/status/ConnectionStatus.vue`, `chatStore`, `sessionStore`
 - 外部依赖:
   - `naive-ui` (`NButton`, `NTooltip`)
-  - `@vicons/ionicons5` (`Settings`, `FolderOpen`)
+  - `@vicons/ionicons5` (`Settings`, `FolderOpen`, `List`)
   - `vue-i18n`
 
 ## 6. 变更影响面

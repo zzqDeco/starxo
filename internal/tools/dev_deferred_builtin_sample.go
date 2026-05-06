@@ -34,14 +34,16 @@ func NewDevDeferredBuiltinSampleEntry() (CatalogEntry, error) {
 		return CatalogEntry{}, err
 	}
 	return CatalogEntry{
-		CanonicalName: DevDeferredBuiltinSampleCanonicalName,
-		Source:        ToolSourceBuiltin,
-		Kind:          ToolKindAction,
-		ToolClass:     ToolClassBuiltin,
-		DeferReason:   "dev_experimental",
-		ShouldDefer:   true,
-		AlwaysLoad:    false,
-		IsMcp:         false,
+		CanonicalName:   DevDeferredBuiltinSampleCanonicalName,
+		Source:          ToolSourceBuiltin,
+		Kind:            ToolKindAction,
+		ToolClass:       ToolClassBuiltin,
+		DeferReason:     "dev_experimental",
+		ShouldDefer:     true,
+		AlwaysLoad:      false,
+		IsMcp:           false,
+		ReadOnlyHint:    true,
+		ReadOnlyTrusted: true,
 		PermissionSpec: PermissionSpec{
 			AllowSearch:  true,
 			AllowExecute: true,

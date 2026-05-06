@@ -34,6 +34,34 @@ export interface MCPServerConfig {
   enabled: boolean
 }
 
+export interface WebSearchProviderConfig {
+  name: string
+  type?: 'http' | 'tinyfish' | 'duckduckgo'
+  endpoint?: string
+  method?: 'GET' | 'POST'
+  headers?: Record<string, string>
+  apiKeyEnv?: string
+  queryParam?: string
+  limitParam?: string
+  bodyTemplate?: string
+  resultsPath?: string
+  titlePath?: string
+  urlPath?: string
+  snippetPath?: string
+  location?: string
+  language?: string
+  page?: number
+  timeoutMs?: number
+  maxResults?: number
+  disabled?: boolean
+}
+
+export interface WebSearchConfig {
+  enabled?: boolean
+  defaultProvider?: string
+  providers?: WebSearchProviderConfig[]
+}
+
 export interface AppSettings {
   ssh: SSHConfig
   sandbox: SandboxConfig
@@ -46,7 +74,7 @@ export interface AppSettings {
   }
   llm: LLMConfig
   mcp: { servers: MCPServerConfig[] }
-  agent: { maxIterations: number }
+  agent: { maxIterations: number; webSearch?: WebSearchConfig }
 }
 
 export interface FileInfo {

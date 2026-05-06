@@ -8,15 +8,16 @@
 - 所属模块: model
 
 ## 2. 核心职责
-- 验证 `SessionData` 对旧版持久化数据的向后兼容性。
+- 验证 `SessionData` 对旧版持久化数据的向后兼容性，以及 normalize copy / permission grants 语义。
 
 ## 3. 输入与输出
-- 输入来源: 不含 `DiscoveredTools` 的旧版 JSON payload
+- 输入来源: 不含新增字段的旧版 JSON payload、包含 plan/permission state 的 v4 payload
 - 输出结果: `SessionData` 解码结果
 
 ## 4. 关键测试覆盖
 - 老 payload 缺少 `discoveredTools` 字段时仍能成功反序列化
 - 缺失字段会回退为空集合，而不是破坏读取
+- normalize 会复制 plan state 和 `PermissionGrants`，调用方修改 normalized copy 不会污染原始输入
 
 ## 5. 依赖关系
 - 内部依赖: `session_data.go`

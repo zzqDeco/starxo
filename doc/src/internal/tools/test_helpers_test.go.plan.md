@@ -18,6 +18,7 @@
 
 ## 4. 关键实现细节
 - `stubCatalogEntry(...)` 默认构造一个可搜索、可执行、deferred、MCP action 的 catalog entry
+- `stubDeferredBuiltinSample(...)` 构造 read-only trusted 的非 MCP deferred sample，匹配 Runtime V2 plan-mode gate
 - 该辅助使 `deferred_state_test.go`、`dynamic_mcp_surface_test.go`、`tool_search_test.go` 的构造保持一致
 
 ## 5. 依赖关系
