@@ -40,12 +40,12 @@ function isRunningStatus(status?: string) {
 }
 
 function isDoneStatus(status?: string) {
-  return status === 'completed' || status === 'stopped'
+  return status === 'completed' || status === 'stopped' || status === 'killed'
 }
 
 function statusType(status?: string) {
   if (status === 'failed') return 'error'
-  if (status === 'stopped') return 'warning'
+  if (status === 'stopped' || status === 'killed') return 'warning'
   if (status === 'completed') return 'success'
   if (isRunningStatus(status)) return 'info'
   return 'default'
@@ -54,7 +54,7 @@ function statusType(status?: string) {
 function statusIcon(status?: string) {
   if (status === 'completed') return CheckmarkCircle
   if (status === 'failed') return AlertCircle
-  if (status === 'stopped') return StopCircle
+  if (status === 'stopped' || status === 'killed') return StopCircle
   if (isRunningStatus(status)) return Reload
   return Time
 }
@@ -501,7 +501,8 @@ onUnmounted(() => {
   color: var(--accent-rose);
 }
 
-.task-status-icon.stopped {
+.task-status-icon.stopped,
+.task-status-icon.killed {
   color: var(--accent-amber);
 }
 

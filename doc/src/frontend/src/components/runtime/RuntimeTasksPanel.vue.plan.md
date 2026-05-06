@@ -28,7 +28,7 @@
   - `truncated` 时展示提示，完整输出仍保留在后端 output file。
 - 停止任务:
   - 仅对 `running` / `pending` 状态显示停止按钮。
-  - 停止后刷新 snapshot 和输出。
+  - 停止后刷新 snapshot 和输出；后端取消成功时状态为 `killed`，前端按终止态展示和统计。
 
 ## 5. 依赖关系
 - 内部依赖: `sessionStore`、`useUiFeedback`、Wails `ChatService` bindings。
