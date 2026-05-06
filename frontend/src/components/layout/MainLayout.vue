@@ -17,6 +17,7 @@ const WorkspaceDrawer = defineAsyncComponent(() => import('@/components/files/Wo
 const ContainerDock = defineAsyncComponent(() => import('@/components/containers/ContainerDock.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
 const CommandPalette = defineAsyncComponent(() => import('@/components/palette/CommandPalette.vue'))
+const RuntimeTasksPanel = defineAsyncComponent(() => import('@/components/runtime/RuntimeTasksPanel.vue'))
 
 const { t } = useI18n()
 const sessionStore = useSessionStore()
@@ -27,6 +28,7 @@ const showWorkspaceDrawer = ref(false)
 const showMobileSidebar = ref(false)
 const showResponsiveDock = ref(false)
 const showPalette = ref(false)
+const showRuntimeTasks = ref(false)
 
 useKeybinds([
   { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = !showPalette.value }, allowInInput: true },
@@ -111,8 +113,16 @@ function toggleWorkspaceDrawer() {
   showWorkspaceDrawer.value = !showWorkspaceDrawer.value
 }
 
+function toggleRuntimeTasks() {
+  showRuntimeTasks.value = !showRuntimeTasks.value
+}
+
 function openWorkspaceDrawer() {
   showWorkspaceDrawer.value = true
+}
+
+function openRuntimeTasks() {
+  showRuntimeTasks.value = true
 }
 
 function toggleMobileSidebar() {
@@ -163,8 +173,10 @@ onUnmounted(() => {
       <Header
         @toggle-settings="toggleSettings"
         @toggle-workspace-drawer="toggleWorkspaceDrawer"
+        @toggle-runtime-tasks="toggleRuntimeTasks"
         @open-command-palette="openCommandPalette"
         :workspace-drawer-visible="showWorkspaceDrawer"
+        :runtime-tasks-visible="showRuntimeTasks"
       />
 
       <div class="content-area">
@@ -241,10 +253,12 @@ onUnmounted(() => {
   </div>
 
   <SettingsPanel v-model:show="showSettings" />
+  <RuntimeTasksPanel v-model:show="showRuntimeTasks" />
   <CommandPalette
     v-model:show="showPalette"
     @open-settings="showSettings = true"
     @open-workspace="openWorkspaceDrawer"
+    @open-runtime-tasks="openRuntimeTasks"
   />
 </template>
 

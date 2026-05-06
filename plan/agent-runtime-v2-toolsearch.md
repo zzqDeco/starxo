@@ -45,6 +45,7 @@
 ## Runtime Tasks
 - Background `Bash` calls create managed runtime tasks.
 - Background `Agent` calls use the same runtime task manager and output files.
+- The frontend Runtime Tasks panel lists active-session tasks, reads output, copies output, refreshes status, and stops running tasks.
 - `ChatService` exposes:
   - `ListRuntimeTasks(sessionID)`
   - `ReadRuntimeTaskOutput(taskID, offset, limit)`
@@ -80,7 +81,6 @@
 - Read-only trusted tools bypass the queue; no UI context fails closed for risky tools.
 
 ## Follow-Up Work
-- Add frontend Runtime Tasks panel.
 - Add diagnostics/install guidance for missing language servers.
 - Add writable LSP operations such as rename, format, and code action apply behind the permission queue.
 - Add token-aware compaction that preserves discovered tools, active tasks, permissions, todos, file read state, and diff summaries.

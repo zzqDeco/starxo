@@ -171,6 +171,8 @@ wails dev
 
 高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化。
 
+后台 Bash 和 Agent 任务可在运行任务面板中查看。面板按当前会话列出任务，支持刷新状态/输出、复制输出，并可通过 Runtime V2 task APIs 停止运行中的任务。
+
 ### 生产构建
 
 ```bash

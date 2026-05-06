@@ -16,6 +16,7 @@
 - HTTP provider 可通过自定义 query/limit 参数调用 JSON endpoint，并按配置路径提取 title/url/snippet。
 - TinyFish provider 使用 `X-API-Key` header、`query/location/language/page` 参数，不发送非官方 `limit` 参数，并解析官方 `results` 响应结构。
 - TinyFish provider 缺少 API key 环境变量时返回明确错误。
+- `TINYFISH_API_KEY` 存在时运行真实 TinyFish Search API smoke test；未设置时自动 skip。
 - POST provider 可使用 body template 和 `resultsPath` 提取数组结果。
 
 ## 5. 维护建议

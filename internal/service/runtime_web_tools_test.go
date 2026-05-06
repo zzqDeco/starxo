@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -141,6 +142,36 @@ func TestRunWebSearchTinyFishRequiresAPIKey(t *testing.T) {
 	}, webSearchInput{Query: "starxo"})
 	if err == nil || !strings.Contains(err.Error(), "STARXO_TINYFISH_MISSING_KEY") {
 		t.Fatalf("expected missing api key error, got %v", err)
+	}
+}
+
+func TestRunWebSearchTinyFishLive(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("TINYFISH_API_KEY")) == "" {
+		t.Skip("TINYFISH_API_KEY is not set")
+	}
+
+	enabled := true
+	out, err := runWebSearch(t.Context(), config.WebSearchConfig{
+		Enabled:         &enabled,
+		DefaultProvider: "tinyfish",
+		Providers: []config.WebSearchProviderConfig{{
+			Name:     "tinyfish",
+			Type:     "tinyfish",
+			Location: "US",
+			Language: "en",
+		}},
+	}, webSearchInput{Query: "OpenAI API documentation", Limit: 2})
+	if err != nil {
+		t.Fatalf("run live tinyfish search: %v", err)
+	}
+	if out.Provider != "tinyfish" {
+		t.Fatalf("unexpected provider %q", out.Provider)
+	}
+	if len(out.Results) == 0 {
+		t.Fatalf("expected live tinyfish results, got %#v", out)
+	}
+	if strings.Contains(out.URL, "limit=") || !strings.Contains(out.URL, "query=") {
+		t.Fatalf("unexpected tinyfish request URL %q", out.URL)
 	}
 }
 

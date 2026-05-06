@@ -9,7 +9,7 @@
 
 ## 2. 核心职责
 - 应用主布局容器，组织为“左侧会话栏 + 中央执行画布 + 右侧运行时入口”。
-- 负责工作区抽屉、命令面板、面板宽度拖拽持久化和设置面板显隐。
+- 负责工作区抽屉、运行任务面板、命令面板、面板宽度拖拽持久化和设置面板显隐。
 - 监听工作区路径桥接事件，确保时间线里的文件路径能打开工作区抽屉。
 
 ## 3. 输入与输出
@@ -20,6 +20,7 @@
 - 内部状态:
   - `showSettings` — 设置面板开关
   - `showWorkspaceDrawer` — 工作区抽屉开关
+  - `showRuntimeTasks` — Runtime Tasks 面板开关
   - `showPalette` — 命令面板开关
   - `leftWidth` — 左侧栏宽度（默认 240）
   - `containerDockWidth` — 右侧容器区宽度（默认 360）
@@ -31,7 +32,7 @@
   - 中央 `Header + ChatPanel`
   - `WorkspaceDrawer` 以覆盖层方式挂在聊天区内
   - 右侧 `ContainerDock` 常驻
-  - SettingsPanel / CommandPalette / WorkspaceDrawer / ContainerDock 使用 async component 降低首包
+  - SettingsPanel / CommandPalette / WorkspaceDrawer / ContainerDock / RuntimeTasksPanel 使用 async component 降低首包
   - `onWorkspaceOpenPath()` 打开 WorkspaceDrawer；路径选择由 WorkspacePanel 消费 pending path
 - 拖拽持久化 key:
   - `starxo-left-panel-width`
@@ -40,14 +41,14 @@
 ## 5. 依赖关系
 - 内部依赖:
   - `Header.vue`, `Sidebar.vue`, `SplitHandle.vue`
-  - `ChatPanel.vue`, async `WorkspaceDrawer.vue`, async `ContainerDock.vue`, async `SettingsPanel.vue`, async `CommandPalette.vue`
+  - `ChatPanel.vue`, async `WorkspaceDrawer.vue`, async `ContainerDock.vue`, async `SettingsPanel.vue`, async `CommandPalette.vue`, async `RuntimeTasksPanel.vue`
   - `@/composables/useWorkspaceBridge`
 - 外部依赖: `vue`、`@vueuse/core`
 
 ## 6. 变更影响面
 - 右侧旧 Tab 面板（Terminal/Files/Containers）已移除。
 - 工作区从常驻区域改为按需抽屉，容器控制改为常驻 Dock。
-- Header 新增 `open-command-palette` 事件；CommandPalette 新增 `open-workspace` 事件。
+- Header 新增 `toggle-runtime-tasks` 事件；CommandPalette 新增 `open-runtime-tasks` 事件。
 
 ## 7. 维护建议
 - 若新增右侧常驻区，优先通过 `SplitHandle` 接入并复用宽度持久化。

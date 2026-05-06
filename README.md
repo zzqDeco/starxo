@@ -171,6 +171,8 @@ Plan mode keeps only read-only trusted tools visible. Writable tools and shell e
 
 Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data.
 
+Background Bash and Agent jobs can be inspected from the Runtime Tasks panel. The panel lists tasks for the active session, refreshes task status/output, supports copying output, and can stop running tasks through the Runtime V2 task APIs.
+
 ### Production Build
 
 ```bash

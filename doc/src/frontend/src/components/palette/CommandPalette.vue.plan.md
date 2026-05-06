@@ -8,11 +8,11 @@
 - 所属模块: frontend/src/components/palette
 
 ## 2. 核心职责
-- 全局命令面板，提供键盘优先的会话、设置、工作区、SSH 连接和模式切换入口。
+- 全局命令面板，提供键盘优先的会话、设置、工作区、运行任务、SSH 连接和模式切换入口。
 
 ## 3. 输入与输出
 - 输入来源: `Props.show`、session/chat/connection stores
-- 输出结果: `update:show`、`open-settings`、`open-workspace`
+- 输出结果: `update:show`、`open-settings`、`open-workspace`、`open-runtime-tasks`
 
 ## 4. 关键实现细节
 - 通过 `useFocusTrap` 保持弹窗内键盘焦点。
@@ -22,4 +22,4 @@
 
 ## 5. 变更影响面
 - 顶部 Header 的命令入口和 `Cmd/Ctrl+K` 均打开该组件。
-- 新增工作区打开命令，需要父组件处理 `open-workspace`。
+- 新增工作区和运行任务打开命令，需要父组件处理 `open-workspace` / `open-runtime-tasks`。
