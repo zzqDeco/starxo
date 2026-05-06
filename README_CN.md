@@ -13,6 +13,8 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **中断/恢复** — 支持 `ask_user` / `ask_choice` 工具暂停等待用户输入，状态通过 CheckPointStore 保持
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
+- **Runtime V2 工具面** — 始终可用的 `ToolSearch`、直接文件/搜索/编辑/shell 工具、动态 `Agent` 委派、worktree 隔离、deferred LSP/Skill/Web/Notebook 工具，以及长任务后台输出管理
+- **工具权限审批** — 高风险 runtime 和 MCP 工具调用会弹出审批，可拒绝、允许一次或本会话允许
 - **MCP 协议** — 支持 Model Context Protocol 扩展工具（stdio/SSE 传输）
 - **多 LLM 支持** — OpenAI / DeepSeek / 火山引擎 Ark / Ollama
 - **多语言界面** — 中文/英文（vue-i18n）
@@ -73,6 +75,10 @@ starxo/
 │   │
 │   ├── service/                     # Wails 绑定服务（前端 API）
 │   │   ├── chat.go                  #   ChatService：Per-Session Agent 生命周期（SessionRun）、消息收发、流式输出
+│   │   ├── runtime_agent_tool.go    #   Runtime V2 动态 Agent 工具
+│   │   ├── runtime_lsp_manager.go   #   Runtime V2 常驻 language server 管理
+│   │   ├── runtime_workspaces.go    #   Runtime V2 会话级 worktree workspace 管理
+│   │   ├── runtime_web_tools.go     #   Runtime V2 WebFetch/WebSearch 工具实现
 │   │   ├── sandbox_svc.go           #   SandboxService：连接/断开/重连、健康监控（RWMutex 并发安全）
 │   │   ├── session_svc.go           #   SessionService：会话 CRUD、多会话状态协调
 │   │   ├── settings_svc.go          #   SettingsService：配置管理、连接测试
@@ -90,6 +96,9 @@ starxo/
 │   ├── tools/                       # Agent 工具定义
 │   │   ├── registry.go              #   ToolRegistry 中央注册表
 │   │   ├── builtin.go               #   内置工具注册
+│   │   ├── runtime_tools.go         #   Runtime V2 工具：Bash/Read/Write/Edit/Glob/Grep/tasks
+│   │   ├── runtime_deferred_tools.go #  Runtime V2 deferred 工具：LSP/Skill/Notebook/Web metadata
+│   │   ├── tool_search.go           #   Runtime-wide deferred 工具发现
 │   │   ├── mcp.go                   #   MCP 服务器连接 + 工具加载
 │   │   ├── followup.go              #   ask_user 中断工具
 │   │   ├── choice.go                #   ask_choice 中断工具
@@ -149,6 +158,20 @@ wails dev
 ```
 
 启动后自动开启 Vite HMR 前端热重载和 Go 后端热重载。前端开发服务器 URL 自动检测，Go 开发服务器运行在 `http://localhost:34115`。
+
+### Agent Runtime V2
+
+顶层 Agent 现在使用更小的 always-loaded runtime 工具面，并通过 `ToolSearch` 按需发现 deferred tools。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
+
+当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 worktree 隔离。
+
+`WebSearch` 默认使用 DuckDuckGo HTML 搜索，也可以通过 `agent.webSearch.providers` 切换 provider。`type: "tinyfish"` 是专用 TinyFish Search API 适配器，对齐 `GET https://api.search.tinyfish.ai`，默认从 `TINYFISH_API_KEY` 读取 API key 并写入 `X-API-Key`，支持 TinyFish `query`、`location`、`language`、`page` 参数，并解析 `results[].title/url/snippet`。`type: "http"` 继续用于自定义 GET/POST provider，支持 headers、body template 和 JSON path 提取。
+
+计划模式只暴露 read-only trusted 工具；写入、编辑和 shell 执行会在计划批准后才进入可见工具面。
+
+高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化。
+
+后台 Bash 和 Agent 任务可在运行任务面板中查看。面板按当前会话列出任务，支持刷新状态/输出、复制输出，并可通过 Runtime V2 task APIs 停止运行中的任务。
 
 ### 生产构建
 

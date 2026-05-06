@@ -23,9 +23,10 @@
 - `effectiveDiscovered = discoveredTools ∩ current catalog ∩ loadablePoolForMode`
 - `CurrentLoadedTools` 仍表示“当前直接可用的已加载集合”：
   - 已加载 deferred entries
-  - 全部 `AlwaysLoad == true` entries
+  - 当前 mode / permission 允许的 `AlwaysLoad == true` entries
 - `ShouldDefer == false && AlwaysLoad == false` 的 entry 在这一层只被排除出 deferred activation，不在本文件额外定义其直接暴露策略
-- `ReadOnlyTrusted` / MCP read-only gate 仍只作用于 MCP deferred pool；非 MCP hidden/test-only sample 不在这套 gate 内
+- `ReadOnlyTrusted` / permission gate 作用于所有 runtime catalog entry；plan mode 下 writable always-load 工具不会进入 `CurrentLoadedTools`
+- Runtime V2 之后，本文件仍保留 `DeferredMCPState` 命名兼容旧代码，但语义已经升级为 generic deferred/runtime surface
 
 ## 5. 依赖关系
 - 内部依赖: `permissions.go`、`catalog.go`

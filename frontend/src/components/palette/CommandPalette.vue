@@ -11,7 +11,7 @@ import { useUiFeedback } from '@/composables/useUiFeedback'
 import { SetMode } from '../../../wailsjs/go/service/ChatService'
 import {
   Add, Settings, SwapHorizontal, ChatbubbleEllipses, Flash, Power, Search, Close,
-  FolderOpen,
+  FolderOpen, List,
 } from '@vicons/ionicons5'
 
 const props = defineProps<{ show: boolean }>()
@@ -19,6 +19,7 @@ const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
   (e: 'open-settings'): void
   (e: 'open-workspace'): void
+  (e: 'open-runtime-tasks'): void
 }>()
 
 const { t } = useI18n()
@@ -79,6 +80,14 @@ const baseCommands = computed<Command[]>(() => {
       icon: FolderOpen,
       group: 'action',
       run: () => emit('open-workspace'),
+    },
+    {
+      id: 'open-runtime-tasks',
+      title: t('palette.openRuntimeTasks'),
+      hint: t('runtimeTasks.title'),
+      icon: List,
+      group: 'action',
+      run: () => emit('open-runtime-tasks'),
     },
     {
       id: 'toggle-mode',

@@ -19,6 +19,7 @@
 
 ## 4. 关键测试覆盖
 - `WrapModel(...)` 只暴露当前 loaded tools 和非 catalog direct tools
+- `tool_search` 作为 Runtime V2 基础能力始终保留在 visible tools 中
 - announcement 只显示 canonical names，不泄漏 search hint
 - 已加载的 deferred tool 直接可调用
 - 未加载但可搜索的 deferred tool 会被引导先用 `tool_search`

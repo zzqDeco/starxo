@@ -1,13 +1,13 @@
 <script lang="ts" setup>
-import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
-import { onMounted } from 'vue'
+import { NButton, NCard, NCode, NConfigProvider, NDialogProvider, NMessageProvider, NModal, NSpace, NTag, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
 import MainLayout from '@/components/layout/MainLayout.vue'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useContainerStore } from '@/stores/containerStore'
-import { GetMode } from '../wailsjs/go/service/ChatService'
+import { ApproveToolPermission, DenyToolPermission, GetMode } from '../wailsjs/go/service/ChatService'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
 import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent, SessionRunState } from '@/types/message'
@@ -17,6 +17,23 @@ const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const containerStore = useContainerStore()
+
+interface RuntimePermissionRequest {
+  requestId: string
+  sessionId?: string
+  toolName: string
+  title?: string
+  description?: string
+  toolClass?: string
+  source?: string
+  risk: string
+  input?: string
+  createdAt: number
+}
+
+const pendingPermission = ref<RuntimePermissionRequest | null>(null)
+const permissionBusy = ref(false)
+const permissionVisible = computed(() => pendingPermission.value !== null)
 
 // Keep palette / radius values in sync with `:root` in src/style.css.
 // Naive UI resolves theme values at component setup, so CSS custom properties
@@ -80,6 +97,30 @@ const themeOverrides: GlobalThemeOverrides = {
 function isActiveSession(data: any): boolean {
   const sid = data?.sessionId
   return !sid || sid === sessionStore.activeSessionId
+}
+
+function permissionRiskType(risk?: string) {
+  if (risk === 'execute' || risk === 'destructive') return 'warning'
+  if (risk === 'write') return 'info'
+  return 'default'
+}
+
+async function resolvePermission(decision: 'allow_once' | 'allow_session' | 'deny') {
+  const request = pendingPermission.value
+  if (!request || permissionBusy.value) return
+  permissionBusy.value = true
+  try {
+    if (decision === 'deny') {
+      await DenyToolPermission(request.requestId)
+    } else {
+      await ApproveToolPermission(request.requestId, decision)
+    }
+    pendingPermission.value = null
+  } catch (e) {
+    console.error('Failed to resolve permission request:', e)
+  } finally {
+    permissionBusy.value = false
+  }
 }
 
 /** Restore messages from persisted data into chatStore */
@@ -317,6 +358,16 @@ onMounted(async () => {
     chatStore.setMode(data.mode)
     chatStore.setGenerating(data.running, data.currentAgent || '')
   })
+
+  EventsOn('runtime:permission_request', (data: RuntimePermissionRequest) => {
+    if (!data || !isActiveSession(data)) return
+    pendingPermission.value = data
+  })
+
+  EventsOn('runtime:permission_canceled', (data: { requestId?: string }) => {
+    if (!data?.requestId || pendingPermission.value?.requestId !== data.requestId) return
+    pendingPermission.value = null
+  })
 })
 </script>
 
@@ -325,6 +376,42 @@ onMounted(async () => {
     <NMessageProvider>
       <NDialogProvider>
         <MainLayout />
+        <NModal :show="permissionVisible" preset="card" class="permission-modal" :mask-closable="false">
+          <template #header>
+            <div class="permission-title">
+              <span>{{ pendingPermission?.title || pendingPermission?.toolName }}</span>
+              <NTag size="small" :type="permissionRiskType(pendingPermission?.risk)">
+                {{ pendingPermission?.risk || 'permission' }}
+              </NTag>
+            </div>
+          </template>
+          <NCard embedded :bordered="false" class="permission-card">
+            <div class="permission-meta">
+              <span>{{ pendingPermission?.source || 'runtime' }}</span>
+              <span>{{ pendingPermission?.toolClass || 'tool' }}</span>
+              <span>{{ pendingPermission?.toolName }}</span>
+            </div>
+            <p v-if="pendingPermission?.description" class="permission-description">
+              {{ pendingPermission.description }}
+            </p>
+            <NCode
+              v-if="pendingPermission?.input"
+              class="permission-input"
+              :code="pendingPermission.input"
+              language="json"
+              word-wrap
+            />
+          </NCard>
+          <template #footer>
+            <NSpace justify="end">
+              <NButton :disabled="permissionBusy" @click="resolvePermission('deny')">拒绝</NButton>
+              <NButton :loading="permissionBusy" @click="resolvePermission('allow_once')">允许一次</NButton>
+              <NButton type="primary" :loading="permissionBusy" @click="resolvePermission('allow_session')">
+                本会话允许
+              </NButton>
+            </NSpace>
+          </template>
+        </NModal>
       </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
@@ -335,5 +422,42 @@ onMounted(async () => {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+}
+
+.permission-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.permission-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.permission-card {
+  background: #0b1220;
+}
+
+.permission-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #94a3b8;
+  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12px;
+}
+
+.permission-description {
+  margin: 12px 0;
+  color: #d9e2ef;
+  line-height: 1.5;
+}
+
+.permission-input {
+  max-height: 260px;
+  overflow: auto;
 }
 </style>

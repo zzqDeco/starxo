@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import { NButton, NTooltip, NIcon } from 'naive-ui'
-import { Settings, FolderOpen, Search, Flash } from '@vicons/ionicons5'
+import { Settings, FolderOpen, Search, Flash, List } from '@vicons/ionicons5'
 import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chatStore'
@@ -16,11 +16,13 @@ const modeLabel = computed(() => chatStore.agentMode === 'plan' ? t('chat.modePl
 
 defineProps<{
   workspaceDrawerVisible: boolean
+  runtimeTasksVisible: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle-settings'): void
   (e: 'toggle-workspace-drawer'): void
+  (e: 'toggle-runtime-tasks'): void
   (e: 'open-command-palette'): void
 }>()
 
@@ -57,6 +59,24 @@ function toggleLocale() {
 
     <div class="header-right">
       <ConnectionStatus />
+
+      <NTooltip trigger="hover" placement="bottom">
+        <template #trigger>
+          <NButton
+            quaternary
+            circle
+            size="small"
+            class="header-btn"
+            :aria-label="runtimeTasksVisible ? t('header.runtimeTasksClose') : t('header.runtimeTasksOpen')"
+            @click="emit('toggle-runtime-tasks')"
+          >
+            <template #icon>
+              <List />
+            </template>
+          </NButton>
+        </template>
+        {{ runtimeTasksVisible ? t('header.runtimeTasksClose') : t('header.runtimeTasksOpen') }}
+      </NTooltip>
 
       <NTooltip trigger="hover" placement="bottom">
         <template #trigger>

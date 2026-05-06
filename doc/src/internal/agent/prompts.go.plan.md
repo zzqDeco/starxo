@@ -18,8 +18,8 @@
 ## 4. 关键实现细节
 - 结构体/接口定义: 无
 - 导出函数/方法:
-  - `DeepAgentPrompt(ac AgentContext) string`: 生成核心代理提示词，定义了直接工具（ask_user、ask_choice、write_todos、update_todo、notify_user）和子代理（code_writer、code_executor、file_manager）的使用规则及决策逻辑
-  - `DeepAgentPlanPrompt(ac AgentContext) string`: 生成计划模式下的严格编排提示词，约束主代理仅负责规划/委派/验收，并明确 task list 工具所有权
+  - `DeepAgentPrompt(ac AgentContext) string`: 生成核心代理提示词，定义了直接工具（ask_user、ask_choice、write_todos、update_todo、notify_user、Runtime V2 core tools）和子代理（code_writer、code_executor、file_manager）的使用规则及决策逻辑
+  - `DeepAgentPlanPrompt(ac AgentContext) string`: 生成计划模式下的严格编排提示词，约束主代理仅负责规划/委派/验收，并明确 read-only runtime tools 与 task list 工具所有权
   - `CodeWriterPrompt(ac AgentContext) string`: 生成代码编写代理提示词，强调使用 str_replace_editor、read_file、list_files 工具进行代码相关操作；包含 reasoning 指导（"Before each tool call, briefly explain what you are about to do and why"）
   - `CodeExecutorPrompt(ac AgentContext) string`: 生成代码执行代理提示词，定义 python_execute、shell_execute、read_file 工具的使用方式；包含 reasoning 指导
   - `FileManagerPrompt(ac AgentContext) string`: 生成文件管理代理提示词，使用 list_files、read_file、write_file 工具处理非代码文件和批量操作；包含 reasoning 指导
@@ -31,6 +31,12 @@
     - tool loading / unknown-tool / execution gating 的 wording 改成 generic deferred wording
     - MCP instructions 仍保持 MCP-specific wording
   - dev-only experimental deferred builtin sample 不需要额外 prompt 特判；它复用现有 generic deferred wording，仅在开发态被注册
+  - Runtime V2 直接工具说明：
+    - default mode 可优先使用 `Read` / `Grep` / `Glob` 做文件检查，使用 `Edit` / `Write` 做修改，使用 `Bash` 执行命令
+    - `Agent` 可用于边界清晰的子任务委派；耗时任务可使用 `background=true`
+    - 后台命令通过 `TaskOutput` / `TaskStop` 管理
+    - plan mode 只声明 read-only tools 和 `ExitPlanMode`，写入、编辑和 shell 工具需在计划批准后才可见
+    - deferred runtime tools 包含 `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`，需要时通过 `ToolSearch` 发现
 - Wails 绑定方法: 无
 - 事件发射: 无
 

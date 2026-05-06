@@ -3,17 +3,22 @@
 import {model} from '../models';
 import {agentctx} from '../models';
 import {service} from '../models';
+import {tools} from '../models';
 import {context} from '../models';
 import {sandbox} from '../models';
 import {time} from '../models';
 
 export function AddDiscoveredTool(arg1:string,arg2:model.DiscoveredToolRecord):Promise<boolean>;
 
+export function ApproveToolPermission(arg1:string,arg2:string):Promise<void>;
+
 export function BuildRunners():Promise<void>;
 
 export function ClearHistory():Promise<void>;
 
 export function CtxEngine():Promise<agentctx.Engine>;
+
+export function DenyToolPermission(arg1:string):Promise<void>;
 
 export function ExportSessionSnapshot(arg1:string):Promise<service.SessionSnapshot>;
 
@@ -33,7 +38,11 @@ export function IsRunning():Promise<boolean>;
 
 export function IsSessionRunning(arg1:string):Promise<boolean>;
 
+export function ListRuntimeTasks(arg1:string):Promise<Array<tools.RuntimeTaskSnapshot>>;
+
 export function PruneDiscoveredToolsForSave(arg1:string,arg2:Array<model.DiscoveredToolRecord>):Promise<Array<model.DiscoveredToolRecord>>;
+
+export function ReadRuntimeTaskOutput(arg1:string,arg2:number,arg3:number):Promise<tools.RuntimeTaskOutput>;
 
 export function RemoveSession(arg1:string):Promise<void>;
 
@@ -66,6 +75,8 @@ export function SetOnAgentDone(arg1:any):Promise<void>;
 export function SetSessionService(arg1:service.SessionService):Promise<void>;
 
 export function StopGeneration():Promise<void>;
+
+export function StopRuntimeTask(arg1:string):Promise<tools.RuntimeTaskSnapshot>;
 
 export function StopSessionGeneration(arg1:string):Promise<void>;
 

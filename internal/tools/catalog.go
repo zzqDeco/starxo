@@ -12,10 +12,15 @@ import (
 
 const (
 	ToolSourceBuiltin = "builtin"
+	ToolSourceRuntime = "runtime"
 	ToolSourceMCP     = "mcp"
 	ToolSourceCustom  = "custom"
 
 	ToolClassBuiltin     = "builtin"
+	ToolClassRuntime     = "runtime"
+	ToolClassRuntimeFile = "runtime_file"
+	ToolClassRuntimeExec = "runtime_exec"
+	ToolClassRuntimeTask = "runtime_task"
 	ToolClassMCPAction   = "mcp_action"
 	ToolClassMCPResource = "mcp_resource"
 

@@ -6,6 +6,10 @@ export function AddDiscoveredTool(arg1, arg2) {
   return window['go']['service']['ChatService']['AddDiscoveredTool'](arg1, arg2);
 }
 
+export function ApproveToolPermission(arg1, arg2) {
+  return window['go']['service']['ChatService']['ApproveToolPermission'](arg1, arg2);
+}
+
 export function BuildRunners() {
   return window['go']['service']['ChatService']['BuildRunners']();
 }
@@ -16,6 +20,10 @@ export function ClearHistory() {
 
 export function CtxEngine() {
   return window['go']['service']['ChatService']['CtxEngine']();
+}
+
+export function DenyToolPermission(arg1) {
+  return window['go']['service']['ChatService']['DenyToolPermission'](arg1);
 }
 
 export function ExportSessionSnapshot(arg1) {
@@ -54,8 +62,16 @@ export function IsSessionRunning(arg1) {
   return window['go']['service']['ChatService']['IsSessionRunning'](arg1);
 }
 
+export function ListRuntimeTasks(arg1) {
+  return window['go']['service']['ChatService']['ListRuntimeTasks'](arg1);
+}
+
 export function PruneDiscoveredToolsForSave(arg1, arg2) {
   return window['go']['service']['ChatService']['PruneDiscoveredToolsForSave'](arg1, arg2);
+}
+
+export function ReadRuntimeTaskOutput(arg1, arg2, arg3) {
+  return window['go']['service']['ChatService']['ReadRuntimeTaskOutput'](arg1, arg2, arg3);
 }
 
 export function RemoveSession(arg1) {
@@ -120,6 +136,10 @@ export function SetSessionService(arg1) {
 
 export function StopGeneration() {
   return window['go']['service']['ChatService']['StopGeneration']();
+}
+
+export function StopRuntimeTask(arg1) {
+  return window['go']['service']['ChatService']['StopRuntimeTask'](arg1);
 }
 
 export function StopSessionGeneration(arg1) {

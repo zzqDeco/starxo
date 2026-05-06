@@ -20,6 +20,7 @@ type SessionData struct {
 	Display                   []DisplayTurn              `json:"display"`                             // frontend-renderable timeline turns
 	Streaming                 *StreamingState            `json:"streaming,omitempty"`                 // non-nil when interrupted mid-stream
 	DiscoveredTools           []DiscoveredToolRecord     `json:"discoveredTools,omitempty"`           // MCP deferred discovery state
+	PermissionGrants          []RuntimePermissionGrant   `json:"permissionGrants,omitempty"`          // per-session runtime tool grants
 	DeferredAnnouncementState *DeferredAnnouncementState `json:"deferredAnnouncementState,omitempty"` // persisted deferred tools delta state
 	MCPInstructionsDeltaState *MCPInstructionsDeltaState `json:"mcpInstructionsDeltaState,omitempty"` // persisted MCP instructions summary state
 	Mode                      string                     `json:"mode,omitempty"`                      // persisted session mode
@@ -69,6 +70,15 @@ type DiscoveredToolRecord struct {
 	Server        string `json:"server"`
 	Kind          string `json:"kind"`
 	DiscoveredAt  int64  `json:"discoveredAt"`
+}
+
+// RuntimePermissionGrant persists a user-approved per-session tool grant.
+type RuntimePermissionGrant struct {
+	ToolName  string `json:"toolName"`
+	ToolClass string `json:"toolClass,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Decision  string `json:"decision"`
+	CreatedAt int64  `json:"createdAt"`
 }
 
 // DisplayTurn represents a single turn (user or assistant) in the chat timeline,
@@ -129,6 +139,7 @@ func NormalizeSessionData(data *SessionData) (*SessionData, []string) {
 		Display:                   cloneDisplayTurns(data.Display),
 		Streaming:                 CloneStreamingState(data.Streaming),
 		DiscoveredTools:           cloneDiscoveredToolRecords(data.DiscoveredTools),
+		PermissionGrants:          cloneRuntimePermissionGrants(data.PermissionGrants),
 		DeferredAnnouncementState: cloneDeferredAnnouncementState(data.DeferredAnnouncementState),
 		MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState),
 		Mode:                      data.Mode,
@@ -226,6 +237,19 @@ func cloneDiscoveredToolRecords(in []DiscoveredToolRecord) []DiscoveredToolRecor
 		return nil
 	}
 	out := make([]DiscoveredToolRecord, len(in))
+	copy(out, in)
+	return out
+}
+
+func CloneRuntimePermissionGrants(in []RuntimePermissionGrant) []RuntimePermissionGrant {
+	return cloneRuntimePermissionGrants(in)
+}
+
+func cloneRuntimePermissionGrants(in []RuntimePermissionGrant) []RuntimePermissionGrant {
+	if in == nil {
+		return nil
+	}
+	out := make([]RuntimePermissionGrant, len(in))
 	copy(out, in)
 	return out
 }

@@ -18,9 +18,11 @@
 
 ## 4. 关键测试覆盖
 - exact match 命中当前已加载工具时只返回 canonical，不写 discovery
+- output 会回传当前 `loaded` 工具列表
+- 空查询会返回包含 `tool_search` 的 loaded 列表，不写 discovery
 - alias 命中后仍返回 canonical names
 - `select:` 支持部分命中而不是全量失败
-- 零命中时才返回 `pending_mcp_servers`
+- 零命中时才返回 `pendingSources` 和兼容字段 `pending_mcp_servers`
 - always-loaded 工具 exact match 不会产生 discovery
 - keyword search 会写 discovery，并保留 `DiscoveredAt` 时间戳
 
