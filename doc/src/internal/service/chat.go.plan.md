@@ -139,7 +139,7 @@
   - `Agent` 作为 always-load runtime tool 注册，支持同步/后台子 agent 和 worktree 隔离
   - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册
   - runtime deferred tools 和 MCP deferred tools 共用 ToolSearch、session discovery 和 permission pipeline
-  - web tools 当前由本地应用进程执行 HTTP 请求；其他 runtime tools 使用远端 sandbox operator
+  - web tools 当前由本地应用进程执行 HTTP 请求，`WebSearch` provider 来自 `agent.webSearch` 配置；其他 runtime tools 使用远端 sandbox operator
   - `LSP` tool 会先尝试常驻 language server；server 缺失或启动失败时由 tools 层 fallback 到 `rg`/`sed`
 - Runtime workspace manager：
   - 按 sessionID 记录 active worktree

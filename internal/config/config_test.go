@@ -36,6 +36,9 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Agent defaults
 	assert.Equal(t, 30, cfg.Agent.MaxIterations)
+	require.NotNil(t, cfg.Agent.WebSearch.Enabled)
+	assert.True(t, *cfg.Agent.WebSearch.Enabled)
+	assert.Equal(t, "duckduckgo", cfg.Agent.WebSearch.DefaultProvider)
 
 	// MCP defaults (empty)
 	assert.Nil(t, cfg.MCP.Servers)

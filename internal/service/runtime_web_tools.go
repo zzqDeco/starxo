@@ -1,16 +1,21 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 
+	"starxo/internal/config"
 	"starxo/internal/tools"
 )
 
@@ -28,17 +33,19 @@ type webFetchOutput struct {
 }
 
 type webSearchInput struct {
-	Query string `json:"query" jsonschema:"description=search query"`
-	Limit int    `json:"limit,omitempty" jsonschema:"description=max result lines"`
+	Query    string `json:"query" jsonschema:"description=search query"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"description=max result lines"`
+	Provider string `json:"provider,omitempty" jsonschema:"description=optional configured provider name; defaults to settings agent.webSearch.defaultProvider"`
 }
 
 type webSearchOutput struct {
-	Query   string   `json:"query"`
-	URL     string   `json:"url"`
-	Results []string `json:"results"`
+	Query    string   `json:"query"`
+	Provider string   `json:"provider"`
+	URL      string   `json:"url"`
+	Results  []string `json:"results"`
 }
 
-func newRuntimeWebCatalogEntries() ([]tools.CatalogEntry, error) {
+func newRuntimeWebCatalogEntries(cfg config.WebSearchConfig) ([]tools.CatalogEntry, error) {
 	fetch, err := toolutils.InferTool(tools.RuntimeToolWebFetch,
 		"Fetch a URL with HTTP GET and return compact text.",
 		func(ctx context.Context, input webFetchInput) (webFetchOutput, error) {
@@ -48,9 +55,9 @@ func newRuntimeWebCatalogEntries() ([]tools.CatalogEntry, error) {
 		return nil, err
 	}
 	search, err := toolutils.InferTool(tools.RuntimeToolWebSearch,
-		"Search the web using DuckDuckGo HTML results and return compact links.",
+		"Search the web using the configured WebSearch provider and return compact results.",
 		func(ctx context.Context, input webSearchInput) (webSearchOutput, error) {
-			return runWebSearch(ctx, input)
+			return runWebSearch(ctx, cfg, input)
 		})
 	if err != nil {
 		return nil, err
@@ -101,10 +108,34 @@ func runWebFetch(ctx context.Context, input webFetchInput) (webFetchOutput, erro
 	}, nil
 }
 
-func runWebSearch(ctx context.Context, input webSearchInput) (webSearchOutput, error) {
+func runWebSearch(ctx context.Context, cfg config.WebSearchConfig, input webSearchInput) (webSearchOutput, error) {
 	if strings.TrimSpace(input.Query) == "" {
 		return webSearchOutput{}, fmt.Errorf("query is required")
 	}
+	if cfg.Enabled != nil && !*cfg.Enabled {
+		return webSearchOutput{}, fmt.Errorf("web search is disabled in settings")
+	}
+	providerName := strings.TrimSpace(input.Provider)
+	if providerName == "" {
+		providerName = strings.TrimSpace(cfg.DefaultProvider)
+	}
+	if providerName == "" {
+		providerName = "duckduckgo"
+	}
+	provider, ok := resolveWebSearchProvider(cfg, providerName)
+	if ok && provider.Disabled {
+		return webSearchOutput{}, fmt.Errorf("web search provider %q is disabled", providerName)
+	}
+	if ok {
+		return runConfiguredWebSearch(ctx, provider, input)
+	}
+	if !ok && !strings.EqualFold(providerName, "duckduckgo") {
+		return webSearchOutput{}, fmt.Errorf("web search provider %q is not configured", providerName)
+	}
+	return runDuckDuckGoWebSearch(ctx, input)
+}
+
+func runDuckDuckGoWebSearch(ctx context.Context, input webSearchInput) (webSearchOutput, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 8
@@ -126,7 +157,279 @@ func runWebSearch(ctx context.Context, input webSearchInput) (webSearchOutput, e
 			break
 		}
 	}
-	return webSearchOutput{Query: input.Query, URL: searchURL, Results: results}, nil
+	return webSearchOutput{Query: input.Query, Provider: "duckduckgo", URL: searchURL, Results: results}, nil
+}
+
+func resolveWebSearchProvider(cfg config.WebSearchConfig, name string) (config.WebSearchProviderConfig, bool) {
+	for _, provider := range cfg.Providers {
+		if strings.EqualFold(strings.TrimSpace(provider.Name), strings.TrimSpace(name)) {
+			return provider, true
+		}
+	}
+	return config.WebSearchProviderConfig{}, false
+}
+
+func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProviderConfig, input webSearchInput) (webSearchOutput, error) {
+	providerType := strings.ToLower(strings.TrimSpace(provider.Type))
+	if providerType == "" {
+		providerType = "http"
+	}
+	if providerType == "duckduckgo" {
+		return runDuckDuckGoWebSearch(ctx, input)
+	}
+	if providerType != "http" && providerType != "tinyfish" {
+		return webSearchOutput{}, fmt.Errorf("unsupported web search provider type %q", provider.Type)
+	}
+	if strings.TrimSpace(provider.Endpoint) == "" {
+		return webSearchOutput{}, fmt.Errorf("web search provider %s endpoint is required", provider.Name)
+	}
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = provider.MaxResults
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(provider.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+	timeout := time.Duration(provider.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+
+	endpoint := expandWebSearchTemplate(provider.Endpoint, input.Query, limit)
+	var body io.Reader
+	if method != http.MethodGet {
+		bodyText := provider.BodyTemplate
+		if strings.TrimSpace(bodyText) == "" {
+			payload, _ := json.Marshal(map[string]any{"query": input.Query, "limit": limit})
+			bodyText = string(payload)
+		}
+		body = bytes.NewBufferString(expandWebSearchTemplate(bodyText, input.Query, limit))
+	}
+	if method == http.MethodGet {
+		endpoint = appendWebSearchQuery(endpoint, provider, input.Query, limit)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, method, endpoint, body)
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	req.Header.Set("User-Agent", "Starxo/RuntimeV2")
+	if method != http.MethodGet && strings.TrimSpace(provider.BodyTemplate) == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range provider.Headers {
+		if strings.TrimSpace(k) != "" {
+			req.Header.Set(k, expandWebSearchTemplate(v, input.Query, limit))
+		}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message := strings.TrimSpace(compactHTML(string(data)))
+		if len(message) > 500 {
+			message = message[:500]
+		}
+		return webSearchOutput{}, fmt.Errorf("web search provider %s returned HTTP %d: %s", provider.Name, resp.StatusCode, message)
+	}
+	results := parseConfiguredWebSearchResults(data, provider, limit)
+	if len(results) == 0 {
+		results = fallbackWebSearchLines(string(data), limit)
+	}
+	return webSearchOutput{
+		Query:    input.Query,
+		Provider: provider.Name,
+		URL:      endpoint,
+		Results:  results,
+	}, nil
+}
+
+func appendWebSearchQuery(endpoint string, provider config.WebSearchProviderConfig, query string, limit int) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return endpoint
+	}
+	values := u.Query()
+	queryParam := provider.QueryParam
+	if queryParam == "" {
+		queryParam = "q"
+	}
+	limitParam := provider.LimitParam
+	if limitParam == "" {
+		limitParam = "limit"
+	}
+	if !hasWebSearchTemplatePlaceholder(endpoint, "query") && queryParam != "-" && values.Get(queryParam) == "" {
+		values.Set(queryParam, query)
+	}
+	if !hasWebSearchTemplatePlaceholder(endpoint, "limit") && limitParam != "-" && values.Get(limitParam) == "" {
+		values.Set(limitParam, strconv.Itoa(limit))
+	}
+	u.RawQuery = values.Encode()
+	return u.String()
+}
+
+func expandWebSearchTemplate(s string, query string, limit int) string {
+	queryJSON, _ := json.Marshal(query)
+	replacer := strings.NewReplacer(
+		"{query}", query,
+		"{{query}}", query,
+		"{query_json}", string(queryJSON),
+		"{{query_json}}", string(queryJSON),
+		"{query_url}", url.QueryEscape(query),
+		"{{query_url}}", url.QueryEscape(query),
+		"{limit}", strconv.Itoa(limit),
+		"{{limit}}", strconv.Itoa(limit),
+	)
+	return replacer.Replace(s)
+}
+
+func hasWebSearchTemplatePlaceholder(s string, name string) bool {
+	return strings.Contains(s, "{"+name+"}") ||
+		strings.Contains(s, "{{"+name+"}}") ||
+		strings.Contains(s, "{"+name+"_url}") ||
+		strings.Contains(s, "{{"+name+"_url}}") ||
+		strings.Contains(s, "{"+name+"_json}") ||
+		strings.Contains(s, "{{"+name+"_json}}")
+}
+
+func parseConfiguredWebSearchResults(data []byte, provider config.WebSearchProviderConfig, limit int) []string {
+	var decoded any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil
+	}
+	var candidates []any
+	if provider.ResultsPath != "" {
+		candidates = extractWebSearchCandidates(decoded, provider.ResultsPath)
+	} else {
+		for _, path := range []string{"results", "data.results", "data", "items", "organic_results"} {
+			candidates = extractWebSearchCandidates(decoded, path)
+			if len(candidates) > 0 {
+				break
+			}
+		}
+		if len(candidates) == 0 {
+			candidates = extractWebSearchCandidates(decoded, "")
+		}
+	}
+	results := make([]string, 0, min(limit, len(candidates)))
+	for _, candidate := range candidates {
+		line := formatWebSearchCandidate(candidate, provider)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		results = append(results, line)
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results
+}
+
+func extractWebSearchCandidates(decoded any, path string) []any {
+	target := decoded
+	if strings.TrimSpace(path) != "" {
+		var ok bool
+		target, ok = valueAtDottedPath(decoded, path)
+		if !ok {
+			return nil
+		}
+	}
+	switch v := target.(type) {
+	case []any:
+		return v
+	case map[string]any:
+		return []any{v}
+	default:
+		return []any{v}
+	}
+}
+
+func formatWebSearchCandidate(candidate any, provider config.WebSearchProviderConfig) string {
+	switch v := candidate.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case map[string]any:
+		title := firstWebSearchString(v, provider.TitlePath, "title", "name")
+		link := firstWebSearchString(v, provider.URLPath, "url", "link", "href")
+		snippet := firstWebSearchString(v, provider.SnippetPath, "snippet", "content", "description", "text")
+		parts := make([]string, 0, 3)
+		if title != "" {
+			parts = append(parts, title)
+		}
+		if link != "" {
+			parts = append(parts, link)
+		}
+		if snippet != "" {
+			parts = append(parts, snippet)
+		}
+		return strings.Join(parts, " - ")
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+}
+
+func firstWebSearchString(v map[string]any, paths ...string) string {
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		if value, ok := valueAtDottedPath(v, path); ok {
+			text := strings.TrimSpace(fmt.Sprint(value))
+			if text != "" && text != "<nil>" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func valueAtDottedPath(v any, path string) (any, bool) {
+	current := v
+	for _, part := range strings.Split(path, ".") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = m[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func fallbackWebSearchLines(content string, limit int) []string {
+	lines := nonEmptyRuntimeLines(compactHTML(content))
+	results := make([]string, 0, min(limit, len(lines)))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		results = append(results, line)
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results
 }
 
 var htmlTagRE = regexp.MustCompile(`<[^>]+>`)

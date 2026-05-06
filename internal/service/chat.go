@@ -2851,7 +2851,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred runtime tools: %w", err)
 	}
-	runtimeWebEntries, err := newRuntimeWebCatalogEntries()
+	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred web tools: %w", err)
