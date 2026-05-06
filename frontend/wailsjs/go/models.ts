@@ -29,8 +29,91 @@ export namespace agentctx {
 
 export namespace config {
 
+	export class WebSearchProviderConfig {
+	    name: string;
+	    type?: string;
+	    endpoint?: string;
+	    method?: string;
+	    headers?: Record<string, string>;
+	    apiKeyEnv?: string;
+	    queryParam?: string;
+	    limitParam?: string;
+	    bodyTemplate?: string;
+	    resultsPath?: string;
+	    titlePath?: string;
+	    urlPath?: string;
+	    snippetPath?: string;
+	    location?: string;
+	    language?: string;
+	    page?: number;
+	    timeoutMs?: number;
+	    maxResults?: number;
+	    disabled?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new WebSearchProviderConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.endpoint = source["endpoint"];
+	        this.method = source["method"];
+	        this.headers = source["headers"];
+	        this.apiKeyEnv = source["apiKeyEnv"];
+	        this.queryParam = source["queryParam"];
+	        this.limitParam = source["limitParam"];
+	        this.bodyTemplate = source["bodyTemplate"];
+	        this.resultsPath = source["resultsPath"];
+	        this.titlePath = source["titlePath"];
+	        this.urlPath = source["urlPath"];
+	        this.snippetPath = source["snippetPath"];
+	        this.location = source["location"];
+	        this.language = source["language"];
+	        this.page = source["page"];
+	        this.timeoutMs = source["timeoutMs"];
+	        this.maxResults = source["maxResults"];
+	        this.disabled = source["disabled"];
+	    }
+	}
+	export class WebSearchConfig {
+	    enabled?: boolean;
+	    defaultProvider?: string;
+	    providers?: WebSearchProviderConfig[];
+
+	    static createFrom(source: any = {}) {
+	        return new WebSearchConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.defaultProvider = source["defaultProvider"];
+	        this.providers = this.convertValues(source["providers"], WebSearchProviderConfig);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AgentConfig {
 	    maxIterations: number;
+	    webSearch: WebSearchConfig;
 
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -39,7 +122,26 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.maxIterations = source["maxIterations"];
+	        this.webSearch = this.convertValues(source["webSearch"], WebSearchConfig);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class MCPServerConfig {
 	    name: string;
@@ -221,6 +323,8 @@ export namespace config {
 		    return a;
 		}
 	}
+
+
 
 
 

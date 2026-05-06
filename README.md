@@ -165,7 +165,7 @@ The top-level agent now receives a smaller always-loaded runtime tool surface an
 
 Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `Agent` can run focused subagents synchronously or in the background, and can request worktree isolation for bounded tasks.
 
-`WebSearch` defaults to DuckDuckGo HTML search and can be redirected to a custom HTTP/TinyFish-style provider in `agent.webSearch.providers`. Custom providers support GET/POST, headers, body templates, and JSON path extraction for result arrays and title/url/snippet fields.
+`WebSearch` defaults to DuckDuckGo HTML search and can be redirected through `agent.webSearch.providers`. `type: "tinyfish"` is a dedicated TinyFish Search API adapter for `GET https://api.search.tinyfish.ai` with `X-API-Key` read from `TINYFISH_API_KEY` by default; it supports TinyFish `query`, `location`, `language`, and `page` parameters and parses `results[].title/url/snippet`. `type: "http"` remains available for custom GET/POST providers with headers, body templates, and JSON path extraction.
 
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 

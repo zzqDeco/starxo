@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,6 +37,9 @@ type webSearchInput struct {
 	Query    string `json:"query" jsonschema:"description=search query"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"description=max result lines"`
 	Provider string `json:"provider,omitempty" jsonschema:"description=optional configured provider name; defaults to settings agent.webSearch.defaultProvider"`
+	Location string `json:"location,omitempty" jsonschema:"description=optional country code for providers that support geo-targeting, for example US or GB"`
+	Language string `json:"language,omitempty" jsonschema:"description=optional language code for providers that support language targeting, for example en or fr"`
+	Page     int    `json:"page,omitempty" jsonschema:"description=optional zero-based page number for providers that support pagination"`
 }
 
 type webSearchOutput struct {
@@ -129,6 +133,9 @@ func runWebSearch(ctx context.Context, cfg config.WebSearchConfig, input webSear
 	if ok {
 		return runConfiguredWebSearch(ctx, provider, input)
 	}
+	if strings.EqualFold(providerName, "tinyfish") {
+		return runConfiguredWebSearch(ctx, config.WebSearchProviderConfig{Name: "tinyfish", Type: "tinyfish"}, input)
+	}
 	if !ok && !strings.EqualFold(providerName, "duckduckgo") {
 		return webSearchOutput{}, fmt.Errorf("web search provider %q is not configured", providerName)
 	}
@@ -177,7 +184,10 @@ func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProvid
 	if providerType == "duckduckgo" {
 		return runDuckDuckGoWebSearch(ctx, input)
 	}
-	if providerType != "http" && providerType != "tinyfish" {
+	if providerType == "tinyfish" {
+		return runTinyFishWebSearch(ctx, provider, input)
+	}
+	if providerType != "http" {
 		return webSearchOutput{}, fmt.Errorf("unsupported web search provider type %q", provider.Type)
 	}
 	if strings.TrimSpace(provider.Endpoint) == "" {
@@ -258,6 +268,124 @@ func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProvid
 	}, nil
 }
 
+func runTinyFishWebSearch(ctx context.Context, provider config.WebSearchProviderConfig, input webSearchInput) (webSearchOutput, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = provider.MaxResults
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	page := input.Page
+	if page == 0 && provider.Page > 0 {
+		page = provider.Page
+	}
+	if page < 0 || page > 10 {
+		return webSearchOutput{}, fmt.Errorf("tinyfish search page must be between 0 and 10")
+	}
+
+	endpoint := strings.TrimSpace(provider.Endpoint)
+	if endpoint == "" {
+		endpoint = "https://api.search.tinyfish.ai"
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	values := u.Query()
+	values.Set("query", input.Query)
+	location := firstNonEmpty(input.Location, provider.Location)
+	if location != "" {
+		values.Set("location", location)
+	}
+	language := firstNonEmpty(input.Language, provider.Language)
+	if language != "" {
+		values.Set("language", language)
+	}
+	if page > 0 {
+		values.Set("page", strconv.Itoa(page))
+	}
+	u.RawQuery = values.Encode()
+
+	timeout := time.Duration(provider.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	req.Header.Set("User-Agent", "Starxo/RuntimeV2")
+	hasAPIKeyHeader := false
+	for k, v := range provider.Headers {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		if strings.EqualFold(k, "X-API-Key") {
+			hasAPIKeyHeader = true
+		}
+		req.Header.Set(k, expandWebSearchTemplate(v, input.Query, limit))
+	}
+	if !hasAPIKeyHeader {
+		apiKeyEnv := strings.TrimSpace(provider.APIKeyEnv)
+		if apiKeyEnv == "" {
+			apiKeyEnv = "TINYFISH_API_KEY"
+		}
+		apiKey := strings.TrimSpace(os.Getenv(apiKeyEnv))
+		if apiKey == "" {
+			return webSearchOutput{}, fmt.Errorf("tinyfish search requires %s to be set or X-API-Key to be configured", apiKeyEnv)
+		}
+		req.Header.Set("X-API-Key", apiKey)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message := strings.TrimSpace(compactHTML(string(data)))
+		if len(message) > 500 {
+			message = message[:500]
+		}
+		return webSearchOutput{}, fmt.Errorf("tinyfish search returned HTTP %d: %s", resp.StatusCode, message)
+	}
+
+	resultProvider := provider
+	if strings.TrimSpace(resultProvider.ResultsPath) == "" {
+		resultProvider.ResultsPath = "results"
+	}
+	if strings.TrimSpace(resultProvider.TitlePath) == "" {
+		resultProvider.TitlePath = "title"
+	}
+	if strings.TrimSpace(resultProvider.URLPath) == "" {
+		resultProvider.URLPath = "url"
+	}
+	if strings.TrimSpace(resultProvider.SnippetPath) == "" {
+		resultProvider.SnippetPath = "snippet"
+	}
+	results := parseConfiguredWebSearchResults(data, resultProvider, limit)
+	if len(results) == 0 {
+		results = fallbackWebSearchLines(string(data), limit)
+	}
+	providerName := strings.TrimSpace(provider.Name)
+	if providerName == "" {
+		providerName = "tinyfish"
+	}
+	return webSearchOutput{
+		Query:    input.Query,
+		Provider: providerName,
+		URL:      u.String(),
+		Results:  results,
+	}, nil
+}
+
 func appendWebSearchQuery(endpoint string, provider config.WebSearchProviderConfig, query string, limit int) string {
 	u, err := url.Parse(endpoint)
 	if err != nil {
@@ -295,6 +423,15 @@ func expandWebSearchTemplate(s string, query string, limit int) string {
 		"{{limit}}", strconv.Itoa(limit),
 	)
 	return replacer.Replace(s)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func hasWebSearchTemplatePlaceholder(s string, name string) bool {

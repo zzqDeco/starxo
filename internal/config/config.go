@@ -78,6 +78,7 @@ type WebSearchProviderConfig struct {
 	Endpoint     string            `json:"endpoint,omitempty"`
 	Method       string            `json:"method,omitempty"`
 	Headers      map[string]string `json:"headers,omitempty"`
+	APIKeyEnv    string            `json:"apiKeyEnv,omitempty"`
 	QueryParam   string            `json:"queryParam,omitempty"`
 	LimitParam   string            `json:"limitParam,omitempty"`
 	BodyTemplate string            `json:"bodyTemplate,omitempty"`
@@ -85,6 +86,9 @@ type WebSearchProviderConfig struct {
 	TitlePath    string            `json:"titlePath,omitempty"`
 	URLPath      string            `json:"urlPath,omitempty"`
 	SnippetPath  string            `json:"snippetPath,omitempty"`
+	Location     string            `json:"location,omitempty"`
+	Language     string            `json:"language,omitempty"`
+	Page         int               `json:"page,omitempty"`
 	TimeoutMS    int               `json:"timeoutMs,omitempty"`
 	MaxResults   int               `json:"maxResults,omitempty"`
 	Disabled     bool              `json:"disabled,omitempty"`

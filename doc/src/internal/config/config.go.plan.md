@@ -7,7 +7,8 @@
 ## 核心职责
 - `AppConfig` 包含 SSH、Sandbox、LLM、MCP、Agent 配置。
 - `SandboxConfig` 替代旧 `DockerConfig`，包含 runtime、rootDir、workDirName、network、memoryLimitMB、commandTimeoutSec、bootstrapPython、pythonPackages。
-- `AgentConfig.WebSearch` 定义 Runtime V2 `WebSearch` provider 配置，默认启用 `duckduckgo`，也支持 HTTP/TinyFish 风格自定义 provider。
+- `AgentConfig.WebSearch` 定义 Runtime V2 `WebSearch` provider 配置，默认启用 `duckduckgo`。
+- `WebSearchProviderConfig` 支持 `type=duckduckgo|http|tinyfish`；TinyFish provider 包含 `apiKeyEnv`、`location`、`language`、`page` 等官方 Search API 适配字段。
 - `DockerConfig` 仅保留为一版 JSON 兼容字段，不应被运行时逻辑使用。
 
 ## 迁移逻辑

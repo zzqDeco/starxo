@@ -70,7 +70,8 @@
 - `Skill` lists/reads `.starxo/skills` and `.claude/skills` prompts inside the workspace.
 - `NotebookEdit` edits `.ipynb` cells through parsed JSON and the normal workspace guard.
 - `WebFetch` and `WebSearch` are deferred runtime tools executed by the local app process.
-- `WebSearch` supports `agent.webSearch` provider configuration, including DuckDuckGo fallback and custom HTTP/TinyFish-like endpoints with JSON path extraction.
+- `WebSearch` supports `agent.webSearch` provider configuration, including DuckDuckGo fallback, custom HTTP providers, and a dedicated TinyFish Search API adapter.
+- TinyFish provider alignment: `GET https://api.search.tinyfish.ai`, `X-API-Key` from `TINYFISH_API_KEY` by default, request parameters `query/location/language/page`, and response parsing from `results[].title/url/snippet`.
 
 ## Permission Queue
 - Runtime V2 now emits `runtime:permission_request` for non-read-only trusted tools.

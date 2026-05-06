@@ -40,6 +40,7 @@ export interface WebSearchProviderConfig {
   endpoint?: string
   method?: 'GET' | 'POST'
   headers?: Record<string, string>
+  apiKeyEnv?: string
   queryParam?: string
   limitParam?: string
   bodyTemplate?: string
@@ -47,6 +48,9 @@ export interface WebSearchProviderConfig {
   titlePath?: string
   urlPath?: string
   snippetPath?: string
+  location?: string
+  language?: string
+  page?: number
   timeoutMs?: number
   maxResults?: number
   disabled?: boolean
