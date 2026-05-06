@@ -7,6 +7,7 @@ import SSHConfigForm from './SSHConfig.vue'
 import SandboxConfigForm from './SandboxConfig.vue'
 import LLMConfigForm from './LLMConfig.vue'
 import MCPConfigForm from './MCPConfig.vue'
+import RuntimePermissionsPanel from './RuntimePermissionsPanel.vue'
 import { useI18n } from 'vue-i18n'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
@@ -32,6 +33,7 @@ const tabs = computed(() => [
   { name: 'ssh', label: t('settings.ssh.tab'), icon: Terminal },
   { name: 'sandbox', label: t('settings.sandbox.tab'), icon: ShieldCheckmark },
   { name: 'llm', label: t('settings.llm.tab'), icon: Cloud },
+  { name: 'permissions', label: t('permissions.tab'), icon: ShieldCheckmark },
   { name: 'mcp', label: t('settings.mcp.tab'), icon: Apps },
 ])
 
@@ -123,6 +125,7 @@ onBeforeUnmount(() => {
               <SSHConfigForm v-if="activeTab === 'ssh'" key="ssh" />
               <SandboxConfigForm v-else-if="activeTab === 'sandbox'" key="sandbox" />
               <LLMConfigForm v-else-if="activeTab === 'llm'" key="llm" />
+              <RuntimePermissionsPanel v-else-if="activeTab === 'permissions'" key="permissions" />
               <MCPConfigForm v-else-if="activeTab === 'mcp'" key="mcp" />
             </Transition>
           </section>

@@ -1551,6 +1551,36 @@ export namespace tools {
 	        this.error = source["error"];
 	    }
 	}
+	export class ToolPermissionRequest {
+	    requestId: string;
+	    sessionId?: string;
+	    toolName: string;
+	    title?: string;
+	    description?: string;
+	    toolClass?: string;
+	    source?: string;
+	    risk: string;
+	    input?: string;
+	    createdAt: number;
+
+	    static createFrom(source: any = {}) {
+	        return new ToolPermissionRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requestId = source["requestId"];
+	        this.sessionId = source["sessionId"];
+	        this.toolName = source["toolName"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.toolClass = source["toolClass"];
+	        this.source = source["source"];
+	        this.risk = source["risk"];
+	        this.input = source["input"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
 
 }
 

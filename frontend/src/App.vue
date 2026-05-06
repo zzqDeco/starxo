@@ -1,13 +1,14 @@
 <script lang="ts" setup>
 import { NButton, NCard, NCode, NConfigProvider, NDialogProvider, NMessageProvider, NModal, NSpace, NTag, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import MainLayout from '@/components/layout/MainLayout.vue'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useContainerStore } from '@/stores/containerStore'
-import { ApproveToolPermission, DenyToolPermission, GetMode } from '../wailsjs/go/service/ChatService'
+import { ApproveToolPermission, DenyToolPermission, GetMode, ListToolPermissionRequests } from '../wailsjs/go/service/ChatService'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
 import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent, SessionRunState } from '@/types/message'
@@ -17,6 +18,7 @@ const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const containerStore = useContainerStore()
+const { t } = useI18n()
 
 interface RuntimePermissionRequest {
   requestId: string
@@ -31,9 +33,21 @@ interface RuntimePermissionRequest {
   createdAt: number
 }
 
-const pendingPermission = ref<RuntimePermissionRequest | null>(null)
+const permissionQueue = ref<RuntimePermissionRequest[]>([])
 const permissionBusy = ref(false)
+const visiblePermissionQueue = computed(() => {
+  const active = sessionStore.activeSessionId
+  return permissionQueue.value.filter((request) => !request.sessionId || (!!active && request.sessionId === active))
+})
+const pendingPermission = computed(() => visiblePermissionQueue.value[0] || null)
 const permissionVisible = computed(() => pendingPermission.value !== null)
+const permissionQueuePosition = computed(() => {
+  const request = pendingPermission.value
+  if (!request) return ''
+  const index = visiblePermissionQueue.value.findIndex((item) => item.requestId === request.requestId)
+  if (index < 0 || visiblePermissionQueue.value.length <= 1) return ''
+  return `${index + 1} / ${visiblePermissionQueue.value.length}`
+})
 
 // Keep palette / radius values in sync with `:root` in src/style.css.
 // Naive UI resolves theme values at component setup, so CSS custom properties
@@ -115,11 +129,41 @@ async function resolvePermission(decision: 'allow_once' | 'allow_session' | 'den
     } else {
       await ApproveToolPermission(request.requestId, decision)
     }
-    pendingPermission.value = null
+    removePermissionRequest(request.requestId)
   } catch (e) {
     console.error('Failed to resolve permission request:', e)
   } finally {
     permissionBusy.value = false
+  }
+}
+
+function sortPermissionRequests(requests: RuntimePermissionRequest[]) {
+  return [...requests].sort((a, b) => {
+    if ((a.createdAt || 0) === (b.createdAt || 0)) {
+      return a.requestId.localeCompare(b.requestId)
+    }
+    return (a.createdAt || 0) - (b.createdAt || 0)
+  })
+}
+
+function upsertPermissionRequest(request: RuntimePermissionRequest) {
+  if (!request?.requestId) return
+  const next = permissionQueue.value.filter((item) => item.requestId !== request.requestId)
+  next.push(request)
+  permissionQueue.value = sortPermissionRequests(next)
+}
+
+function removePermissionRequest(requestId?: string) {
+  if (!requestId) return
+  permissionQueue.value = permissionQueue.value.filter((item) => item.requestId !== requestId)
+}
+
+async function refreshPermissionQueue() {
+  try {
+    const requests = await ListToolPermissionRequests('')
+    permissionQueue.value = sortPermissionRequests((requests || []) as RuntimePermissionRequest[])
+  } catch (e) {
+    console.warn('Failed to refresh permission queue:', e)
   }
 }
 
@@ -196,6 +240,7 @@ onMounted(async () => {
 
   // Load sessions (enriched with container info)
   await sessionStore.loadSessions().catch((e) => console.error('Failed to initialize sessions:', e))
+  await refreshPermissionQueue()
 
   // Sync mode from backend for the active session at startup.
   try {
@@ -256,6 +301,7 @@ onMounted(async () => {
       } else {
         containerStore.clearActiveContainer()
       }
+      await refreshPermissionQueue()
     }
   })
 
@@ -360,14 +406,20 @@ onMounted(async () => {
   })
 
   EventsOn('runtime:permission_request', (data: RuntimePermissionRequest) => {
-    if (!data || !isActiveSession(data)) return
-    pendingPermission.value = data
+    upsertPermissionRequest(data)
   })
 
   EventsOn('runtime:permission_canceled', (data: { requestId?: string }) => {
-    if (!data?.requestId || pendingPermission.value?.requestId !== data.requestId) return
-    pendingPermission.value = null
+    removePermissionRequest(data?.requestId)
   })
+
+  EventsOn('runtime:permission_resolved', (data: { requestId?: string }) => {
+    removePermissionRequest(data?.requestId)
+  })
+})
+
+watch(() => sessionStore.activeSessionId, () => {
+  void refreshPermissionQueue()
 })
 </script>
 
@@ -380,9 +432,12 @@ onMounted(async () => {
           <template #header>
             <div class="permission-title">
               <span>{{ pendingPermission?.title || pendingPermission?.toolName }}</span>
-              <NTag size="small" :type="permissionRiskType(pendingPermission?.risk)">
-                {{ pendingPermission?.risk || 'permission' }}
-              </NTag>
+              <div class="permission-title-actions">
+                <span v-if="permissionQueuePosition" class="permission-queue-position">{{ permissionQueuePosition }}</span>
+                <NTag size="small" :type="permissionRiskType(pendingPermission?.risk)">
+                  {{ pendingPermission?.risk || 'permission' }}
+                </NTag>
+              </div>
             </div>
           </template>
           <NCard embedded :bordered="false" class="permission-card">
@@ -404,10 +459,10 @@ onMounted(async () => {
           </NCard>
           <template #footer>
             <NSpace justify="end">
-              <NButton :disabled="permissionBusy" @click="resolvePermission('deny')">拒绝</NButton>
-              <NButton :loading="permissionBusy" @click="resolvePermission('allow_once')">允许一次</NButton>
+              <NButton :disabled="permissionBusy" @click="resolvePermission('deny')">{{ t('permissions.deny') }}</NButton>
+              <NButton :loading="permissionBusy" @click="resolvePermission('allow_once')">{{ t('permissions.allowOnce') }}</NButton>
               <NButton type="primary" :loading="permissionBusy" @click="resolvePermission('allow_session')">
-                本会话允许
+                {{ t('permissions.allowSession') }}
               </NButton>
             </NSpace>
           </template>
@@ -435,6 +490,20 @@ onMounted(async () => {
   gap: 12px;
   font-size: 15px;
   font-weight: 700;
+}
+
+.permission-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.permission-queue-position {
+  color: #94a3b8;
+  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .permission-card {

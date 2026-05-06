@@ -5,6 +5,7 @@
 - 设置弹窗入口。
 
 ## 核心职责
-- 设置分区包含 SSH、Sandbox、LLM、MCP。
+- 设置分区包含 SSH、Sandbox、LLM、Permissions、MCP。
 - Sandbox 分区加载 `SandboxConfig.vue`，替代旧 Docker 设置页。
+- Permissions 分区加载 `RuntimePermissionsPanel.vue`，用于查看 pending tool approvals 和当前 session 的持久授权。
 - 保存时通过 `settingsStore.saveSettings` 写回后端并触发 runner 缓存失效。

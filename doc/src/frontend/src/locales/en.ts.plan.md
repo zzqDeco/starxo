@@ -9,4 +9,5 @@
 - 新增 `settings.sandbox` 运行时配置、检测和安装文案。
 - 新增 sandbox diagnostics、remote fix guide、workspace metadata/tmp cleanup 文案。
 - 新增 Runtime Tasks panel、task refresh、output copy、task stop 文案。
+- 新增 `permissions` copy for the tool approval modal and Settings / Permissions grant management panel.
 - `containers.unavailable` 用于旧 Docker 记录。

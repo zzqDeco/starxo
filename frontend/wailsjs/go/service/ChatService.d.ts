@@ -16,6 +16,8 @@ export function BuildRunners():Promise<void>;
 
 export function ClearHistory():Promise<void>;
 
+export function ClearToolPermissionGrants(arg1:string):Promise<void>;
+
 export function CtxEngine():Promise<agentctx.Engine>;
 
 export function DenyToolPermission(arg1:string):Promise<void>;
@@ -40,6 +42,10 @@ export function IsSessionRunning(arg1:string):Promise<boolean>;
 
 export function ListRuntimeTasks(arg1:string):Promise<Array<tools.RuntimeTaskSnapshot>>;
 
+export function ListToolPermissionGrants(arg1:string):Promise<Array<model.RuntimePermissionGrant>>;
+
+export function ListToolPermissionRequests(arg1:string):Promise<Array<tools.ToolPermissionRequest>>;
+
 export function PruneDiscoveredToolsForSave(arg1:string,arg2:Array<model.DiscoveredToolRecord>):Promise<Array<model.DiscoveredToolRecord>>;
 
 export function ReadRuntimeTaskOutput(arg1:string,arg2:number,arg3:number):Promise<tools.RuntimeTaskOutput>;
@@ -53,6 +59,8 @@ export function RestoreSessionData(arg1:string,arg2:model.SessionData):Promise<v
 export function ResumeWithAnswer(arg1:string):Promise<void>;
 
 export function ResumeWithChoice(arg1:number):Promise<void>;
+
+export function RevokeToolPermissionGrant(arg1:string,arg2:string):Promise<void>;
 
 export function SendMessage(arg1:string):Promise<void>;
 
