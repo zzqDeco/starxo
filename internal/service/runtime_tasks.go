@@ -57,7 +57,7 @@ func (m *runtimeTaskManager) StartShellTask(ctx context.Context, sessionID, comm
 	if err != nil {
 		return tools.RuntimeTaskRef{}, err
 	}
-	taskCtx, cancel := context.WithCancel(context.Background())
+	taskCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	snapshot := tools.RuntimeTaskSnapshot{
 		ID:          taskID,
 		SessionID:   sessionID,
@@ -93,6 +93,69 @@ func (m *runtimeTaskManager) StartShellTask(ctx context.Context, sessionID, comm
 				task.snapshot.Status = runtimeTaskStatusKilled
 			} else if out.ExitCode != 0 {
 				task.snapshot.Status = runtimeTaskStatusFailed
+			} else {
+				task.snapshot.Status = runtimeTaskStatusCompleted
+			}
+			task.cancel = nil
+			snapshot = task.snapshot
+		}
+		m.mu.Unlock()
+		m.emitEvent("runtime:task_completed", snapshot)
+	}()
+
+	return tools.RuntimeTaskRef{
+		TaskID:     taskID,
+		Status:     runtimeTaskStatusRunning,
+		OutputPath: outputPath,
+	}, nil
+}
+
+func (m *runtimeTaskManager) StartAgentTask(ctx context.Context, sessionID, description string, runner func(ctx context.Context) (string, error)) (tools.RuntimeTaskRef, error) {
+	if runner == nil {
+		return tools.RuntimeTaskRef{}, fmt.Errorf("runtime agent task runner is nil")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = "global"
+	}
+	taskID := fmt.Sprintf("task-%d", m.now().UnixNano())
+	outputPath, err := runtimeTaskOutputPath(sessionID, taskID)
+	if err != nil {
+		return tools.RuntimeTaskRef{}, err
+	}
+	taskCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	snapshot := tools.RuntimeTaskSnapshot{
+		ID:          taskID,
+		SessionID:   sessionID,
+		Type:        "agent",
+		Status:      runtimeTaskStatusRunning,
+		Description: description,
+		Command:     "Agent",
+		OutputPath:  outputPath,
+		StartedAt:   m.now().UnixMilli(),
+	}
+	m.mu.Lock()
+	m.tasks[taskID] = &runtimeTask{snapshot: snapshot, cancel: cancel}
+	m.mu.Unlock()
+	m.emitEvent("runtime:task_started", snapshot)
+
+	go func() {
+		content, runErr := runner(taskCtx)
+		if runErr != nil {
+			content = strings.TrimRight(content, "\n") + "\nerror: " + runErr.Error() + "\n"
+		}
+		_ = os.MkdirAll(filepath.Dir(outputPath), 0755)
+		_ = os.WriteFile(outputPath, []byte(content), 0644)
+
+		m.mu.Lock()
+		task := m.tasks[taskID]
+		if task != nil {
+			task.snapshot.FinishedAt = m.now().UnixMilli()
+			if task.snapshot.Status == runtimeTaskStatusKilled {
+				// Keep explicit stop status.
+			} else if runErr != nil {
+				task.snapshot.Status = runtimeTaskStatusFailed
+				task.snapshot.Error = runErr.Error()
+				task.snapshot.ExitCode = 1
 			} else {
 				task.snapshot.Status = runtimeTaskStatusCompleted
 			}

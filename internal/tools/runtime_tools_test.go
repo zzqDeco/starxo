@@ -52,6 +52,25 @@ type fakeRuntimeTaskManager struct {
 	persistedSize int64
 }
 
+type fakeWorkspaceManager struct {
+	workspace string
+}
+
+func (m fakeWorkspaceManager) CurrentWorkspace(ctx context.Context, defaultWorkspace string) string {
+	if m.workspace == "" {
+		return defaultWorkspace
+	}
+	return m.workspace
+}
+
+func (m fakeWorkspaceManager) EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (WorktreeOutput, error) {
+	return WorktreeOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeWorkspaceManager) ExitWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, action string, discardChanges bool) (WorktreeOutput, error) {
+	return WorktreeOutput{}, fmt.Errorf("not implemented")
+}
+
 func (m *fakeRuntimeTaskManager) StartShellTask(ctx context.Context, sessionID, command, description string, runner RuntimeTaskRunner) (RuntimeTaskRef, error) {
 	return RuntimeTaskRef{}, fmt.Errorf("not implemented")
 }
@@ -71,7 +90,7 @@ func (m *fakeRuntimeTaskManager) PersistToolResult(ctx context.Context, sessionI
 }
 
 func TestRuntimeCoreCatalogEntriesExposeAliasesAndPlanGate(t *testing.T) {
-	entries, err := NewRuntimeCoreCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil)
+	entries, err := NewRuntimeCoreCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil, nil)
 	if err != nil {
 		t.Fatalf("runtime core entries: %v", err)
 	}
@@ -106,8 +125,8 @@ func TestRuntimeCoreCatalogEntriesExposeAliasesAndPlanGate(t *testing.T) {
 }
 
 func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {
-	op := &fakeRuntimeOperator{files: map[string]string{"main.go": "before\nold\n"}}
-	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil)
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/main.go": "before\nold\n"}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
 	if err != nil {
 		t.Fatalf("runtime core entries: %v", err)
 	}
@@ -132,11 +151,81 @@ func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("edit tool run: %v", err)
 	}
-	if got := op.files["main.go"]; got != "before\nnew\n" {
+	if got := op.files["/workspace/main.go"]; got != "before\nnew\n" {
 		t.Fatalf("expected edited file, got %q", got)
 	}
 	if !strings.Contains(result, `"replacements":1`) || !strings.Contains(result, "-old") || !strings.Contains(result, "+new") {
 		t.Fatalf("expected structured edit result with patch, got %s", result)
+	}
+}
+
+func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/.starxo/worktrees/feat/main.go": "package main\n"}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, fakeWorkspaceManager{workspace: "/workspace/.starxo/worktrees/feat"})
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var read CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolRead {
+			read = entry
+			break
+		}
+	}
+	invokable, ok := read.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("read tool is not invokable: %T", read.Tool)
+	}
+	result, err := invokable.InvokableRun(context.Background(), `{"file_path":"main.go"}`)
+	if err != nil {
+		t.Fatalf("read tool run: %v", err)
+	}
+	if !strings.Contains(result, "/workspace/.starxo/worktrees/feat/main.go") || !strings.Contains(result, "package main") {
+		t.Fatalf("expected read from worktree workspace, got %s", result)
+	}
+}
+
+func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
+	entries, err := NewRuntimeDeferredCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil)
+	if err != nil {
+		t.Fatalf("runtime deferred entries: %v", err)
+	}
+	got := map[string]CatalogEntry{}
+	for _, entry := range entries {
+		got[entry.CanonicalName] = entry
+		if entry.AlwaysLoad {
+			t.Fatalf("expected %s to be deferred, got always-load", entry.CanonicalName)
+		}
+		if !entry.ShouldDefer {
+			t.Fatalf("expected %s to opt into deferred loading", entry.CanonicalName)
+		}
+	}
+	for _, name := range []string{RuntimeToolLSP, RuntimeToolSkill, RuntimeToolNotebookEdit} {
+		if _, ok := got[name]; !ok {
+			t.Fatalf("missing deferred runtime tool %s", name)
+		}
+	}
+	for _, name := range []string{RuntimeToolLSP, RuntimeToolSkill} {
+		entry := got[name]
+		if !entry.ReadOnlyHint || !entry.ReadOnlyTrusted {
+			t.Fatalf("expected %s to be read-only trusted, got %#v", name, entry)
+		}
+	}
+	if entry := got[RuntimeToolNotebookEdit]; entry.ReadOnlyHint || entry.ReadOnlyTrusted {
+		t.Fatalf("expected NotebookEdit to require write permission, got %#v", entry)
+	}
+
+	webFetch := RuntimeWebFetchCatalogEntry(nil)
+	webSearch := RuntimeWebSearchCatalogEntry(nil)
+	for _, entry := range []CatalogEntry{webFetch, webSearch} {
+		if entry.AlwaysLoad || !entry.ShouldDefer {
+			t.Fatalf("expected %s to be deferred, got %#v", entry.CanonicalName, entry)
+		}
+		if !entry.ReadOnlyHint || !entry.ReadOnlyTrusted {
+			t.Fatalf("expected %s to be read-only trusted, got %#v", entry.CanonicalName, entry)
+		}
 	}
 }
 

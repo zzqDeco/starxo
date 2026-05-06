@@ -10,7 +10,7 @@
 - 把文件、搜索、编辑、shell、后台任务工具纳入统一 catalog/permission/ToolSearch 体系。
 
 ## 3. 输入与输出
-- 输入来源: remote sandbox `commandline.Operator`、workspace path、runtime task manager
+- 输入来源: remote sandbox `commandline.Operator`、workspace path、runtime task manager、runtime workspace manager
 - 输出结果: catalog entries 和结构化 tool result
 
 ## 4. 关键实现细节
@@ -24,6 +24,10 @@
   - `TaskOutput`
   - `TaskStop`
   - `ExitPlanMode`
+  - `Agent`
+- deferred core 工具：
+  - `EnterWorktree`
+  - `ExitWorktree`
 - legacy aliases：
   - `shell_execute`
   - `read_file`
@@ -31,8 +35,9 @@
   - `list_files`
   - `str_replace_editor`
 - `Read`/`Glob`/`Grep`/`TaskOutput`/`ExitPlanMode` 标记为 read-only trusted，plan mode 可见。
-- `Bash`/`Write`/`Edit`/`TaskStop` 是 writable/destructive surface，plan mode 下不加载。
+- `Bash`/`Write`/`Edit`/`TaskStop`/`Agent`/`EnterWorktree`/`ExitWorktree` 是 writable/destructive surface，plan mode 下不加载或需先退出计划模式。
 - 所有 workspace path 都走 guard：拒绝空 workspace、`..` traversal 和 workspace 外 absolute path。
+- `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash` 会通过 `RuntimeWorkspaceManager.CurrentWorkspace` 解析 session 当前 workspace，因此可透明运行在 active worktree 中。
 - `Bash` 支持 foreground/background。background 通过 task manager 持久化输出。
 - `Read` 支持 line offset/limit。
 - `Edit` 使用精确字符串替换并返回 patch 摘要、行数变化和是否替换成功。
@@ -44,8 +49,10 @@
 
 ## 6. 变更影响面
 - 顶层 agent prompt 现在可以直接看到 Runtime V2 core tools。
-- 后续 LSP/worktree/web/notebook tools 应通过相同 metadata contract 接入。
+- LSP/Skill/Web/Notebook deferred tools 已通过相同 metadata contract 接入。
+- Worktree tools 会改变当前 session 的 active workspace，影响后续 runtime tool 路径解析。
 
 ## 7. 维护建议
 - 新增 runtime tool 时先定义 metadata、permission 和 read-only 语义，再接入实现。
 - 任何文件类工具都必须复用 workspace guard，不要在工具内部各写一套 path 清洗。
+- 任何会切换 workspace 的能力都必须基于 context sessionID 管理状态，不能依赖全局 active session。

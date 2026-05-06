@@ -15,15 +15,18 @@ import (
 )
 
 const (
-	RuntimeToolBash         = "Bash"
-	RuntimeToolRead         = "Read"
-	RuntimeToolWrite        = "Write"
-	RuntimeToolEdit         = "Edit"
-	RuntimeToolGlob         = "Glob"
-	RuntimeToolGrep         = "Grep"
-	RuntimeToolTaskOutput   = "TaskOutput"
-	RuntimeToolTaskStop     = "TaskStop"
-	RuntimeToolExitPlanMode = "ExitPlanMode"
+	RuntimeToolBash          = "Bash"
+	RuntimeToolAgent         = "Agent"
+	RuntimeToolRead          = "Read"
+	RuntimeToolWrite         = "Write"
+	RuntimeToolEdit          = "Edit"
+	RuntimeToolGlob          = "Glob"
+	RuntimeToolGrep          = "Grep"
+	RuntimeToolTaskOutput    = "TaskOutput"
+	RuntimeToolTaskStop      = "TaskStop"
+	RuntimeToolExitPlanMode  = "ExitPlanMode"
+	RuntimeToolEnterWorktree = "EnterWorktree"
+	RuntimeToolExitWorktree  = "ExitWorktree"
 
 	runtimeLargeOutputThreshold = 32 * 1024
 )
@@ -66,6 +69,12 @@ type RuntimeTaskManager interface {
 	ReadTaskOutput(ctx context.Context, taskID string, offset, limit int) (RuntimeTaskOutput, error)
 	StopTask(ctx context.Context, taskID string) (RuntimeTaskSnapshot, error)
 	PersistToolResult(ctx context.Context, sessionID, prefix, content string) (path string, size int64, err error)
+}
+
+type RuntimeWorkspaceManager interface {
+	CurrentWorkspace(ctx context.Context, defaultWorkspace string) string
+	EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (WorktreeOutput, error)
+	ExitWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, action string, discardChanges bool) (WorktreeOutput, error)
 }
 
 type BashInput struct {
@@ -182,17 +191,36 @@ type ExitPlanModeOutput struct {
 	Message string `json:"message"`
 }
 
-func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager) ([]CatalogEntry, error) {
+type EnterWorktreeInput struct {
+	Name string `json:"name,omitempty" jsonschema:"description=optional short worktree name; safe characters only"`
+}
+
+type ExitWorktreeInput struct {
+	Action         string `json:"action,omitempty" jsonschema:"description=keep or remove; defaults to keep"`
+	DiscardChanges bool   `json:"discard_changes,omitempty" jsonschema:"description=required to remove a dirty worktree"`
+}
+
+type WorktreeOutput struct {
+	Action         string `json:"action"`
+	WorkspacePath  string `json:"workspacePath"`
+	WorktreePath   string `json:"worktreePath,omitempty"`
+	WorktreeBranch string `json:"worktreeBranch,omitempty"`
+	Message        string `json:"message"`
+}
+
+func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager, workspaces RuntimeWorkspaceManager) ([]CatalogEntry, error) {
 	builders := []func() (CatalogEntry, error){
-		func() (CatalogEntry, error) { return newBashCatalogEntry(op, workspacePath, tasks) },
-		func() (CatalogEntry, error) { return newReadCatalogEntry(op) },
-		func() (CatalogEntry, error) { return newWriteCatalogEntry(op) },
-		func() (CatalogEntry, error) { return newEditCatalogEntry(op) },
-		func() (CatalogEntry, error) { return newGlobCatalogEntry(op, workspacePath) },
-		func() (CatalogEntry, error) { return newGrepCatalogEntry(op, workspacePath) },
+		func() (CatalogEntry, error) { return newBashCatalogEntry(op, workspacePath, tasks, workspaces) },
+		func() (CatalogEntry, error) { return newReadCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newWriteCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newEditCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newGlobCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newGrepCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newTaskOutputCatalogEntry(tasks) },
 		func() (CatalogEntry, error) { return newTaskStopCatalogEntry(tasks) },
 		newExitPlanModeCatalogEntry,
+		func() (CatalogEntry, error) { return newEnterWorktreeCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newExitWorktreeCatalogEntry(op, workspacePath, workspaces) },
 	}
 	entries := make([]CatalogEntry, 0, len(builders))
 	for _, build := range builders {
@@ -206,6 +234,14 @@ func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string,
 }
 
 func runtimeCatalogEntry(name, title, description, class string, readOnly bool, t tool.BaseTool, aliases ...string) CatalogEntry {
+	return runtimeCatalogEntryWithLoading(name, title, description, class, readOnly, true, false, t, aliases...)
+}
+
+func deferredRuntimeCatalogEntry(name, title, description, class string, readOnly bool, t tool.BaseTool, aliases ...string) CatalogEntry {
+	return runtimeCatalogEntryWithLoading(name, title, description, class, readOnly, false, true, t, aliases...)
+}
+
+func runtimeCatalogEntryWithLoading(name, title, description, class string, readOnly bool, alwaysLoad bool, shouldDefer bool, t tool.BaseTool, aliases ...string) CatalogEntry {
 	return CatalogEntry{
 		CanonicalName:   name,
 		Aliases:         aliases,
@@ -215,8 +251,8 @@ func runtimeCatalogEntry(name, title, description, class string, readOnly bool, 
 		Description:     description,
 		SearchHint:      description,
 		ToolClass:       class,
-		AlwaysLoad:      true,
-		ShouldDefer:     false,
+		AlwaysLoad:      alwaysLoad,
+		ShouldDefer:     shouldDefer,
 		ReadOnlyHint:    readOnly,
 		ReadOnlyTrusted: readOnly,
 		PermissionSpec: PermissionSpec{
@@ -227,7 +263,7 @@ func runtimeCatalogEntry(name, title, description, class string, readOnly bool, 
 	}
 }
 
-func newBashCatalogEntry(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager) (CatalogEntry, error) {
+func newBashCatalogEntry(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolBash,
 		"Execute a shell command in the sandbox workspace. Supports timeout, concise descriptions, and background execution.",
 		func(ctx context.Context, input BashInput) (BashOutput, error) {
@@ -235,7 +271,7 @@ func newBashCatalogEntry(op commandline.Operator, workspacePath string, tasks Ru
 				return BashOutput{}, fmt.Errorf("command is required")
 			}
 			run := func(runCtx context.Context) (BashOutput, error) {
-				return runBashCommand(runCtx, op, workspacePath, input)
+				return runBashCommand(runCtx, op, workspacePath, workspaces, input)
 			}
 			if input.RunInBackground {
 				if tasks == nil {
@@ -265,15 +301,15 @@ func newBashCatalogEntry(op commandline.Operator, workspacePath string, tasks Ru
 	return runtimeCatalogEntry(RuntimeToolBash, "Bash", "Run shell commands in the sandbox workspace.", ToolClassRuntimeExec, false, t, "shell_execute"), nil
 }
 
-func runBashCommand(ctx context.Context, op commandline.Operator, workspacePath string, input BashInput) (BashOutput, error) {
+func runBashCommand(ctx context.Context, op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, input BashInput) (BashOutput, error) {
 	if input.TimeoutMs > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(input.TimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
 	command := input.Command
-	if workspacePath != "" {
-		command = "cd " + shellQuote(workspacePath) + " && " + command
+	if workspace := currentWorkspace(ctx, workspacePath, workspaces); workspace != "" {
+		command = "cd " + shellQuote(workspace) + " && " + command
 	}
 	output, err := op.RunCommand(ctx, []string{"sh", "-lc", command})
 	out := BashOutput{}
@@ -307,14 +343,18 @@ func maybePersistLargeBashOutput(ctx context.Context, tasks RuntimeTaskManager, 
 	return out
 }
 
-func newReadCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
+func newReadCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolRead,
 		"Read a file from the sandbox workspace with optional line offset and limit.",
 		func(ctx context.Context, input ReadInput) (ReadOutput, error) {
 			if strings.TrimSpace(input.FilePath) == "" {
 				return ReadOutput{}, fmt.Errorf("file_path is required")
 			}
-			content, err := op.ReadFile(ctx, input.FilePath)
+			target, err := workspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
+			if err != nil {
+				return ReadOutput{}, err
+			}
+			content, err := op.ReadFile(ctx, target)
 			if err != nil {
 				return ReadOutput{}, err
 			}
@@ -329,7 +369,7 @@ func newReadCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
 				end = offset + limit
 			}
 			return ReadOutput{
-				FilePath:   input.FilePath,
+				FilePath:   target,
 				Content:    strings.Join(lines[offset:end], "\n"),
 				NumLines:   end - offset,
 				StartLine:  offset + 1,
@@ -342,22 +382,26 @@ func newReadCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
 	return runtimeCatalogEntry(RuntimeToolRead, "Read", "Read files with line paging.", ToolClassRuntimeFile, true, t, "read_file"), nil
 }
 
-func newWriteCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
+func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolWrite,
 		"Write a file inside the sandbox workspace.",
 		func(ctx context.Context, input WriteInput) (WriteOutput, error) {
 			if strings.TrimSpace(input.FilePath) == "" {
 				return WriteOutput{}, fmt.Errorf("file_path is required")
 			}
+			target, err := workspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
+			if err != nil {
+				return WriteOutput{}, err
+			}
 			created := false
-			if _, err := op.ReadFile(ctx, input.FilePath); err != nil {
+			if _, err := op.ReadFile(ctx, target); err != nil {
 				created = true
 			}
-			if err := op.WriteFile(ctx, input.FilePath, input.Content); err != nil {
+			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
 			return WriteOutput{
-				FilePath:   input.FilePath,
+				FilePath:   target,
 				Created:    created,
 				Bytes:      len(input.Content),
 				LinesAdded: len(splitLines(input.Content)),
@@ -369,7 +413,7 @@ func newWriteCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
 	return runtimeCatalogEntry(RuntimeToolWrite, "Write", "Create or overwrite files.", ToolClassRuntimeFile, false, t, "write_file"), nil
 }
 
-func newEditCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
+func newEditCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolEdit,
 		"Edit a file by replacing an exact string.",
 		func(ctx context.Context, input EditInput) (EditOutput, error) {
@@ -379,26 +423,30 @@ func newEditCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
 			if input.OldString == "" {
 				return EditOutput{}, fmt.Errorf("old_string is required")
 			}
-			content, err := op.ReadFile(ctx, input.FilePath)
+			target, err := workspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
+			if err != nil {
+				return EditOutput{}, err
+			}
+			content, err := op.ReadFile(ctx, target)
 			if err != nil {
 				return EditOutput{}, err
 			}
 			count := strings.Count(content, input.OldString)
 			if count == 0 {
-				return EditOutput{}, fmt.Errorf("old_string not found in %s", input.FilePath)
+				return EditOutput{}, fmt.Errorf("old_string not found in %s", target)
 			}
 			replacements := 1
 			if input.ReplaceAll {
 				replacements = count
 			} else if count > 1 {
-				return EditOutput{}, fmt.Errorf("old_string appears %d times in %s; set replace_all=true or provide a more specific string", count, input.FilePath)
+				return EditOutput{}, fmt.Errorf("old_string appears %d times in %s; set replace_all=true or provide a more specific string", count, target)
 			}
 			next := strings.Replace(content, input.OldString, input.NewString, replacements)
-			if err := op.WriteFile(ctx, input.FilePath, next); err != nil {
+			if err := op.WriteFile(ctx, target, next); err != nil {
 				return EditOutput{}, err
 			}
 			return EditOutput{
-				FilePath:     input.FilePath,
+				FilePath:     target,
 				Replacements: replacements,
 				LinesAdded:   countLinesDelta(input.NewString, input.OldString, true) * replacements,
 				LinesRemoved: countLinesDelta(input.NewString, input.OldString, false) * replacements,
@@ -411,7 +459,7 @@ func newEditCatalogEntry(op commandline.Operator) (CatalogEntry, error) {
 	return runtimeCatalogEntry(RuntimeToolEdit, "Edit", "Patch files using exact string replacement.", ToolClassRuntimeFile, false, t, "str_replace_editor"), nil
 }
 
-func newGlobCatalogEntry(op commandline.Operator, workspacePath string) (CatalogEntry, error) {
+func newGlobCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolGlob,
 		"Find files by glob pattern inside the sandbox workspace.",
 		func(ctx context.Context, input GlobInput) (GlobOutput, error) {
@@ -428,7 +476,7 @@ func newGlobCatalogEntry(op commandline.Operator, workspacePath string) (Catalog
 			}
 			offset := max(0, input.Offset)
 			start := time.Now()
-			cmd := "cd " + shellQuote(workspacePath) + " && find " + shellQuote(searchPath) + " -path " + shellQuote(input.Pattern) + " -type f | sort"
+			cmd := "cd " + shellQuote(currentWorkspace(ctx, workspacePath, workspaces)) + " && find " + shellQuote(searchPath) + " -path " + shellQuote(input.Pattern) + " -type f | sort"
 			output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
 			if err != nil {
 				return GlobOutput{}, err
@@ -455,7 +503,7 @@ func newGlobCatalogEntry(op commandline.Operator, workspacePath string) (Catalog
 	return runtimeCatalogEntry(RuntimeToolGlob, "Glob", "Find files by name pattern.", ToolClassRuntimeFile, true, t, "list_files"), nil
 }
 
-func newGrepCatalogEntry(op commandline.Operator, workspacePath string) (CatalogEntry, error) {
+func newGrepCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
 	t, err := toolutils.InferTool(RuntimeToolGrep,
 		"Search file contents with ripgrep inside the sandbox workspace.",
 		func(ctx context.Context, input GrepInput) (GrepOutput, error) {
@@ -496,7 +544,7 @@ func newGrepCatalogEntry(op commandline.Operator, workspacePath string) (Catalog
 				args = append(args, "--glob", input.Glob)
 			}
 			args = append(args, input.Pattern, searchPath)
-			cmd := "cd " + shellQuote(workspacePath) + " && " + shellJoin(args) + " || test $? -eq 1"
+			cmd := "cd " + shellQuote(currentWorkspace(ctx, workspacePath, workspaces)) + " && " + shellJoin(args) + " || test $? -eq 1"
 			output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
 			if err != nil {
 				return GrepOutput{}, err
@@ -573,6 +621,90 @@ func newExitPlanModeCatalogEntry() (CatalogEntry, error) {
 		return CatalogEntry{}, err
 	}
 	return runtimeCatalogEntry(RuntimeToolExitPlanMode, "Exit Plan Mode", "Request plan approval before write or shell execution.", ToolClassRuntime, true, t), nil
+}
+
+func newEnterWorktreeCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolEnterWorktree,
+		"Create an isolated git worktree inside the sandbox workspace and switch this session into it.",
+		func(ctx context.Context, input EnterWorktreeInput) (WorktreeOutput, error) {
+			if workspaces == nil {
+				return WorktreeOutput{}, fmt.Errorf("runtime worktree manager is not available")
+			}
+			return workspaces.EnterWorktree(ctx, op, workspacePath, input.Name)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	return deferredRuntimeCatalogEntry(RuntimeToolEnterWorktree, "Enter Worktree", "Create and enter an isolated git worktree.", ToolClassRuntime, false, t), nil
+}
+
+func newExitWorktreeCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolExitWorktree,
+		"Leave the current runtime worktree, optionally keeping or removing it.",
+		func(ctx context.Context, input ExitWorktreeInput) (WorktreeOutput, error) {
+			if workspaces == nil {
+				return WorktreeOutput{}, fmt.Errorf("runtime worktree manager is not available")
+			}
+			return workspaces.ExitWorktree(ctx, op, workspacePath, input.Action, input.DiscardChanges)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	return deferredRuntimeCatalogEntry(RuntimeToolExitWorktree, "Exit Worktree", "Exit a worktree session created by EnterWorktree.", ToolClassRuntime, false, t), nil
+}
+
+func currentWorkspace(ctx context.Context, defaultWorkspace string, workspaces RuntimeWorkspaceManager) string {
+	if workspaces == nil {
+		return defaultWorkspace
+	}
+	workspace := workspaces.CurrentWorkspace(ctx, defaultWorkspace)
+	if strings.TrimSpace(workspace) == "" {
+		return defaultWorkspace
+	}
+	return cleanRemotePath(workspace)
+}
+
+func workspaceFilePath(ctx context.Context, filePath string, workspaceRoot string, workspaces RuntimeWorkspaceManager) (string, error) {
+	root := cleanRemotePath(workspaceRoot)
+	if root == "" || root == "." {
+		return "", fmt.Errorf("sandbox workspace is not active")
+	}
+	base := currentWorkspace(ctx, root, workspaces)
+	if base == "" || base == "." {
+		base = root
+	}
+
+	p := strings.TrimSpace(filePath)
+	if p == "" {
+		return "", fmt.Errorf("file_path is required")
+	}
+	switch {
+	case p == "/workspace":
+		p = base
+	case strings.HasPrefix(p, "/workspace/"):
+		p = path.Join(base, strings.TrimPrefix(p, "/workspace/"))
+	case strings.HasPrefix(p, "/"):
+		p = cleanRemotePath(p)
+	default:
+		p = path.Join(base, p)
+	}
+	p = cleanRemotePath(p)
+	if p != root && !strings.HasPrefix(p, root+"/") {
+		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, root)
+	}
+	return p, nil
+}
+
+func cleanRemotePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	cleaned := path.Clean(p)
+	if strings.HasPrefix(p, "/") && !strings.HasPrefix(cleaned, "/") {
+		cleaned = "/" + cleaned
+	}
+	return cleaned
 }
 
 func safeSearchPath(p string) (string, error) {

@@ -6,7 +6,7 @@
 - 所属模块: tools
 
 ## 2. 核心职责
-- 覆盖 Runtime V2 core tools 的 catalog、alias、plan-mode gate、编辑执行、路径守卫和大输出持久化。
+- 覆盖 Runtime V2 core tools 的 catalog、alias、plan-mode gate、编辑执行、路径守卫、大输出持久化和 worktree-aware path 解析。
 
 ## 3. 输入与输出
 - 输入来源: fake runtime operator、fake task manager、Runtime V2 catalog entries
@@ -18,6 +18,8 @@
 - `Edit` tool 能通过 invokable contract 修改文件并返回 patch。
 - `safeSearchPath` 拒绝 workspace 外 absolute path 和 `..` traversal。
 - 大型 Bash 输出会写入持久化结果并在 inline stdout 中截断。
+- `Read` tool 会通过 fake workspace manager 使用当前 session active workspace。
+- deferred runtime tools 的 metadata 覆盖 LSP/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。
 
 ## 5. 维护建议
 - 新增 Runtime V2 core tool 时同步补 alias/permission/path 或执行语义测试。

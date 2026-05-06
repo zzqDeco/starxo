@@ -3,8 +3,8 @@
 ## Summary
 - Branch: `feature/agent-runtime-v2`, based on latest `dev`.
 - Goal: make ToolSearch a runtime-wide foundation instead of an MCP-only helper.
-- Scope in this implementation: catalog metadata, always-loaded Runtime V2 core tools, permission-aware deferred search/load, background task APIs, and documentation/test coverage.
-- Out of scope for this first slice: full Claude Code parity, LSP/worktree/notebook/web tooling, frontend runtime task panel, full permission approval queue, and token-aware compaction.
+- Scope in this implementation: catalog metadata, always-loaded Runtime V2 core tools, permission-aware deferred search/load, permission queue, background task APIs, dynamic Agent tool, worktree isolation, initial LSP/Skill/Web/Notebook deferred tools, and documentation/test coverage.
+- Out of scope for this slice: full Claude Code parity, a persistent language-server-backed LSP engine, dedicated frontend runtime task panel, structured diff UI, and token-aware compaction.
 
 ## Runtime Surface
 - `tool_search` is always visible and callable.
@@ -18,6 +18,15 @@
   - `TaskOutput`
   - `TaskStop`
   - `ExitPlanMode`
+  - `Agent`
+- Runtime deferred tools:
+  - `EnterWorktree`
+  - `ExitWorktree`
+  - `LSP`
+  - `Skill`
+  - `NotebookEdit`
+  - `WebFetch`
+  - `WebSearch`
 - Legacy aliases remain searchable where applicable:
   - `shell_execute` -> `Bash`
   - `read_file` -> `Read`
@@ -35,6 +44,7 @@
 
 ## Runtime Tasks
 - Background `Bash` calls create managed runtime tasks.
+- Background `Agent` calls use the same runtime task manager and output files.
 - `ChatService` exposes:
   - `ListRuntimeTasks(sessionID)`
   - `ReadRuntimeTaskOutput(taskID, offset, limit)`
@@ -50,6 +60,15 @@
 - `Bash` runs in the active workspace and supports foreground or background execution.
 - `Read` supports offset/limit by line range.
 - `Grep` and `Glob` prefer remote `rg`/`find` behavior with stable sorted output.
+- `EnterWorktree` creates a session-scoped git worktree under `.starxo/worktrees`; Runtime V2 file/search/edit/shell tools follow the active worktree until `ExitWorktree`.
+- `ExitWorktree(action=remove)` refuses dirty worktrees unless `discard_changes=true`.
+
+## Dynamic Agent And Deferred Tools
+- `Agent` spawns a focused subagent for bounded tasks. It can run synchronously or in the background and can request `isolation=worktree`.
+- `LSP` is a lightweight `rg`/`sed` fallback for definitions, references, hover, and symbols; it is not yet a persistent language server.
+- `Skill` lists/reads `.starxo/skills` and `.claude/skills` prompts inside the workspace.
+- `NotebookEdit` edits `.ipynb` cells through parsed JSON and the normal workspace guard.
+- `WebFetch` and `WebSearch` are deferred runtime tools executed by the local app process.
 
 ## Permission Queue
 - Runtime V2 now emits `runtime:permission_request` for non-read-only trusted tools.
@@ -59,7 +78,7 @@
 
 ## Follow-Up Work
 - Add frontend Runtime Tasks panel.
-- Add deferred LSP/worktree/skill/web/notebook tools through the generalized catalog.
+- Replace lightweight LSP fallback with optional persistent language server adapters.
 - Add token-aware compaction that preserves discovered tools, active tasks, permissions, todos, file read state, and diff summaries.
 - Add structured diff UI for `Edit`/`Write`.
 - Expand integration tests against the remote sandbox host.

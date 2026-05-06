@@ -7,7 +7,7 @@
 
 ## 2. 核心职责
 - 提供 Runtime V2 后台任务管理器和 ChatService Wails API。
-- 支撑后台 Bash/subagent 统一进入 task lifecycle 的第一层实现。
+- 支撑后台 Bash 和后台 `Agent` 统一进入 task lifecycle。
 
 ## 3. 输入与输出
 - 输入来源:
@@ -22,6 +22,8 @@
 - task 状态：`running`、`completed`、`failed`、`killed`
 - task output 存储在 `~/.starxo/sessions/<session>/runtime-tasks/<task>.output`
 - 大型 foreground tool result 可存储在 `~/.starxo/sessions/<session>/tool-results/<id>.txt`
+- `StartShellTask` 负责后台 shell 命令，task type 为 `shell`。
+- `StartAgentTask` 负责后台动态子 agent，task type 为 `agent`，并继承 session context 以支持 permission、worktree 等 per-session 能力。
 - `ReadTaskOutput` 支持 byte offset/limit，便于前端增量读取。
 - `StopTask` 对 running task 调用 cancel，并保留明确的 `killed` 状态。
 - permission API 方法名仍保留在本文件，但实际队列和 grant 逻辑已下沉到 `runtime_permissions.go`。
@@ -33,8 +35,8 @@
 
 ## 6. 变更影响面
 - `ChatService` 增加 runtime task manager 字段并暴露新的 Wails 方法。
-- Runtime V2 `Bash` background mode 依赖本文件。
+- Runtime V2 `Bash` background mode 和动态 `Agent(background=true)` 依赖本文件。
 
 ## 7. 维护建议
-- 增加后台 subagent 或 worktree task 时复用同一 task snapshot/result contract。
+- 增加新的后台 tool 类型时复用同一 task snapshot/result contract。
 - permission queue 完整实现后仍应保留当前 Wails API 名称，避免前端绑定断裂。

@@ -11,8 +11,10 @@
 - 实现 `ChatService`，负责多会话聊天、runner 生命周期、事件流转、中断恢复、mode 切换。
 - 维护共享 runner 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
 - 构建并装配 deferred MCP surface：MCP action/resource catalog、`tool_search`、permission gate、per-model-call late binding、announcement 注入。
-- 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
+- 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
+- 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
+- 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
@@ -113,6 +115,7 @@
   - 等待中的请求若发现自己的 config digest 已变化，必须在 task 完成后重新进入判定循环
   - recoverable fallback 也必须先重读 current config digest；只有 `currentConfigDigest == task.TargetConfigDigest` 时才允许接受
   - fallback reserve 继续复用 `reserveInstalledBundleLocked(sessionID)`，不单独写 `pendingStartBundleGeneration`
+  - caller 创建新的 freshness task 后会等待该 task 并处理结果，避免快速失败时下一轮循环重复创建 probe
   - installed bundle 的直接接受路径只有两条：
     - `currentDigest == installedBundle.ConfigDigest && bundleFresh` 的正常 fast path
     - 刚等待完成的 freshness task 报告 `fallbackToCurrent=true` 且 target digest 仍匹配时的 recoverable fallback path
@@ -131,6 +134,15 @@
   - runtime entries 同样经过 permission wrapper
   - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
   - background `Bash` 任务写入 `runtimeTaskManager`
+- Runtime V2 dynamic/deferred catalog：
+  - `Agent` 作为 always-load runtime tool 注册，支持同步/后台子 agent 和 worktree 隔离
+  - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册
+  - runtime deferred tools 和 MCP deferred tools 共用 ToolSearch、session discovery 和 permission pipeline
+  - web tools 当前由本地应用进程执行 HTTP 请求；其他 runtime tools 使用远端 sandbox operator
+- Runtime workspace manager：
+  - 按 sessionID 记录 active worktree
+  - 后续 Runtime V2 file/search/edit/shell 工具通过 context sessionID 解析当前 workspace
+  - worktree 状态不依赖全局 active session，支持多会话并行
 - Runtime V2 permission queue：
   - `WrapMCPToolWithPermissionCheck` 覆盖 runtime 与 MCP catalog entries
   - 非 read-only trusted 工具执行前调用 `deferredMCPProvider.RequestToolPermission`

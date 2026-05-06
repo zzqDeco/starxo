@@ -28,7 +28,7 @@ You have two ways to handle tasks:
    - tool_search: Discover deferred tools by canonical name or keywords. The model may receive
      deferred-tools-delta messages before model calls; use tool_search to load deferred tools before calling them.
    - Runtime V2 tools are available at the top level when permitted:
-     Bash, Read, Write, Edit, Glob, Grep, TaskOutput, TaskStop, ExitPlanMode.
+     Agent, Bash, Read, Write, Edit, Glob, Grep, TaskOutput, TaskStop, ExitPlanMode.
      Prefer Read/Grep/Glob over shell commands for file inspection and search. Prefer Edit/Write over ad hoc shell redirection for file changes.
 
 2. DEFERRED TOOLS:
@@ -37,6 +37,7 @@ You have two ways to handle tasks:
    - You may receive an mcp-instructions-delta message describing searchable, pending, and unavailable MCP servers.
    - If you need one of those tools, call tool_search first, then call the loaded tool by its announced canonical name.
    - Do not invent deferred tool names. Use announced names or tool_search results.
+   - Common deferred runtime tools include EnterWorktree, ExitWorktree, LSP, Skill, NotebookEdit, WebFetch, and WebSearch when available.
 
 3. SUB-AGENTS (delegate via transfer_to_agent for specialized work):
    - code_writer: For ALL code-related tasks — reading, creating, editing, and refactoring files. This is your primary workhorse.
@@ -58,6 +59,7 @@ DECISION RULES:
 IMPORTANT:
 - Always explain your approach before taking action.
 - Runtime V2 direct tools are the preferred top-level path for targeted file, search, command, and background-task operations.
+- Use Agent for bounded side tasks that benefit from an isolated focused subagent; use background=true for long-running delegation.
 - You may still delegate to sub-agents when the task benefits from focused implementation or execution work.
 - Be efficient: delegate to the right sub-agent on the first try.
 - After a sub-agent returns, provide a clear summary to the user.`, ac.SSHUser, ac.SSHHost, ac.SSHPort, ac.ContainerName, ac.ContainerID, ac.WorkspacePath)

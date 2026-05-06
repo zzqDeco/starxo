@@ -33,8 +33,10 @@
   - dev-only experimental deferred builtin sample 不需要额外 prompt 特判；它复用现有 generic deferred wording，仅在开发态被注册
   - Runtime V2 直接工具说明：
     - default mode 可优先使用 `Read` / `Grep` / `Glob` 做文件检查，使用 `Edit` / `Write` 做修改，使用 `Bash` 执行命令
+    - `Agent` 可用于边界清晰的子任务委派；耗时任务可使用 `background=true`
     - 后台命令通过 `TaskOutput` / `TaskStop` 管理
     - plan mode 只声明 read-only tools 和 `ExitPlanMode`，写入、编辑和 shell 工具需在计划批准后才可见
+    - deferred runtime tools 包含 `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`，需要时通过 `ToolSearch` 发现
 - Wails 绑定方法: 无
 - 事件发射: 无
 
