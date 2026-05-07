@@ -74,6 +74,7 @@
   - `emitRunState()` 在无 Wails events context（例如 Go 单测）时短路，避免 Wails runtime 对普通 context 触发 fatal
 - `ClearHistory()`：
   - 清空消息/显示/streaming/deferred state 与 plan state
+  - 清空当前 active session 对应的 todo bucket，不影响其他后台 session 的 todo 状态
   - 不重置当前 mode
   - 解锁后 best-effort 调度 async save
   - 不删除、不重写 workspace 里的 `plan.md`
@@ -161,8 +162,8 @@
 - Runtime context compact：
   - 每次新 run 前通过 `prepareMessagesForRun(...)` 刷新 compact state
   - `Read`/`Write`/`Edit` tool result 会被解析为 file read state / diff summary
-  - `ExportSessionSnapshot(...)` 保存 compact state 到 `SessionData.RuntimeContextCompact`
-  - `RestoreSessionData(...)` 会恢复 compact state、task snapshots、todo state 和 active worktree routing
+  - `ExportSessionSnapshot(...)` 保存当前 session 的 compact state 到 `SessionData.RuntimeContextCompact`
+  - `RestoreSessionData(...)` 会恢复 compact state、task snapshots、session-scoped todo state 和 active worktree routing
   - 运行中的 task 只恢复为可见 snapshot；reload 后不会假装原进程仍附着
 - deferred synthetic message 的 phase-2 注入规则：
   - 先注入 deferred tools delta，再按需注入 MCP instructions delta

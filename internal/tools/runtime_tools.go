@@ -673,6 +673,7 @@ func workspaceFilePath(ctx context.Context, filePath string, workspaceRoot strin
 	if base == "" || base == "." {
 		base = root
 	}
+	base = cleanRemotePath(base)
 
 	p := strings.TrimSpace(filePath)
 	if p == "" {
@@ -681,18 +682,38 @@ func workspaceFilePath(ctx context.Context, filePath string, workspaceRoot strin
 	switch {
 	case p == "/workspace":
 		p = base
-	case strings.HasPrefix(p, "/workspace/"):
-		p = path.Join(base, strings.TrimPrefix(p, "/workspace/"))
 	case strings.HasPrefix(p, "/"):
-		p = cleanRemotePath(p)
+		cleaned := cleanRemotePath(p)
+		if isRemotePathInside(cleaned, base) {
+			p = cleaned
+		} else if strings.HasPrefix(p, "/workspace/") {
+			p = path.Join(base, strings.TrimPrefix(p, "/workspace/"))
+		} else {
+			p = cleaned
+		}
 	default:
 		p = path.Join(base, p)
 	}
 	p = cleanRemotePath(p)
-	if p != root && !strings.HasPrefix(p, root+"/") {
-		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, root)
+	if !isRemotePathInside(p, base) {
+		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, base)
 	}
 	return p, nil
+}
+
+func isRemotePathInside(p, root string) bool {
+	p = cleanRemotePath(p)
+	root = cleanRemotePath(root)
+	if p == "" || root == "" {
+		return false
+	}
+	if p == root {
+		return true
+	}
+	if root == "/" {
+		return strings.HasPrefix(p, "/")
+	}
+	return strings.HasPrefix(p, root+"/")
 }
 
 func cleanRemotePath(p string) string {

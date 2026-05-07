@@ -1259,6 +1259,7 @@ func (s *ChatService) RemoveSession(sessionID string) {
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
 	s.cleanupRetiredBundlesLocked()
+	tools.ClearTodosForSession(sessionID)
 }
 
 // ---------------------------------------------------------------------------
@@ -2344,7 +2345,7 @@ func (s *ChatService) ClearHistory() error {
 	sessionSvc := s.sessionService
 	s.mu.Unlock()
 
-	tools.ClearTodos()
+	tools.ClearTodosForSession(sessionID)
 	if sessionSvc != nil && sessionID != "" {
 		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
 			logger.Warn("[CHAT] Failed to schedule clear-history save", "session", sessionID, "error", err)
@@ -2477,9 +2478,9 @@ func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model
 		if workspaces != nil {
 			workspaces.RestoreCompactSnapshot(sessionID, data.RuntimeContextCompact.Workspace)
 		}
-		tools.RestoreTodos(data.RuntimeContextCompact.Todos)
+		tools.RestoreTodosForSession(sessionID, data.RuntimeContextCompact.Todos)
 	} else {
-		tools.ClearTodos()
+		tools.ClearTodosForSession(sessionID)
 	}
 }
 
@@ -2895,7 +2896,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred runtime tools: %w", err)
 	}
-	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch)
+	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch, provider)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred web tools: %w", err)

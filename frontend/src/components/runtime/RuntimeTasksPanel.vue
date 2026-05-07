@@ -25,6 +25,7 @@ const stoppingTaskId = ref('')
 const panelRef = ref<HTMLElement | null>(null)
 
 let refreshTimer: number | null = null
+let eventCleanups: Array<() => void> = []
 
 const activeSessionId = computed(() => sessionStore.activeSessionId || '')
 const selectedTask = computed(() => tasks.value.find((task) => task.id === selectedTaskId.value) || null)
@@ -193,19 +194,23 @@ watch(selectedTaskId, () => {
 })
 
 onMounted(() => {
-  EventsOn('runtime:task_started', upsertTask)
-  EventsOn('runtime:task_completed', (task: tools.RuntimeTaskSnapshot) => {
-    upsertTask(task)
-    if (task?.id === selectedTaskId.value) readOutput()
-  })
-  EventsOn('runtime:task_stopped', (task: tools.RuntimeTaskSnapshot) => {
-    upsertTask(task)
-    if (task?.id === selectedTaskId.value) readOutput()
-  })
+  eventCleanups = [
+    EventsOn('runtime:task_started', upsertTask),
+    EventsOn('runtime:task_completed', (task: tools.RuntimeTaskSnapshot) => {
+      upsertTask(task)
+      if (task?.id === selectedTaskId.value) readOutput()
+    }),
+    EventsOn('runtime:task_stopped', (task: tools.RuntimeTaskSnapshot) => {
+      upsertTask(task)
+      if (task?.id === selectedTaskId.value) readOutput()
+    }),
+  ]
   startTimer()
 })
 
 onUnmounted(() => {
+  eventCleanups.forEach((cleanup) => cleanup())
+  eventCleanups = []
   stopTimer()
 })
 </script>

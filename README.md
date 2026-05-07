@@ -168,6 +168,8 @@ Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`,
 
 `WebSearch` defaults to DuckDuckGo HTML search and can be redirected through `agent.webSearch.providers`. `type: "tinyfish"` is a dedicated TinyFish Search API adapter for `GET https://api.search.tinyfish.ai` with `X-API-Key` read from `TINYFISH_API_KEY` by default; it supports TinyFish `query`, `location`, `language`, and `page` parameters and parses `results[].title/url/snippet`. `type: "http"` remains available for custom GET/POST providers with headers, body templates, and JSON path extraction.
 
+`WebFetch` and `WebSearch` only execute `http`/`https` requests. Empty hosts, URL userinfo, unsafe local/private/link-local/multicast/unspecified targets, IPv6 ULA/link-local targets, and `169.254.169.254` are blocked by default; non-public endpoints require an explicit runtime permission grant and redirects are validated before they are followed.
+
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 
 Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data and can be reviewed or revoked from Settings / Permissions.

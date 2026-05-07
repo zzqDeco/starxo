@@ -146,6 +146,10 @@ func (m *runtimeWorkspaceManager) createWorktree(ctx context.Context, op command
 	cmd := strings.Join([]string{
 		"cd " + shellQuoteRuntime(defaultWorkspace),
 		"git rev-parse --is-inside-work-tree >/dev/null",
+		"exclude_file=$(git rev-parse --git-path info/exclude)",
+		"mkdir -p \"$(dirname \"$exclude_file\")\"",
+		"touch \"$exclude_file\"",
+		"grep -qxF '.starxo/' \"$exclude_file\" || printf '%s\\n' '.starxo/' >> \"$exclude_file\"",
 		"mkdir -p .starxo/worktrees",
 		"git worktree add -b " + shellQuoteRuntime(branch) + " " + shellQuoteRuntime(worktreePath) + " HEAD",
 	}, " && ")

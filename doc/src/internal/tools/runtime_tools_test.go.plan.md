@@ -17,6 +17,8 @@
 - plan mode current loaded 只保留 read-only trusted runtime tools。
 - `Edit` tool 能通过 invokable contract 修改文件并返回 patch。
 - `safeSearchPath` 拒绝 workspace 外 absolute path 和 `..` traversal。
+- `workspaceFilePath` 在 worktree mode 下把 relative path 和 `/workspace/...` 映射到 active worktree，并拒绝 parent workspace absolute path。
+- `workspaceFilePath` 允许 active worktree 自身的 absolute path，避免 `/workspace/.starxo/worktrees/...` 被重复映射。
 - 大型 Bash 输出会写入持久化结果并在 inline stdout 中截断。
 - `Read` tool 会通过 fake workspace manager 使用当前 session active workspace。
 - deferred runtime tools 的 metadata 覆盖 LSP/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。

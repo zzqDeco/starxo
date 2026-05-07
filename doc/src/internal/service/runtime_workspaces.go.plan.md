@@ -17,6 +17,7 @@
 ## 4. 关键实现细节
 - 每个 session 同时只允许一个 active worktree。
 - worktree 创建位置固定在 `<workspace>/.starxo/worktrees/<slug>`。
+- 创建 worktree 前会把 `.starxo/` 追加到本地 Git `info/exclude`，避免改动 tracked `.gitignore`。
 - 分支名固定为 `starxo/<slug>`，slug 会做字符过滤和长度限制。
 - `CreateIsolatedWorktree` 只创建 worktree，不写入 session active state；子 agent 通过 context workspace override 路由到该 worktree。
 - `CurrentWorkspace` 优先读取 context-scoped override，其次读取 session-scoped active worktree，最后回退默认 workspace。

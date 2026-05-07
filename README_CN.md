@@ -168,6 +168,8 @@ wails dev
 
 `WebSearch` 默认使用 DuckDuckGo HTML 搜索，也可以通过 `agent.webSearch.providers` 切换 provider。`type: "tinyfish"` 是专用 TinyFish Search API 适配器，对齐 `GET https://api.search.tinyfish.ai`，默认从 `TINYFISH_API_KEY` 读取 API key 并写入 `X-API-Key`，支持 TinyFish `query`、`location`、`language`、`page` 参数，并解析 `results[].title/url/snippet`。`type: "http"` 继续用于自定义 GET/POST provider，支持 headers、body template 和 JSON path 提取。
 
+`WebFetch` 和 `WebSearch` 只执行 `http`/`https` 请求。空 host、URL userinfo、本地/私有/link-local/组播/未指定地址、IPv6 ULA/link-local 地址以及 `169.254.169.254` 默认阻止；访问非公网 endpoint 需要显式 runtime permission 授权，redirect 跟随后也会先重新校验目标。
+
 计划模式只暴露 read-only trusted 工具；写入、编辑和 shell 执行会在计划批准后才进入可见工具面。
 
 高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化，并可在设置页 Permissions 分区查看或撤销。
