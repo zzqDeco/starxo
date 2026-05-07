@@ -1,11 +1,15 @@
 import { onMounted, onUnmounted } from 'vue'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 export function useWailsEvent<T = any>(eventName: string, handler: (data: T) => void) {
+  let cleanup: (() => void) | undefined
+
   onMounted(() => {
-    EventsOn(eventName, handler)
+    cleanup = EventsOn(eventName, handler)
   })
+
   onUnmounted(() => {
-    EventsOff(eventName)
+    cleanup?.()
+    cleanup = undefined
   })
 }

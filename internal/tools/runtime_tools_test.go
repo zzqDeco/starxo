@@ -187,6 +187,56 @@ func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFilePathUsesActiveWorktreeBoundary(t *testing.T) {
+	manager := fakeWorkspaceManager{workspace: "/repo/.starxo/worktrees/feat"}
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "relative", path: "main.go", want: "/repo/.starxo/worktrees/feat/main.go"},
+		{name: "workspace alias", path: "/workspace/main.go", want: "/repo/.starxo/worktrees/feat/main.go"},
+		{name: "active absolute", path: "/repo/.starxo/worktrees/feat/main.go", want: "/repo/.starxo/worktrees/feat/main.go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := workspaceFilePath(ctx, tt.path, "/repo", manager)
+			if err != nil {
+				t.Fatalf("workspaceFilePath(%q): %v", tt.path, err)
+			}
+			if got != tt.want {
+				t.Fatalf("workspaceFilePath(%q) = %q; want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceFilePathRejectsParentAbsolutePathInWorktree(t *testing.T) {
+	manager := fakeWorkspaceManager{workspace: "/repo/.starxo/worktrees/feat"}
+
+	got, err := workspaceFilePath(context.Background(), "/repo/main.go", "/repo", manager)
+	if err == nil {
+		t.Fatalf("expected parent workspace path to be rejected, got %q", got)
+	}
+	if !strings.Contains(err.Error(), "/repo/.starxo/worktrees/feat") {
+		t.Fatalf("expected error to name active worktree boundary, got %v", err)
+	}
+}
+
+func TestWorkspaceFilePathAllowsActiveWorktreeAbsolutePathUnderWorkspaceRoot(t *testing.T) {
+	manager := fakeWorkspaceManager{workspace: "/workspace/.starxo/worktrees/feat"}
+
+	got, err := workspaceFilePath(context.Background(), "/workspace/.starxo/worktrees/feat/main.go", "/workspace", manager)
+	if err != nil {
+		t.Fatalf("workspaceFilePath active absolute: %v", err)
+	}
+	if want := "/workspace/.starxo/worktrees/feat/main.go"; got != want {
+		t.Fatalf("workspaceFilePath active absolute = %q; want %q", got, want)
+	}
+}
+
 func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
 	entries, err := NewRuntimeDeferredCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil, nil)
 	if err != nil {

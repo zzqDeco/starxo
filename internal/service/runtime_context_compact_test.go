@@ -14,11 +14,14 @@ import (
 
 func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Cleanup(tools.ClearTodos)
 	now := time.UnixMilli(1700000000000)
 	chat := NewChatService(nil)
 	chat.now = func() time.Time { return now }
 	sessionID := "sess-compact"
+	t.Cleanup(func() {
+		tools.ClearTodos()
+		tools.ClearTodosForSession(sessionID)
+	})
 
 	chat.mu.Lock()
 	run := chat.getOrCreateRun(sessionID)
@@ -87,7 +90,7 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 		WorktreeBranch:    "starxo/a",
 	}
 	chat.runtimeWorkspaces.mu.Unlock()
-	tools.RestoreTodos([]model.RuntimeTodoItem{{
+	tools.RestoreTodosForSession(sessionID, []model.RuntimeTodoItem{{
 		ID:     "todo-1",
 		Title:  "compact",
 		Status: "in_progress",
@@ -128,7 +131,12 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 
 	reloaded := NewChatService(nil)
 	reloaded.now = func() time.Time { return now.Add(time.Second) }
+	tools.ClearTodosForSession(sessionID)
 	reloaded.RestoreSessionData(sessionID, snapshot.SessionData)
+	restoredTodos := tools.SnapshotTodosForSession(sessionID)
+	if len(restoredTodos) != 1 || restoredTodos[0].ID != "todo-1" || restoredTodos[0].Status != "in_progress" {
+		t.Fatalf("expected restored session todos, got %#v", restoredTodos)
+	}
 	reloadedRun := reloaded.GetOrCreateRun(sessionID)
 	reloadedRun.stateMu.RLock()
 	if len(reloadedRun.fileReadState) != 1 || len(reloadedRun.diffSummaries) != 1 || reloadedRun.runtimeContextCompact == nil {
@@ -194,7 +202,11 @@ func TestRuntimeTaskRestoreKeepsCompletedTaskStatus(t *testing.T) {
 
 func TestTodoSnapshotAndRestore(t *testing.T) {
 	tools.ClearTodos()
-	t.Cleanup(tools.ClearTodos)
+	tools.ClearTodosForSession("todo-session")
+	t.Cleanup(func() {
+		tools.ClearTodos()
+		tools.ClearTodosForSession("todo-session")
+	})
 	tools.RestoreTodos([]model.RuntimeTodoItem{{
 		ID:        "a",
 		Title:     "A",
@@ -214,6 +226,78 @@ func TestTodoSnapshotAndRestore(t *testing.T) {
 	tools.ClearTodos()
 	if got := tools.SnapshotTodos(); len(got) != 0 {
 		t.Fatalf("expected cleared todos, got %#v", got)
+	}
+
+	tools.RestoreTodosForSession("todo-session", []model.RuntimeTodoItem{{
+		ID:     "session-a",
+		Title:  "Session A",
+		Status: "pending",
+	}})
+	if got := tools.SnapshotTodosForSession("todo-session"); len(got) != 1 || got[0].ID != "session-a" {
+		t.Fatalf("unexpected session todos: %#v", got)
+	}
+	if got := tools.SnapshotTodos(); len(got) != 0 {
+		t.Fatalf("expected session restore not to touch global todos, got %#v", got)
+	}
+	tools.ClearTodosForSession("todo-session")
+	if got := tools.SnapshotTodosForSession("todo-session"); len(got) != 0 {
+		t.Fatalf("expected cleared session todos, got %#v", got)
+	}
+}
+
+func TestRuntimeContextCompactSnapshotsSessionScopedTodos(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionA := "sess-a"
+	sessionB := "sess-b"
+	t.Cleanup(func() {
+		tools.ClearTodosForSession(sessionA)
+		tools.ClearTodosForSession(sessionB)
+	})
+
+	chat.mu.Lock()
+	runA := chat.getOrCreateRun(sessionA)
+	runB := chat.getOrCreateRun(sessionB)
+	chat.mu.Unlock()
+	runA.addUserMessage("session a")
+	runB.addUserMessage("session b")
+
+	tools.RestoreTodosForSession(sessionA, []model.RuntimeTodoItem{{
+		ID:     "a",
+		Title:  "A",
+		Status: "pending",
+	}})
+	tools.RestoreTodosForSession(sessionB, []model.RuntimeTodoItem{{
+		ID:     "b",
+		Title:  "B",
+		Status: "done",
+	}})
+
+	snapshotA, err := chat.ExportSessionSnapshot(sessionA)
+	if err != nil {
+		t.Fatalf("export session-a snapshot: %v", err)
+	}
+	snapshotB, err := chat.ExportSessionSnapshot(sessionB)
+	if err != nil {
+		t.Fatalf("export session-b snapshot: %v", err)
+	}
+	todosA := snapshotA.SessionData.RuntimeContextCompact.Todos
+	if len(todosA) != 1 || todosA[0].ID != "a" {
+		t.Fatalf("unexpected session-a compact todos: %#v", todosA)
+	}
+	todosB := snapshotB.SessionData.RuntimeContextCompact.Todos
+	if len(todosB) != 1 || todosB[0].ID != "b" {
+		t.Fatalf("unexpected session-b compact todos: %#v", todosB)
+	}
+
+	reloaded := NewChatService(nil)
+	tools.ClearTodosForSession(sessionA)
+	tools.ClearTodosForSession(sessionB)
+	reloaded.RestoreSessionData(sessionB, snapshotB.SessionData)
+	if got := tools.SnapshotTodosForSession(sessionA); len(got) != 0 {
+		t.Fatalf("expected session-a todos to remain empty after restoring session-b, got %#v", got)
+	}
+	if got := tools.SnapshotTodosForSession(sessionB); len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("expected session-b todos restored, got %#v", got)
 	}
 }
 

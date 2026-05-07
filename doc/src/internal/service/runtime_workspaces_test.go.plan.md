@@ -14,8 +14,10 @@
 
 ## 4. 关键测试覆盖
 - `EnterWorktree` 创建 session-scoped worktree 后，`CurrentWorkspace` 返回 worktree path。
+- worktree 创建命令会在 `git worktree add` 前更新 Git `info/exclude`，并且不触碰 tracked `.gitignore`。
 - `ExitWorktree(action=keep)` 恢复默认 workspace，并保留 worktree。
 - dirty worktree 在未设置 `discard_changes=true` 时拒绝 remove，并保持 active worktree 状态。
+- `CreateIsolatedWorktree` 不切换 session workspace；只有带 context override 的子 agent context 会路由到 isolated worktree。
 
 ## 5. 维护建议
 - 新增 worktree action 时同步补状态转换和命令构造测试。

@@ -164,9 +164,11 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 
 The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
 
-Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `Agent` can run focused subagents synchronously or in the background, and can request worktree isolation for bounded tasks.
+Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `Agent` can run focused subagents synchronously or in the background, and can request context-scoped worktree isolation for bounded tasks without switching the parent session workspace.
 
 `WebSearch` defaults to DuckDuckGo HTML search and can be redirected through `agent.webSearch.providers`. `type: "tinyfish"` is a dedicated TinyFish Search API adapter for `GET https://api.search.tinyfish.ai` with `X-API-Key` read from `TINYFISH_API_KEY` by default; it supports TinyFish `query`, `location`, `language`, and `page` parameters and parses `results[].title/url/snippet`. `type: "http"` remains available for custom GET/POST providers with headers, body templates, and JSON path extraction.
+
+`WebFetch` and `WebSearch` only execute `http`/`https` requests. Empty hosts, URL userinfo, unsafe local/private/link-local/multicast/unspecified targets, IPv6 ULA/link-local targets, and `169.254.169.254` are blocked by default; non-public endpoints require an explicit runtime permission grant and redirects are validated before they are followed.
 
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 

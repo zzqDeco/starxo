@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NPopconfirm, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -22,6 +22,7 @@ const pending = ref<tools.ToolPermissionRequest[]>([])
 const loading = ref(false)
 const revokingTool = ref('')
 const clearing = ref(false)
+let eventCleanups: Array<() => void> = []
 
 const activeSessionId = computed(() => sessionStore.activeSessionId || '')
 
@@ -38,23 +39,29 @@ function formatTime(ms?: number) {
 }
 
 async function refreshPermissions() {
-  if (!activeSessionId.value) {
+  const sessionID = activeSessionId.value
+  if (!sessionID) {
     grants.value = []
     pending.value = []
+    loading.value = false
     return
   }
   loading.value = true
   try {
     const [nextGrants, nextPending] = await Promise.all([
-      ListToolPermissionGrants(activeSessionId.value),
-      ListToolPermissionRequests(activeSessionId.value),
+      ListToolPermissionGrants(sessionID),
+      ListToolPermissionRequests(sessionID),
     ])
+    if (sessionID !== activeSessionId.value) return
     grants.value = (nextGrants || []) as model.RuntimePermissionGrant[]
     pending.value = (nextPending || []) as tools.ToolPermissionRequest[]
   } catch (e) {
+    if (sessionID !== activeSessionId.value) return
     feedback.error(t('permissions.refresh'), e)
   } finally {
-    loading.value = false
+    if (sessionID === activeSessionId.value) {
+      loading.value = false
+    }
   }
 }
 
@@ -88,10 +95,17 @@ watch(activeSessionId, refreshPermissions)
 
 onMounted(() => {
   refreshPermissions()
-  EventsOn('runtime:permission_request', refreshPermissions)
-  EventsOn('runtime:permission_canceled', refreshPermissions)
-  EventsOn('runtime:permission_resolved', refreshPermissions)
-  EventsOn('runtime:permission_grants_changed', refreshPermissions)
+  eventCleanups = [
+    EventsOn('runtime:permission_request', refreshPermissions),
+    EventsOn('runtime:permission_canceled', refreshPermissions),
+    EventsOn('runtime:permission_resolved', refreshPermissions),
+    EventsOn('runtime:permission_grants_changed', refreshPermissions),
+  ]
+})
+
+onUnmounted(() => {
+  eventCleanups.forEach((cleanup) => cleanup())
+  eventCleanups = []
 })
 </script>
 

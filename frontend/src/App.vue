@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { NButton, NCard, NCode, NConfigProvider, NDialogProvider, NMessageProvider, NModal, NSpace, NTag, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/components/layout/MainLayout.vue'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -35,18 +35,30 @@ interface RuntimePermissionRequest {
 
 const permissionQueue = ref<RuntimePermissionRequest[]>([])
 const permissionBusy = ref(false)
-const visiblePermissionQueue = computed(() => {
-  const active = sessionStore.activeSessionId
-  return permissionQueue.value.filter((request) => !request.sessionId || (!!active && request.sessionId === active))
-})
-const pendingPermission = computed(() => visiblePermissionQueue.value[0] || null)
+const permissionSwitching = ref(false)
+const eventCleanups: Array<() => void> = []
+const pendingPermission = computed(() => permissionQueue.value[0] || null)
 const permissionVisible = computed(() => pendingPermission.value !== null)
 const permissionQueuePosition = computed(() => {
   const request = pendingPermission.value
   if (!request) return ''
-  const index = visiblePermissionQueue.value.findIndex((item) => item.requestId === request.requestId)
-  if (index < 0 || visiblePermissionQueue.value.length <= 1) return ''
-  return `${index + 1} / ${visiblePermissionQueue.value.length}`
+  const index = permissionQueue.value.findIndex((item) => item.requestId === request.requestId)
+  if (index < 0 || permissionQueue.value.length <= 1) return ''
+  return `${index + 1} / ${permissionQueue.value.length}`
+})
+const pendingPermissionSession = computed(() => {
+  const sessionId = pendingPermission.value?.sessionId
+  if (!sessionId) return null
+  return sessionStore.sessions.find((session) => session.id === sessionId) || null
+})
+const pendingPermissionSessionId = computed(() => pendingPermission.value?.sessionId || '')
+const pendingPermissionSessionTitle = computed(() => {
+  if (!pendingPermissionSessionId.value) return t('permissions.globalRequest')
+  return pendingPermissionSession.value?.title || t('sidebar.untitled')
+})
+const permissionIsInactiveSession = computed(() => {
+  const sessionId = pendingPermissionSessionId.value
+  return !!sessionId && sessionId !== sessionStore.activeSessionId
 })
 
 // Keep palette / radius values in sync with `:root` in src/style.css.
@@ -111,6 +123,27 @@ const themeOverrides: GlobalThemeOverrides = {
 function isActiveSession(data: any): boolean {
   const sid = data?.sessionId
   return !sid || sid === sessionStore.activeSessionId
+}
+
+function onWailsEvent<T = any>(eventName: string, handler: (data: T) => void | Promise<void>) {
+  eventCleanups.push(EventsOn(eventName, handler as (...data: any[]) => void))
+}
+
+function shortSessionId(sessionId?: string) {
+  return sessionId ? sessionId.slice(0, 8) : ''
+}
+
+async function switchToPermissionSession() {
+  const sessionId = pendingPermissionSessionId.value
+  if (!sessionId || sessionId === sessionStore.activeSessionId || permissionSwitching.value) return
+  permissionSwitching.value = true
+  try {
+    await sessionStore.switchSession(sessionId)
+  } catch (e) {
+    console.error('Failed to switch to permission request session:', e)
+  } finally {
+    permissionSwitching.value = false
+  }
 }
 
 function permissionRiskType(risk?: string) {
@@ -256,7 +289,7 @@ onMounted(async () => {
   await restoreActiveMessages()
 
   // Session switched event — full state restore from backend snapshot
-  EventsOn('session:switched', async (data: {
+  onWailsEvent('session:switched', async (data: {
     session: Session;
     containerID?: string;
     agentRunning?: boolean;
@@ -306,32 +339,32 @@ onMounted(async () => {
   })
 
   // SSH progress events
-  EventsOn('ssh:progress', (data: { step: string; percent: number }) => {
+  onWailsEvent('ssh:progress', (data: { step: string; percent: number }) => {
     if (data) {
       connectionStore.updateProgress(data.step, data.percent)
     }
   })
 
   // SSH connected
-  EventsOn('ssh:connected', () => {
+  onWailsEvent('ssh:connected', () => {
     connectionStore.setSSHConnected()
   })
 
   // SSH disconnected (health check failure or manual disconnect)
-  EventsOn('ssh:disconnected', () => {
+  onWailsEvent('ssh:disconnected', () => {
     connectionStore.setSSHDisconnected()
     containerStore.clearActiveContainer()
   })
 
   // Container creation/activation progress
-  EventsOn('container:progress', (data: { step: string; percent: number }) => {
+  onWailsEvent('container:progress', (data: { step: string; percent: number }) => {
     if (data) {
       containerStore.updateContainerProgress(data.step, data.percent)
     }
   })
 
   // New container ready
-  EventsOn('container:ready', (data: { containerID: string }) => {
+  onWailsEvent('container:ready', (data: { containerID: string }) => {
     if (data?.containerID) {
       containerStore.setActiveContainer(data.containerID)
       containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
@@ -340,7 +373,7 @@ onMounted(async () => {
   })
 
   // Container activated (switched to existing container)
-  EventsOn('container:activated', (data: { containerID: string }) => {
+  onWailsEvent('container:activated', (data: { containerID: string }) => {
     if (data?.containerID) {
       containerStore.setActiveContainer(data.containerID)
       containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
@@ -348,12 +381,12 @@ onMounted(async () => {
   })
 
   // Container deactivated
-  EventsOn('container:deactivated', () => {
+  onWailsEvent('container:deactivated', () => {
     containerStore.clearActiveContainer()
   })
 
   // Timeline events (unified event stream — filtered by sessionId)
-  EventsOn('agent:timeline', (data: TurnEvent) => {
+  onWailsEvent('agent:timeline', (data: TurnEvent) => {
     if (!data || !isActiveSession(data)) return
     chatStore.addTimelineEvent(data)
     if (!chatStore.agentDone && data.agent) {
@@ -362,14 +395,14 @@ onMounted(async () => {
   })
 
   // Agent done (now receives object with sessionId)
-  EventsOn('agent:done', (data: any) => {
+  onWailsEvent('agent:done', (data: any) => {
     if (!isActiveSession(data)) return
     chatStore.setGenerating(false)
     sessionStore.loadSessions().catch((e) => console.error('Failed to refresh sessions:', e))
   })
 
   // Agent error (now receives object with sessionId + error)
-  EventsOn('agent:error', (data: any) => {
+  onWailsEvent('agent:error', (data: any) => {
     if (!isActiveSession(data)) return
     chatStore.setGenerating(false)
     const errMsg = typeof data === 'string' ? data : data?.error
@@ -385,19 +418,19 @@ onMounted(async () => {
   })
 
   // Interrupt event — agent needs user input (filtered by sessionId)
-  EventsOn('agent:interrupt', (data: InterruptEvent) => {
+  onWailsEvent('agent:interrupt', (data: InterruptEvent) => {
     if (!data || !isActiveSession(data)) return
     chatStore.setInterrupt(data)
   })
 
   // Mode changed event (filtered by sessionId)
-  EventsOn('agent:mode_changed', (data: ModeChangedEvent) => {
+  onWailsEvent('agent:mode_changed', (data: ModeChangedEvent) => {
     if (!data?.mode || !isActiveSession(data)) return
     chatStore.setMode(data.mode)
   })
 
   // Session-level run state stream — used by session rail and active composer.
-  EventsOn('agent:run_state', (data: SessionRunState) => {
+  onWailsEvent('agent:run_state', (data: SessionRunState) => {
     if (!data?.sessionId) return
     chatStore.setSessionRunState(data)
     if (!isActiveSession(data)) return
@@ -405,17 +438,22 @@ onMounted(async () => {
     chatStore.setGenerating(data.running, data.currentAgent || '')
   })
 
-  EventsOn('runtime:permission_request', (data: RuntimePermissionRequest) => {
+  onWailsEvent('runtime:permission_request', (data: RuntimePermissionRequest) => {
     upsertPermissionRequest(data)
   })
 
-  EventsOn('runtime:permission_canceled', (data: { requestId?: string }) => {
+  onWailsEvent('runtime:permission_canceled', (data: { requestId?: string }) => {
     removePermissionRequest(data?.requestId)
   })
 
-  EventsOn('runtime:permission_resolved', (data: { requestId?: string }) => {
+  onWailsEvent('runtime:permission_resolved', (data: { requestId?: string }) => {
     removePermissionRequest(data?.requestId)
   })
+})
+
+onUnmounted(() => {
+  eventCleanups.forEach((cleanup) => cleanup())
+  eventCleanups.length = 0
 })
 
 watch(() => sessionStore.activeSessionId, () => {
@@ -434,6 +472,9 @@ watch(() => sessionStore.activeSessionId, () => {
               <span>{{ pendingPermission?.title || pendingPermission?.toolName }}</span>
               <div class="permission-title-actions">
                 <span v-if="permissionQueuePosition" class="permission-queue-position">{{ permissionQueuePosition }}</span>
+                <NTag v-if="permissionIsInactiveSession" size="small" type="warning">
+                  {{ t('permissions.inactiveSession') }}
+                </NTag>
                 <NTag size="small" :type="permissionRiskType(pendingPermission?.risk)">
                   {{ pendingPermission?.risk || 'permission' }}
                 </NTag>
@@ -441,6 +482,29 @@ watch(() => sessionStore.activeSessionId, () => {
             </div>
           </template>
           <NCard embedded :bordered="false" class="permission-card">
+            <div class="permission-session-context">
+              <div class="permission-session-copy">
+                <span class="permission-session-label">{{ t('permissions.sessionContext') }}</span>
+                <strong>{{ pendingPermissionSessionTitle }}</strong>
+                <span
+                  v-if="pendingPermissionSessionId"
+                  class="permission-session-id"
+                  :title="pendingPermissionSessionId"
+                >
+                  #{{ shortSessionId(pendingPermissionSessionId) }}
+                </span>
+              </div>
+              <NButton
+                v-if="permissionIsInactiveSession"
+                size="tiny"
+                tertiary
+                :disabled="permissionBusy || sessionStore.switching"
+                :loading="permissionSwitching"
+                @click="switchToPermissionSession"
+              >
+                {{ t('permissions.switchToSession') }}
+              </NButton>
+            </div>
             <div class="permission-meta">
               <span>{{ pendingPermission?.source || 'runtime' }}</span>
               <span>{{ pendingPermission?.toolClass || 'tool' }}</span>
@@ -508,6 +572,34 @@ watch(() => sessionStore.activeSessionId, () => {
 
 .permission-card {
   background: #0b1220;
+}
+
+.permission-session-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.permission-session-copy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.permission-session-copy strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.permission-session-label,
+.permission-session-id {
+  color: #94a3b8;
+  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 11px;
 }
 
 .permission-meta {

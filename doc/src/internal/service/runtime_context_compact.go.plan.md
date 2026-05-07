@@ -15,14 +15,14 @@
   - `SessionRun` 的 messages、discovered tools、permission grants、plan state
   - `runtimeTaskManager` 的 task snapshots
   - `runtimeWorkspaceManager` 的 active worktree state
-  - `tools.SnapshotTodos()`
+  - `tools.SnapshotTodosForSession(sessionID)`
   - Runtime tool call/result JSON
 - 输出结果:
   - `model.RuntimeContextCompact`
   - 带 compact synthetic message 的 `[]*schema.Message`
 
 ## 4. 关键实现细节
-- `refreshRuntimeContextCompact(...)` 是 compact state 的统一构建入口。
+- `refreshRuntimeContextCompact(...)` 是 compact state 的统一构建入口，并只读取当前 `sessionID` 的 todo bucket。
 - compact summary 是 deterministic summary，不调用 LLM。
 - `Read`/`read_file` 记录 file path、line range、total lines 和返回内容 hash。
 - `Write`/`write_file`、`Edit`/`str_replace_editor` 记录最近 diff summary。

@@ -22,6 +22,8 @@ type runtimeWorktreeState struct {
 	Slug              string
 }
 
+type runtimeWorkspaceOverrideKey struct{}
+
 type runtimeWorkspaceManager struct {
 	mu     sync.RWMutex
 	states map[string]runtimeWorktreeState
@@ -39,6 +41,9 @@ func newRuntimeWorkspaceManager(now func() time.Time) *runtimeWorkspaceManager {
 }
 
 func (m *runtimeWorkspaceManager) CurrentWorkspace(ctx context.Context, defaultWorkspace string) string {
+	if override := runtimeWorkspaceOverride(ctx); override != "" {
+		return override
+	}
 	sessionID := workspaceSessionID(ctx)
 	if sessionID == "" {
 		return defaultWorkspace
@@ -93,13 +98,6 @@ func (m *runtimeWorkspaceManager) RestoreCompactSnapshot(sessionID string, compa
 }
 
 func (m *runtimeWorkspaceManager) EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (tools.WorktreeOutput, error) {
-	if op == nil {
-		return tools.WorktreeOutput{}, fmt.Errorf("sandbox operator is not available")
-	}
-	defaultWorkspace = cleanRuntimeRemotePath(defaultWorkspace)
-	if defaultWorkspace == "" || defaultWorkspace == "." {
-		return tools.WorktreeOutput{}, fmt.Errorf("sandbox workspace is not active")
-	}
 	sessionID := workspaceSessionID(ctx)
 	if sessionID == "" {
 		sessionID = "global"
@@ -111,6 +109,34 @@ func (m *runtimeWorkspaceManager) EnterWorktree(ctx context.Context, op commandl
 		return tools.WorktreeOutput{}, fmt.Errorf("already in a worktree session")
 	}
 
+	state, out, err := m.createWorktree(ctx, op, defaultWorkspace, name)
+	if err != nil {
+		return tools.WorktreeOutput{}, err
+	}
+	state.SessionID = sessionID
+	m.mu.Lock()
+	m.states[sessionID] = state
+	m.mu.Unlock()
+	return out, nil
+}
+
+func (m *runtimeWorkspaceManager) CreateIsolatedWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (tools.WorktreeOutput, error) {
+	_, out, err := m.createWorktree(ctx, op, defaultWorkspace, name)
+	if err != nil {
+		return tools.WorktreeOutput{}, err
+	}
+	out.Message = fmt.Sprintf("Created isolated worktree at %s on branch %s. This subagent uses the worktree; the parent session workspace is unchanged.", out.WorktreePath, out.WorktreeBranch)
+	return out, nil
+}
+
+func (m *runtimeWorkspaceManager) createWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (runtimeWorktreeState, tools.WorktreeOutput, error) {
+	if op == nil {
+		return runtimeWorktreeState{}, tools.WorktreeOutput{}, fmt.Errorf("sandbox operator is not available")
+	}
+	defaultWorkspace = cleanRuntimeRemotePath(defaultWorkspace)
+	if defaultWorkspace == "" || defaultWorkspace == "." {
+		return runtimeWorktreeState{}, tools.WorktreeOutput{}, fmt.Errorf("sandbox workspace is not active")
+	}
 	slug := sanitizeWorktreeSlug(name)
 	if slug == "" {
 		slug = fmt.Sprintf("wt-%d", m.now().Unix())
@@ -120,28 +146,28 @@ func (m *runtimeWorkspaceManager) EnterWorktree(ctx context.Context, op commandl
 	cmd := strings.Join([]string{
 		"cd " + shellQuoteRuntime(defaultWorkspace),
 		"git rev-parse --is-inside-work-tree >/dev/null",
+		"exclude_file=$(git rev-parse --git-path info/exclude)",
+		"mkdir -p \"$(dirname \"$exclude_file\")\"",
+		"touch \"$exclude_file\"",
+		"grep -qxF '.starxo/' \"$exclude_file\" || printf '%s\\n' '.starxo/' >> \"$exclude_file\"",
 		"mkdir -p .starxo/worktrees",
 		"git worktree add -b " + shellQuoteRuntime(branch) + " " + shellQuoteRuntime(worktreePath) + " HEAD",
 	}, " && ")
 	output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
 	if err != nil {
-		return tools.WorktreeOutput{}, err
+		return runtimeWorktreeState{}, tools.WorktreeOutput{}, err
 	}
 	if output.ExitCode != 0 {
-		return tools.WorktreeOutput{}, fmt.Errorf("failed to create worktree: %s", output.Stderr)
+		return runtimeWorktreeState{}, tools.WorktreeOutput{}, fmt.Errorf("failed to create worktree: %s", output.Stderr)
 	}
 
 	state := runtimeWorktreeState{
-		SessionID:         sessionID,
 		OriginalWorkspace: defaultWorkspace,
 		WorktreePath:      worktreePath,
 		WorktreeBranch:    branch,
 		Slug:              slug,
 	}
-	m.mu.Lock()
-	m.states[sessionID] = state
-	m.mu.Unlock()
-	return tools.WorktreeOutput{
+	return state, tools.WorktreeOutput{
 		Action:         "enter",
 		WorkspacePath:  worktreePath,
 		WorktreePath:   worktreePath,
@@ -228,6 +254,24 @@ func workspaceSessionID(ctx context.Context) string {
 	}
 	if v, ok := ctx.Value("sessionID").(string); ok {
 		return v
+	}
+	return ""
+}
+
+func contextWithRuntimeWorkspaceOverride(ctx context.Context, workspace string) context.Context {
+	workspace = cleanRuntimeRemotePath(workspace)
+	if workspace == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, runtimeWorkspaceOverrideKey{}, workspace)
+}
+
+func runtimeWorkspaceOverride(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(runtimeWorkspaceOverrideKey{}).(string); ok {
+		return cleanRuntimeRemotePath(v)
 	}
 	return ""
 }

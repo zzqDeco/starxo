@@ -18,6 +18,8 @@
 
 ## 4. 关键实现细节
 - `WebFetch` 使用 Go `http.Client` 发起 GET，请求超时和最大读取字节数可配置。
+- 所有 WebFetch/WebSearch endpoint 在请求前和每次 redirect 前经过统一 guard：只允许 `http`/`https`，拒绝空 host 和 userinfo。
+- 默认阻止 localhost、私有地址、link-local、组播、未指定地址、IPv6 ULA/link-local 和 `169.254.169.254`；非公网目标必须走 runtime permission queue，且授权输入只包含 URL/host/reason，不包含 provider headers 或 API key。
 - HTML 通过轻量 tag strip 和空白压缩转换为文本，避免把整页 HTML 注入模型。
 - `WebSearch` 默认使用 DuckDuckGo HTML endpoint，调用 `WebFetch` 后筛选非空结果行。
 - 自定义 provider 支持 `type=http|tinyfish|duckduckgo`。
@@ -28,7 +30,7 @@
 
 ## 5. 依赖关系
 - 内部依赖: `internal/tools`
-- 外部依赖: Go `net/http`
+- 外部依赖: Go `net/http`、`net/url`、`net/netip`
 
 ## 6. 变更影响面
 - Runtime V2 首次提供非 MCP 的 web deferred tool surface。

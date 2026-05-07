@@ -266,3 +266,77 @@ func TestSessionServiceSaveSessionByIDPersistsMCPInstructionsDeltaState(t *testi
 		t.Fatal("expected persisted fingerprint")
 	}
 }
+
+func TestSessionServiceSwitchRestoresSessionScopedTodos(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sessionA, err := sessionStore.Create("Session A")
+	if err != nil {
+		t.Fatalf("create session-a: %v", err)
+	}
+	sessionB, err := sessionStore.Create("Session B")
+	if err != nil {
+		t.Fatalf("create session-b: %v", err)
+	}
+	t.Cleanup(func() {
+		tools.ClearTodos()
+		tools.ClearTodosForSession(sessionA.ID)
+		tools.ClearTodosForSession(sessionB.ID)
+	})
+
+	dataA := model.DefaultSessionData()
+	dataA.RuntimeContextCompact = &model.RuntimeContextCompact{
+		Version: model.RuntimeContextCompactVersion,
+		Todos: []model.RuntimeTodoItem{{
+			ID:     "todo-a",
+			Title:  "A",
+			Status: "pending",
+		}},
+	}
+	if err := sessionStore.SaveSessionData(sessionA.ID, dataA); err != nil {
+		t.Fatalf("save session-a data: %v", err)
+	}
+	dataB := model.DefaultSessionData()
+	dataB.RuntimeContextCompact = &model.RuntimeContextCompact{
+		Version: model.RuntimeContextCompactVersion,
+		Todos: []model.RuntimeTodoItem{{
+			ID:     "todo-b",
+			Title:  "B",
+			Status: "done",
+		}},
+	}
+	if err := sessionStore.SaveSessionData(sessionB.ID, dataB); err != nil {
+		t.Fatalf("save session-b data: %v", err)
+	}
+
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	if err := ss.SwitchSession(sessionA.ID); err != nil {
+		t.Fatalf("switch to session-a: %v", err)
+	}
+	todosA := tools.SnapshotTodosForSession(sessionA.ID)
+	if len(todosA) != 1 || todosA[0].ID != "todo-a" {
+		t.Fatalf("unexpected session-a todos after switch: %#v", todosA)
+	}
+	if got := tools.SnapshotTodosForSession(sessionB.ID); len(got) != 0 {
+		t.Fatalf("expected session-b todos to remain empty before switch, got %#v", got)
+	}
+
+	if err := ss.SwitchSession(sessionB.ID); err != nil {
+		t.Fatalf("switch to session-b: %v", err)
+	}
+	todosB := tools.SnapshotTodosForSession(sessionB.ID)
+	if len(todosB) != 1 || todosB[0].ID != "todo-b" {
+		t.Fatalf("unexpected session-b todos after switch: %#v", todosB)
+	}
+	if got := tools.SnapshotTodos(); len(got) != 0 {
+		t.Fatalf("expected global compatibility todos to remain empty, got %#v", got)
+	}
+}

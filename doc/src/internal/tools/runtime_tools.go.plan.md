@@ -36,7 +36,7 @@
   - `str_replace_editor`
 - `Read`/`Glob`/`Grep`/`TaskOutput`/`ExitPlanMode` 标记为 read-only trusted，plan mode 可见。
 - `Bash`/`Write`/`Edit`/`TaskStop`/`Agent`/`EnterWorktree`/`ExitWorktree` 是 writable/destructive surface，plan mode 下不加载或需先退出计划模式。
-- 所有 workspace path 都走 guard：拒绝空 workspace、`..` traversal 和 workspace 外 absolute path。
+- 所有 workspace path 都走 guard：拒绝空 workspace、`..` traversal 和 active workspace 外 absolute path；worktree mode 下以当前 active worktree 作为唯一边界。
 - `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash` 会通过 `RuntimeWorkspaceManager.CurrentWorkspace` 解析 session 当前 workspace，因此可透明运行在 active worktree 中。
 - `Bash` 支持 foreground/background。background 通过 task manager 持久化输出。
 - `Read` 支持 line offset/limit。

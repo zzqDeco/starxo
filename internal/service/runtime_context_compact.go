@@ -98,7 +98,7 @@ func (s *ChatService) refreshRuntimeContextCompact(sessionID string, run *Sessio
 		Tasks:            taskSnapshots,
 		FileReadState:    fileReads,
 		DiffSummaries:    diffs,
-		Todos:            tools.SnapshotTodos(),
+		Todos:            tools.SnapshotTodosForSession(sessionID),
 		PlanDocument:     model.ClonePlanDocument(run.planDocument),
 		Workspace:        workspace,
 	}

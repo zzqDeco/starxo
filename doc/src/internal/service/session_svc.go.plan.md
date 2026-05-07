@@ -44,7 +44,7 @@
 - startup / session switch 走“store 先 normalize+log，再 service restoreNormalized”路径：
   - 同一条调用链只记录一次 normalize warning
   - `session:switched.mode` 继续来自 `GetSessionRunSnapshot(...)`，因此会反映 restore 后的 persisted mode
-- session switch / startup 会从 `SessionData.RuntimeContextCompact.Todos` 恢复 todoStore；没有 compact todos 时清空，避免跨会话泄漏。
+- session create 会清空新 session 的 todo bucket；session switch / startup 会从 `SessionData.RuntimeContextCompact.Todos` 恢复对应 `sessionID` 的 todo bucket；没有 compact todos 时只清空对应 session，避免跨会话泄漏。
 - save-time discovery 剪枝已经收敛为“结构性剪枝”：
   - current config 始终可用于删除空 canonical 和已移除 server
   - 当前没有 installed bundle，或 installed bundle config/freshness 不可信时，会停用 runtime-metadata-based 删除并 fail-open 保留 history
