@@ -476,7 +476,7 @@ func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
 			t.Fatalf("expected %s to opt into deferred loading", entry.CanonicalName)
 		}
 	}
-	for _, name := range []string{RuntimeToolLSP, RuntimeToolSkill, RuntimeToolNotebookEdit} {
+	for _, name := range []string{RuntimeToolLSP, RuntimeToolLSPEdit, RuntimeToolSkill, RuntimeToolNotebookEdit} {
 		if _, ok := got[name]; !ok {
 			t.Fatalf("missing deferred runtime tool %s", name)
 		}
@@ -487,8 +487,11 @@ func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
 			t.Fatalf("expected %s to be read-only trusted, got %#v", name, entry)
 		}
 	}
-	if entry := got[RuntimeToolNotebookEdit]; entry.ReadOnlyHint || entry.ReadOnlyTrusted {
-		t.Fatalf("expected NotebookEdit to require write permission, got %#v", entry)
+	for _, name := range []string{RuntimeToolLSPEdit, RuntimeToolNotebookEdit} {
+		entry := got[name]
+		if entry.ReadOnlyHint || entry.ReadOnlyTrusted {
+			t.Fatalf("expected %s to require write permission, got %#v", name, entry)
+		}
 	}
 
 	webFetch := RuntimeWebFetchCatalogEntry(nil)

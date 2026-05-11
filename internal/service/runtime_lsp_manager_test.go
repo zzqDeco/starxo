@@ -128,6 +128,26 @@ func (p *fakeLanguageServerProcess) serve(r io.Reader, w io.WriteCloser) {
 					"end":   map[string]any{"line": 0, "character": 4},
 				},
 			}}
+		case "textDocument/rename":
+			result = map[string]any{
+				"changes": map[string]any{
+					"file:///workspace/main.go": []map[string]any{{
+						"range": map[string]any{
+							"start": map[string]any{"line": 1, "character": 5},
+							"end":   map[string]any{"line": 1, "character": 8},
+						},
+						"newText": "newName",
+					}},
+				},
+			}
+		case "textDocument/formatting":
+			result = []map[string]any{{
+				"range": map[string]any{
+					"start": map[string]any{"line": 0, "character": 0},
+					"end":   map[string]any{"line": 2, "character": 0},
+				},
+				"newText": "package main\n\nfunc old() {}\n",
+			}}
 		default:
 			result = nil
 		}
@@ -178,6 +198,86 @@ func TestRuntimeLSPManagerReusesPersistentServer(t *testing.T) {
 	}
 	if op.startCount != 1 {
 		t.Fatalf("expected one persistent server, got %d starts", op.startCount)
+	}
+}
+
+func TestRuntimeLSPManagerAppliesRenameEdit(t *testing.T) {
+	op := &fakeLSPRuntimeOperator{files: map[string]string{
+		"/workspace/main.go": "package main\nfunc old() {}\n",
+	}}
+	manager := newRuntimeLSPManager(nil)
+	defer manager.CloseAll()
+
+	out, handled, err := manager.Edit(context.Background(), op, "/workspace", nil, tools.LSPEditInput{
+		Operation: "rename",
+		FilePath:  "main.go",
+		Line:      2,
+		Character: 6,
+		NewName:   "newName",
+	})
+	if err != nil {
+		t.Fatalf("edit rename: %v", err)
+	}
+	if !handled || out.Engine != "lsp:go" || out.EditCount != 1 {
+		t.Fatalf("unexpected edit output: handled=%v out=%#v", handled, out)
+	}
+	if got := op.files["/workspace/main.go"]; got != "package main\nfunc newName() {}\n" {
+		t.Fatalf("unexpected renamed content: %q", got)
+	}
+}
+
+func TestRuntimeLSPManagerAppliesFormattingEdit(t *testing.T) {
+	op := &fakeLSPRuntimeOperator{files: map[string]string{
+		"/workspace/main.go": "package main\nfunc old() {}\n",
+	}}
+	manager := newRuntimeLSPManager(nil)
+	defer manager.CloseAll()
+
+	out, handled, err := manager.Edit(context.Background(), op, "/workspace", nil, tools.LSPEditInput{
+		Operation: "format",
+		FilePath:  "main.go",
+	})
+	if err != nil {
+		t.Fatalf("edit format: %v", err)
+	}
+	if !handled || out.EditCount != 1 {
+		t.Fatalf("unexpected format output: handled=%v out=%#v", handled, out)
+	}
+	if got := op.files["/workspace/main.go"]; got != "package main\n\nfunc old() {}\n" {
+		t.Fatalf("unexpected formatted content: %q", got)
+	}
+}
+
+func TestRuntimeLSPApplyWorkspaceEditRejectsUnsupportedDocumentChanges(t *testing.T) {
+	op := &fakeLSPRuntimeOperator{files: map[string]string{
+		"/workspace/main.go": "package main\n",
+	}}
+	raw := json.RawMessage(`{"documentChanges":[{"kind":"rename","oldUri":"file:///workspace/main.go","newUri":"file:///workspace/renamed.go"}]}`)
+
+	_, err := runtimeLSPApplyWorkspaceEdit(context.Background(), op, "/workspace", "/workspace", nil, raw)
+	if err == nil || !strings.Contains(err.Error(), "unsupported LSP document change") {
+		t.Fatalf("expected unsupported document change error, got %v", err)
+	}
+	if got := op.files["/workspace/main.go"]; got != "package main\n" {
+		t.Fatalf("unsupported document change should not modify files, got %q", got)
+	}
+}
+
+func TestRuntimeLSPApplyWorkspaceEditDoesNotPartiallyWrite(t *testing.T) {
+	op := &fakeLSPRuntimeOperator{files: map[string]string{
+		"/workspace/a.go": "old\n",
+	}}
+	raw := json.RawMessage(`{"changes":{
+		"file:///workspace/a.go":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"newText":"new"}],
+		"file:///workspace/b.go":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"missing"}]
+	}}`)
+
+	_, err := runtimeLSPApplyWorkspaceEdit(context.Background(), op, "/workspace", "/workspace", nil, raw)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected missing second file error, got %v", err)
+	}
+	if got := op.files["/workspace/a.go"]; got != "old\n" {
+		t.Fatalf("first file should not be written before all edits validate, got %q", got)
 	}
 }
 
