@@ -1504,6 +1504,30 @@ export namespace service {
 		    return a;
 		}
 	}
+	export class RuntimeWorktreeStateDTO {
+	    sessionId: string;
+	    active: boolean;
+	    workspacePath?: string;
+	    currentPath?: string;
+	    worktreePath?: string;
+	    worktreeBranch?: string;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeWorktreeStateDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessionId = source["sessionId"];
+	        this.active = source["active"];
+	        this.workspacePath = source["workspacePath"];
+	        this.currentPath = source["currentPath"];
+	        this.worktreePath = source["worktreePath"];
+	        this.worktreeBranch = source["worktreeBranch"];
+	        this.message = source["message"];
+	    }
+	}
 	export class SandboxStatusDTO {
 	    sshConnected: boolean;
 	    runtimeAvailable: boolean;
@@ -1850,6 +1874,80 @@ export namespace tools {
 	        this.risk = source["risk"];
 	        this.input = source["input"];
 	        this.createdAt = source["createdAt"];
+	    }
+	}
+	export class WorktreeDiffOutput {
+	    workspacePath: string;
+	    worktreePath: string;
+	    worktreeBranch: string;
+	    status: string;
+	    diffStat: string;
+	    diff?: string;
+	    untrackedDiff?: string;
+	    truncated?: boolean;
+	    untrackedTruncated?: boolean;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WorktreeDiffOutput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspacePath = source["workspacePath"];
+	        this.worktreePath = source["worktreePath"];
+	        this.worktreeBranch = source["worktreeBranch"];
+	        this.status = source["status"];
+	        this.diffStat = source["diffStat"];
+	        this.diff = source["diff"];
+	        this.untrackedDiff = source["untrackedDiff"];
+	        this.truncated = source["truncated"];
+	        this.untrackedTruncated = source["untrackedTruncated"];
+	        this.message = source["message"];
+	    }
+	}
+	export class WorktreeMergeOutput {
+	    action: string;
+	    workspacePath: string;
+	    worktreePath: string;
+	    worktreeBranch: string;
+	    commitMessage?: string;
+	    removed: boolean;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WorktreeMergeOutput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action = source["action"];
+	        this.workspacePath = source["workspacePath"];
+	        this.worktreePath = source["worktreePath"];
+	        this.worktreeBranch = source["worktreeBranch"];
+	        this.commitMessage = source["commitMessage"];
+	        this.removed = source["removed"];
+	        this.message = source["message"];
+	    }
+	}
+	export class WorktreeOutput {
+	    action: string;
+	    workspacePath: string;
+	    worktreePath?: string;
+	    worktreeBranch?: string;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WorktreeOutput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action = source["action"];
+	        this.workspacePath = source["workspacePath"];
+	        this.worktreePath = source["worktreePath"];
+	        this.worktreeBranch = source["worktreeBranch"];
+	        this.message = source["message"];
 	    }
 	}
 

@@ -8,7 +8,7 @@
 - 所属模块: frontend/src/components/files
 
 ## 2. 核心职责
-- 工作区主面板，提供文件树浏览、搜索、上传/下载、预览联动、sandbox 元信息和 tmp 清理。
+- 工作区主面板，提供文件树浏览、搜索、上传/下载、预览联动、sandbox 元信息、Runtime worktree 审阅和 tmp 清理。
 
 ## 3. 输入与输出
 - 输入来源: FileService (`GetWorkspaceInfo`, `ListWorkspaceFiles`, `ReadFilePreview`, `DownloadFile`, `CleanupSandboxTmp`)、`useWorkspaceBridge` 路径打开事件
@@ -21,6 +21,7 @@
 - 交互:
   - 顶部按钮：上传、下载、刷新、复制 workspace 路径、清理 tmp
   - 元信息栏展示 active sandbox、runtime、SSH host、workspace path、文件数量和大小
+  - `WorktreeReviewPanel` 展示当前 session active worktree，并支持 review/merge/exit keep
   - 搜索过滤：按 `path/name` 匹配
   - 选择文件后加载预览内容
   - 收到工具时间线发来的 workspace path 后，自动选择路径并加载预览
@@ -32,6 +33,7 @@
 - 工作区桥接:
   - mounted 后消费 pending path，避免抽屉首次打开时丢失点击来源
   - mounted 期间监听 `starxo:workspace-open-path`
+- worktree review 成功 merge 或 exit 后触发 `refreshFiles`，确保文件树跟随后端 active workspace 状态。
 
 ## 5. 依赖关系
 - 内部依赖:
@@ -44,6 +46,7 @@
 
 ## 6. 变更影响面
 - 替代旧 FileExplorer 组合，提升工作区浏览与预览一体化体验。
+- 工作区抽屉现在能展示 Runtime V2 worktree 状态，不再只显示原 sandbox workspace。
 
 ## 7. 维护建议
 - 若加入大目录懒加载，优先在 `buildTree` 层做虚拟化或按需展开。

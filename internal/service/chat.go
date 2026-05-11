@@ -1834,11 +1834,15 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 
 			// Emit tool result events
 			if msg.Role == schema.Tool && msg.ToolCallID != "" {
+				resultContent := truncateResult(msg.Content, 1000)
+				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
+					resultContent = truncateResult(msg.Content, timelineToolResultLimit(call.name))
+				}
 				s.emitTimelineForRun(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "tool_result",
 					Agent:     event.AgentName,
-					Content:   truncateResult(msg.Content, 1000),
+					Content:   resultContent,
 					ToolID:    msg.ToolCallID,
 					Timestamp: time.Now().UnixMilli(),
 				}, run)
@@ -1847,6 +1851,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				run.addToolResult(msg.ToolCallID, msg.Content)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
 					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
+					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, msg.Content)
 				}
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
@@ -1901,6 +1906,29 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	}
 
 	return strings.Join(allContents, "\n\n"), transferCount, false
+}
+
+func timelineToolResultLimit(toolName string) int {
+	switch toolName {
+	case tools.RuntimeToolWorktreeDiff:
+		return 24000
+	case tools.RuntimeToolWorktreeMerge, tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree:
+		return 6000
+	default:
+		return 1000
+	}
+}
+
+func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, result string) {
+	if strings.HasPrefix(strings.TrimSpace(result), "Error:") {
+		return
+	}
+	switch toolName {
+	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
+		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sessionID, "action": toolName})
+	case tools.RuntimeToolWorktreeDiff:
+		wailsEmit(s.ctx, "runtime:worktree_reviewed", map[string]string{"sessionId": sessionID})
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -3487,6 +3515,9 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 			Content:   result,
 			Timestamp: time.Now().UnixMilli(),
 		}, sessionID)
+		if eventType == "tool_result" {
+			s.emitRuntimeWorktreeToolEvent(sessionID, toolName, result)
+		}
 	}
 
 	return ac

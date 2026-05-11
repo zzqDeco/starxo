@@ -25,12 +25,12 @@
 ## 3. 输入与输出
 - 输入来源:
   - Wails 绑定调用：`SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`SetMode`、`BuildRunners`
-  - Runtime V2 绑定调用：`ListRuntimeTasks`、`ReadRuntimeTaskOutput`、`StopRuntimeTask`、`ApproveToolPermission`、`DenyToolPermission`
+  - Runtime V2 绑定调用：`ListRuntimeTasks`、`ReadRuntimeTaskOutput`、`StopRuntimeTask`、`ApproveToolPermission`、`DenyToolPermission`、`GetRuntimeWorktreeState`、`ReviewRuntimeWorktree`、`MergeRuntimeWorktree`、`ExitRuntimeWorktree`
   - 依赖注入：`config.Store`、`sandbox.SandboxManager`、`SessionService`
   - 运行时上下文：`contextWithSessionID(...)` 注入的 `sessionID`
 - 输出结果:
   - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`、`agent:run_state`
-  - Runtime V2 事件：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`
+  - Runtime V2 事件：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`、`runtime:worktree_changed`
   - Permission 事件：`runtime:permission_request`、`runtime:permission_canceled`
   - 一致性快照：`ExportSessionSnapshot(sessionID)`
   - discovery 状态操作：`RestoreSessionData`、`AddDiscoveredTool`、`ReplaceDiscoveredTools`、`PruneDiscoveredToolsForSave`
@@ -150,6 +150,7 @@
   - 按 sessionID 记录 active worktree
   - 后续 Runtime V2 file/search/edit/shell 工具通过 context sessionID 解析当前 workspace
   - worktree 状态不依赖全局 active session，支持多会话并行
+  - 桌面端可通过 ChatService 的 worktree UI API 审阅、合并或退出当前 session worktree
 - Runtime LSP manager：
   - 按 `sessionID + workspacePath + language` 复用远端常驻进程
   - `UpdateSandbox` / `InvalidateRunner` 会关闭所有 LSP server，避免跨 SSH/sandbox 配置复用旧进程
