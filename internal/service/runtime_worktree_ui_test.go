@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"starxo/internal/tools"
@@ -51,5 +53,45 @@ func TestTimelineToolResultLimitKeepsWorktreeDiffReview(t *testing.T) {
 	}
 	if got := timelineToolResultLimit(tools.RuntimeToolBash); got != 1000 {
 		t.Fatalf("expected default timeline limit, got %d", got)
+	}
+}
+
+func TestTimelineToolResultContentKeepsLargeWorktreeDiffJSONParseable(t *testing.T) {
+	result := tools.WorktreeDiffOutput{
+		WorkspacePath:      "/workspace",
+		WorktreePath:       "/workspace/.starxo/worktrees/a",
+		WorktreeBranch:     "starxo/a",
+		Status:             strings.Repeat(" M file.go\n", 200),
+		DiffStat:           strings.Repeat(" file.go | 1 +\n", 200),
+		Diff:               strings.Repeat("+changed line\n", 5000),
+		UntrackedDiff:      strings.Repeat("+untracked line\n", 1000),
+		Truncated:          false,
+		UntrackedTruncated: false,
+		Message:            "Active worktree changes are ready for review.",
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	if len(raw) <= timelineToolResultLimit(tools.RuntimeToolWorktreeDiff) {
+		t.Fatalf("test input should exceed timeline limit, got %d", len(raw))
+	}
+
+	content := timelineToolResultContent(tools.RuntimeToolWorktreeDiff, string(raw))
+	if len(content) > timelineToolResultLimit(tools.RuntimeToolWorktreeDiff) {
+		t.Fatalf("expected content within timeline limit, got %d", len(content))
+	}
+	var parsed tools.WorktreeDiffOutput
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		t.Fatalf("timeline content should remain valid JSON: %v\n%s", err, content)
+	}
+	if parsed.WorktreeBranch != result.WorktreeBranch || parsed.Status == "" || parsed.DiffStat == "" {
+		t.Fatalf("timeline content lost review metadata: %#v", parsed)
+	}
+	if parsed.Diff == "" || !parsed.Truncated {
+		t.Fatalf("expected truncated diff to remain available, got %#v", parsed)
+	}
+	if parsed.UntrackedDiff != "" {
+		t.Fatalf("expected duplicate untracked diff to be omitted from timeline JSON")
 	}
 }

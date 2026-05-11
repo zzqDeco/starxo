@@ -1836,7 +1836,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 			if msg.Role == schema.Tool && msg.ToolCallID != "" {
 				resultContent := truncateResult(msg.Content, 1000)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
-					resultContent = truncateResult(msg.Content, timelineToolResultLimit(call.name))
+					resultContent = timelineToolResultContent(call.name, msg.Content)
 				}
 				s.emitTimelineForRun(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
@@ -1917,6 +1917,96 @@ func timelineToolResultLimit(toolName string) int {
 	default:
 		return 1000
 	}
+}
+
+func timelineToolResultContent(toolName string, result string) string {
+	limit := timelineToolResultLimit(toolName)
+	if toolName == tools.RuntimeToolWorktreeDiff {
+		return truncateWorktreeDiffTimelineJSON(result, limit)
+	}
+	return truncateResult(result, limit)
+}
+
+func truncateWorktreeDiffTimelineJSON(result string, limit int) string {
+	if limit <= 0 || len(result) <= limit {
+		return result
+	}
+	var out tools.WorktreeDiffOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return truncateResult(result, limit)
+	}
+	if out.Diff != "" && out.UntrackedDiff != "" {
+		// DiffWorktree serializes untracked patches into Diff as the combined
+		// patch payload. Timeline JSON can omit the duplicate field and still
+		// render the full review patch in the frontend.
+		out.UntrackedDiff = ""
+	}
+
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return truncateResult(result, limit)
+	}
+	if len(encoded) <= limit {
+		return string(encoded)
+	}
+
+	for i := 0; i < 24 && len(encoded) > limit; i++ {
+		over := len(encoded) - limit
+		reduced := false
+		switch {
+		case out.Diff != "":
+			next, truncated := shrinkTimelineText(out.Diff, over+512)
+			out.Diff = next
+			out.Truncated = out.Truncated || truncated
+			reduced = truncated
+		case out.UntrackedDiff != "":
+			next, truncated := shrinkTimelineText(out.UntrackedDiff, over+512)
+			out.UntrackedDiff = next
+			out.UntrackedTruncated = out.UntrackedTruncated || truncated
+			reduced = truncated
+		case out.DiffStat != "":
+			next, truncated := shrinkTimelineText(out.DiffStat, over+256)
+			out.DiffStat = next
+			reduced = truncated
+		case out.Status != "":
+			next, truncated := shrinkTimelineText(out.Status, over+256)
+			out.Status = next
+			reduced = truncated
+		case out.Message != "":
+			next, truncated := shrinkTimelineText(out.Message, over+128)
+			out.Message = next
+			reduced = truncated
+		}
+		if !reduced {
+			return truncateResult(result, limit)
+		}
+		encoded, err = json.Marshal(out)
+		if err != nil {
+			return truncateResult(result, limit)
+		}
+	}
+	if len(encoded) > limit {
+		return truncateResult(result, limit)
+	}
+	return string(encoded)
+}
+
+func shrinkTimelineText(value string, removeBytes int) (string, bool) {
+	if value == "" {
+		return value, false
+	}
+	marker := "\n... (truncated for timeline)"
+	target := len(value) - removeBytes
+	if target > len(value)-1 {
+		target = len(value) - 1
+	}
+	if target <= len(marker) {
+		return "", true
+	}
+	if target >= len(value) {
+		return value, false
+	}
+	return value[:target-len(marker)] + marker, true
 }
 
 func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, result string) {
@@ -3505,6 +3595,10 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 	// The context carries session identity for proper event routing.
 	ac.OnToolEvent = func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string) {
 		sessionID := SessionIDFromContext(ctx)
+		content := result
+		if eventType == "tool_result" {
+			content = timelineToolResultContent(toolName, result)
+		}
 		s.emitTimelineForSession(TimelineEvent{
 			ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 			Type:      eventType,
@@ -3512,7 +3606,7 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 			ToolName:  toolName,
 			ToolArgs:  toolArgs,
 			ToolID:    toolID,
-			Content:   result,
+			Content:   content,
 			Timestamp: time.Now().UnixMilli(),
 		}, sessionID)
 		if eventType == "tool_result" {

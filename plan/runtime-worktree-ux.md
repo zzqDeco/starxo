@@ -17,7 +17,7 @@
   - `ExitRuntimeWorktree(sessionID, action, discardChanges)`
 - `FileService.workspacePath()` now resolves the active session's runtime worktree route through `ChatService.runtimeWorkspaces`.
 - Workspace listing and metadata commands explicitly `cd` into the resolved workspace path.
-- Timeline tool-result truncation keeps larger `WorktreeDiff` payloads so status/stat/patch can be inspected inline.
+- Timeline tool-result handling keeps `WorktreeDiff` output as valid JSON by truncating large fields before serialization, so status/stat/patch can be inspected inline even for large patches.
 
 ## Frontend
 - Added `WorktreeReviewPanel.vue` under the workspace drawer.
