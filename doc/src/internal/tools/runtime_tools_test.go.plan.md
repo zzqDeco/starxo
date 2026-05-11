@@ -27,7 +27,8 @@
 - `workspaceFilePath` 允许 active worktree 自身的 absolute path，避免 `/workspace/.starxo/worktrees/...` 被重复映射。
 - 大型 Bash 输出会写入持久化结果并在 inline stdout 中截断。
 - `Read` tool 会通过 fake workspace manager 使用当前 session active workspace。
-- deferred runtime tools 的 metadata 覆盖 LSP/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。
+- deferred runtime tools 的 metadata 覆盖 LSP/LSPEdit/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。
+- `LSPEdit` 和 `NotebookEdit` 必须保持 writable deferred，避免绕过 runtime permission queue。
 - `WorktreeDiff` 是 read-only deferred；`WorktreeMerge` 是 writable deferred，plan mode 不直接加载。
 
 ## 5. 维护建议
