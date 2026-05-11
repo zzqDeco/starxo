@@ -450,6 +450,8 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 			patch, truncated := buildSimplePatchLimited(previous, input.Content, runtimeToolPatchLimit)
 			linesRemoved := 0
 			if !created {
+				// splitLines trims a trailing newline, so normal text files do
+				// not report a phantom removed line.
 				linesRemoved = len(splitLines(previous))
 			}
 			return WriteOutput{

@@ -124,3 +124,33 @@ func TestTimelineToolResultContentKeepsLargeEditJSONParseable(t *testing.T) {
 		t.Fatalf("unexpected parsed edit result: %#v", parsed)
 	}
 }
+
+func TestTimelineToolResultContentKeepsLargeWriteJSONParseable(t *testing.T) {
+	result := tools.WriteOutput{
+		FilePath:     "/workspace/main.go",
+		Created:      false,
+		Bytes:        50000,
+		LinesAdded:   1000,
+		LinesRemoved: 900,
+		Patch:        strings.Repeat("-old line\n", 2000) + strings.Repeat("+new line\n", 2000),
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	if len(raw) <= timelineToolResultLimit(tools.RuntimeToolWrite) {
+		t.Fatalf("test input should exceed timeline limit, got %d", len(raw))
+	}
+
+	content := timelineToolResultContent(tools.RuntimeToolWrite, string(raw))
+	if len(content) > timelineToolResultLimit(tools.RuntimeToolWrite) {
+		t.Fatalf("expected content within timeline limit, got %d", len(content))
+	}
+	var parsed tools.WriteOutput
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		t.Fatalf("timeline content should remain valid JSON: %v\n%s", err, content)
+	}
+	if parsed.FilePath != result.FilePath || parsed.Patch == "" || !parsed.Truncated {
+		t.Fatalf("unexpected parsed write result: %#v", parsed)
+	}
+}
