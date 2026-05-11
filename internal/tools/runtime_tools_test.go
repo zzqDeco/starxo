@@ -317,6 +317,22 @@ func TestBuildSimplePatchLimitedBoundsPreview(t *testing.T) {
 	}
 }
 
+func TestBuildSimplePatchLimitedKeepsLongLinePrefix(t *testing.T) {
+	patch, truncated := buildSimplePatchLimited("", strings.Repeat("x", 1000), 128)
+	if !truncated {
+		t.Fatalf("expected patch to be truncated")
+	}
+	if len(patch) > 128 {
+		t.Fatalf("expected bounded patch, got %d bytes", len(patch))
+	}
+	if !strings.Contains(patch, "+xxx") {
+		t.Fatalf("expected long line prefix to remain visible, got %q", patch)
+	}
+	if !strings.Contains(patch, "patch truncated") {
+		t.Fatalf("expected truncation marker, got %q", patch)
+	}
+}
+
 func TestBuildWritePatchLimitedReservesNewContentBudget(t *testing.T) {
 	patch, truncated := buildWritePatchLimited(strings.Repeat("removed\n", 10000), "replacement\n", 512)
 	if !truncated {

@@ -20,6 +20,7 @@
 - `Write` tool 覆盖大型已有文件时使用 bounded preview，不调用全量 `ReadFile`。
 - `Write` tool 的 bounded patch 会为写入的新内容保留预算，大文件覆盖小文件时仍能看到新增内容预览。
 - bounded patch helper 会在生成预览时按 limit 截断并标记，不依赖先拼完整 patch。
+- bounded patch helper 对超长单行保留可容纳的内容前缀，不退化成只有截断标记。
 - `safeSearchPath` 拒绝 workspace 外 absolute path 和 `..` traversal。
 - `workspaceFilePath` 在 worktree mode 下把 relative path 和 `/workspace/...` 映射到 active worktree，并拒绝 parent workspace absolute path。
 - `workspaceFilePath` 允许 active worktree 自身的 absolute path，避免 `/workspace/.starxo/worktrees/...` 被重复映射。

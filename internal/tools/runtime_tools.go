@@ -1026,6 +1026,16 @@ func appendPatchContentLimited(b *strings.Builder, prefix, content string, limit
 func appendPatchLineLimited(b *strings.Builder, prefix, line string, limit int) bool {
 	nextLen := b.Len() + len(prefix) + len(line) + 1
 	if limit > 0 && nextLen > limit {
+		remaining := limit - b.Len()
+		lineBudget := remaining - len(prefix) - 1
+		if lineBudget > 0 {
+			if lineBudget > len(line) {
+				lineBudget = len(line)
+			}
+			b.WriteString(prefix)
+			b.WriteString(line[:lineBudget])
+			b.WriteString("\n")
+		}
 		return false
 	}
 	b.WriteString(prefix)
