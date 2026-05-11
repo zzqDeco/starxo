@@ -34,6 +34,10 @@ const (
 	runtimeToolPatchLimit       = 20 * 1024
 )
 
+type runtimeFilePreviewReader interface {
+	ReadFilePreview(ctx context.Context, path string, maxBytes int) (content string, bytes int64, lines int, exists bool, truncated bool, err error)
+}
+
 type RuntimeTaskRef struct {
 	TaskID     string `json:"taskId"`
 	Status     string `json:"status"`
@@ -439,24 +443,22 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 			if err != nil {
 				return WriteOutput{}, err
 			}
-			created := false
-			previous, err := op.ReadFile(ctx, target)
+			previous, err := readExistingFilePreview(ctx, op, target, runtimeToolPatchLimit)
 			if err != nil {
-				created = true
+				return WriteOutput{}, err
 			}
 			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
-			patch, truncated := buildSimplePatchLimited(previous, input.Content, runtimeToolPatchLimit)
+			patch, patchTruncated := buildSimplePatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
+			truncated := previous.Truncated || patchTruncated
 			linesRemoved := 0
-			if !created {
-				// splitLines trims a trailing newline, so normal text files do
-				// not report a phantom removed line.
-				linesRemoved = len(splitLines(previous))
+			if previous.Exists {
+				linesRemoved = previous.Lines
 			}
 			return WriteOutput{
 				FilePath:     target,
-				Created:      created,
+				Created:      !previous.Exists,
 				Bytes:        len(input.Content),
 				LinesAdded:   len(splitLines(input.Content)),
 				LinesRemoved: linesRemoved,
@@ -819,6 +821,44 @@ func cleanRemotePath(p string) string {
 		cleaned = "/" + cleaned
 	}
 	return cleaned
+}
+
+type existingFilePreview struct {
+	Exists    bool
+	Content   string
+	Bytes     int64
+	Lines     int
+	Truncated bool
+}
+
+func readExistingFilePreview(ctx context.Context, op commandline.Operator, target string, maxBytes int) (existingFilePreview, error) {
+	if previewer, ok := op.(runtimeFilePreviewReader); ok {
+		content, bytes, lines, exists, truncated, err := previewer.ReadFilePreview(ctx, target, maxBytes)
+		if err != nil {
+			return existingFilePreview{}, err
+		}
+		return existingFilePreview{
+			Exists:    exists,
+			Content:   content,
+			Bytes:     bytes,
+			Lines:     lines,
+			Truncated: truncated,
+		}, nil
+	}
+
+	// Non-remote test or legacy operators may not support bounded previews.
+	// Production RemoteOperator implements ReadFilePreview so large overwrites
+	// do not require reading the whole old file just to render a diff summary.
+	content, err := op.ReadFile(ctx, target)
+	if err != nil {
+		return existingFilePreview{Exists: false}, nil
+	}
+	return existingFilePreview{
+		Exists:  true,
+		Content: content,
+		Bytes:   int64(len(content)),
+		Lines:   len(splitLines(content)),
+	}, nil
 }
 
 func safeSearchPath(p string) (string, error) {

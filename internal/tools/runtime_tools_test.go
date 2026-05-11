@@ -12,10 +12,13 @@ import (
 )
 
 type fakeRuntimeOperator struct {
-	files map[string]string
+	files        map[string]string
+	readFileHits int
+	previewHits  int
 }
 
 func (o *fakeRuntimeOperator) ReadFile(ctx context.Context, path string) (string, error) {
+	o.readFileHits++
 	if o.files == nil {
 		o.files = make(map[string]string)
 	}
@@ -24,6 +27,30 @@ func (o *fakeRuntimeOperator) ReadFile(ctx context.Context, path string) (string
 		return "", fmt.Errorf("not found")
 	}
 	return content, nil
+}
+
+func (o *fakeRuntimeOperator) ReadFilePreview(ctx context.Context, path string, maxBytes int) (string, int64, int, bool, bool, error) {
+	o.previewHits++
+	if o.files == nil {
+		o.files = make(map[string]string)
+	}
+	content, ok := o.files[path]
+	if !ok {
+		return "", 0, 0, false, false, nil
+	}
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	preview := content
+	truncated := false
+	if maxBytes == 0 && len(content) > 0 {
+		preview = ""
+		truncated = true
+	} else if maxBytes > 0 && len(content) > maxBytes {
+		preview = content[:maxBytes]
+		truncated = true
+	}
+	return preview, int64(len(content)), len(splitLines(content)), true, truncated, nil
 }
 
 func (o *fakeRuntimeOperator) WriteFile(ctx context.Context, path string, content string) error {
@@ -220,6 +247,52 @@ func TestRuntimeWriteToolReturnsStructuredPatchForOverwrite(t *testing.T) {
 	}
 	if !strings.Contains(out.Patch, "-old") || !strings.Contains(out.Patch, "+new") {
 		t.Fatalf("expected write patch, got %#v", out)
+	}
+}
+
+func TestRuntimeWriteToolUsesBoundedPreviewForExistingFile(t *testing.T) {
+	oldContent := strings.Repeat("old line\n", 50000)
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/large.log": oldContent}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var write CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolWrite {
+			write = entry
+			break
+		}
+	}
+	invokable, ok := write.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("write tool is not invokable: %T", write.Tool)
+	}
+	payload, _ := json.Marshal(WriteInput{FilePath: "large.log", Content: "replacement\n"})
+	result, err := invokable.InvokableRun(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("write tool run: %v", err)
+	}
+	if op.readFileHits != 0 {
+		t.Fatalf("expected write to avoid full ReadFile, got %d calls", op.readFileHits)
+	}
+	if op.previewHits != 1 {
+		t.Fatalf("expected one bounded preview call, got %d", op.previewHits)
+	}
+	var out WriteOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("expected JSON write result: %v\n%s", err, result)
+	}
+	if !out.Truncated {
+		t.Fatalf("expected truncated write preview for large old file: %#v", out)
+	}
+	if out.LinesRemoved != 50000 {
+		t.Fatalf("expected full old line count from metadata, got %d", out.LinesRemoved)
+	}
+	if len(out.Patch) > runtimeToolPatchLimit {
+		t.Fatalf("expected bounded patch, got %d bytes", len(out.Patch))
 	}
 }
 
