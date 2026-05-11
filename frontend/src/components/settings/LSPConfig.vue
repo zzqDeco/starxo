@@ -122,6 +122,12 @@ async function refreshStatus() {
         <NTag size="small">{{ status.servers?.length || 0 }} {{ t('settings.lsp.runningServers') }}</NTag>
       </div>
       <div class="status-list">
+        <div v-for="item in status.configured || []" :key="`configured:${item.language}:${item.executable}`" class="status-row">
+          <span class="mono">{{ item.language }}</span>
+          <NTag size="small" :type="!item.disabled ? 'success' : 'default'">{{ !item.disabled ? 'configured' : 'disabled' }}</NTag>
+          <span>{{ item.command?.join(' ') || item.executable }}</span>
+          <span v-if="item.builtIn">{{ t('settings.lsp.builtIn') }}</span>
+        </div>
         <div v-for="server in status.servers || []" :key="`${server.sessionId}:${server.workspace}:${server.language}`" class="status-row">
           <span class="mono">{{ server.language }}</span>
           <NTag size="small" :type="server.alive ? 'success' : 'error'">{{ server.alive ? 'alive' : 'stopped' }}</NTag>

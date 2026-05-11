@@ -89,6 +89,34 @@ func TestDiagnoseWebSearchConfigWarnsForNonPublicEndpoint(t *testing.T) {
 	}
 }
 
+func TestSettingsServiceTestWebSearchReturnsFailureResult(t *testing.T) {
+	enabled := false
+	svc := &SettingsService{}
+	result, err := svc.TestWebSearch(config.AppConfig{
+		Agent: config.AgentConfig{
+			WebSearch: config.WebSearchConfig{Enabled: &enabled},
+		},
+	}, "runtime")
+	if err != nil {
+		t.Fatalf("test web search: %v", err)
+	}
+	if result.OK || result.Query != "runtime" || !strings.Contains(result.Message, "disabled") {
+		t.Fatalf("expected non-throwing disabled result, got %#v", result)
+	}
+}
+
+func TestWebSearchSmokeResultTreatsEmptyResultsAsFailure(t *testing.T) {
+	result := webSearchSmokeResult("runtime", 0, webSearchOutput{
+		Query:    "runtime",
+		Provider: "custom",
+		URL:      "https://example.com/search",
+		Results:  nil,
+	}, nil)
+	if result.OK || result.ResultCount != 0 || !strings.Contains(result.Message, "zero results") {
+		t.Fatalf("expected empty smoke results to fail, got %#v", result)
+	}
+}
+
 func webSearchDiagnosticCheckByID(checks []WebSearchDiagnosticCheck, id string) WebSearchDiagnosticCheck {
 	for _, check := range checks {
 		if check.ID == id {
