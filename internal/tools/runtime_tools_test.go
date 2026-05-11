@@ -15,6 +15,7 @@ type fakeRuntimeOperator struct {
 	files        map[string]string
 	readFileHits int
 	previewHits  int
+	previewMax   int
 }
 
 func (o *fakeRuntimeOperator) ReadFile(ctx context.Context, path string) (string, error) {
@@ -31,6 +32,7 @@ func (o *fakeRuntimeOperator) ReadFile(ctx context.Context, path string) (string
 
 func (o *fakeRuntimeOperator) ReadFilePreview(ctx context.Context, path string, maxBytes int) (string, int64, int, bool, bool, error) {
 	o.previewHits++
+	o.previewMax = maxBytes
 	if o.files == nil {
 		o.files = make(map[string]string)
 	}
@@ -281,6 +283,9 @@ func TestRuntimeWriteToolUsesBoundedPreviewForExistingFile(t *testing.T) {
 	if op.previewHits != 1 {
 		t.Fatalf("expected one bounded preview call, got %d", op.previewHits)
 	}
+	if op.previewMax != runtimeWriteOldPreviewLimit {
+		t.Fatalf("expected old-file preview budget %d, got %d", runtimeWriteOldPreviewLimit, op.previewMax)
+	}
 	var out WriteOutput
 	if err := json.Unmarshal([]byte(result), &out); err != nil {
 		t.Fatalf("expected JSON write result: %v\n%s", err, result)
@@ -294,6 +299,9 @@ func TestRuntimeWriteToolUsesBoundedPreviewForExistingFile(t *testing.T) {
 	if len(out.Patch) > runtimeToolPatchLimit {
 		t.Fatalf("expected bounded patch, got %d bytes", len(out.Patch))
 	}
+	if !strings.Contains(out.Patch, "+replacement") {
+		t.Fatalf("expected write patch to reserve budget for new content, got %q", out.Patch)
+	}
 }
 
 func TestBuildSimplePatchLimitedBoundsPreview(t *testing.T) {
@@ -306,6 +314,19 @@ func TestBuildSimplePatchLimitedBoundsPreview(t *testing.T) {
 	}
 	if !strings.Contains(patch, "patch truncated") {
 		t.Fatalf("expected truncation marker, got %q", patch)
+	}
+}
+
+func TestBuildWritePatchLimitedReservesNewContentBudget(t *testing.T) {
+	patch, truncated := buildWritePatchLimited(strings.Repeat("removed\n", 10000), "replacement\n", 512)
+	if !truncated {
+		t.Fatalf("expected patch to be truncated")
+	}
+	if len(patch) > 512 {
+		t.Fatalf("expected bounded patch, got %d bytes", len(patch))
+	}
+	if !strings.Contains(patch, "+replacement") {
+		t.Fatalf("expected new content to remain visible, got %q", patch)
 	}
 }
 

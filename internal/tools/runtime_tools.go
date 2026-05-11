@@ -32,6 +32,7 @@ const (
 
 	runtimeLargeOutputThreshold = 32 * 1024
 	runtimeToolPatchLimit       = 20 * 1024
+	runtimeWriteOldPreviewLimit = runtimeToolPatchLimit / 3
 )
 
 type runtimeFilePreviewReader interface {
@@ -443,14 +444,14 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 			if err != nil {
 				return WriteOutput{}, err
 			}
-			previous, err := readExistingFilePreview(ctx, op, target, runtimeToolPatchLimit)
+			previous, err := readExistingFilePreview(ctx, op, target, runtimeWriteOldPreviewLimit)
 			if err != nil {
 				return WriteOutput{}, err
 			}
 			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
-			patch, patchTruncated := buildSimplePatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
+			patch, patchTruncated := buildWritePatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
 			truncated := previous.Truncated || patchTruncated
 			linesRemoved := 0
 			if previous.Exists {
@@ -965,7 +966,27 @@ func buildSimplePatchLimited(oldString, newString string, limit int) (string, bo
 	if !truncated {
 		truncated = !appendPatchContentLimited(&b, "+", newString, limit)
 	}
-	patch := strings.TrimSuffix(b.String(), "\n")
+	return finishLimitedPatch(b.String(), truncated, limit)
+}
+
+func buildWritePatchLimited(oldString, newString string, limit int) (string, bool) {
+	if limit <= 0 {
+		return buildSimplePatchLimited(oldString, newString, limit)
+	}
+	oldBudget := limit / 2
+	if oldBudget < 1 {
+		oldBudget = 1
+	}
+	var b strings.Builder
+	truncated := !appendPatchContentLimited(&b, "-", oldString, oldBudget)
+	if !appendPatchContentLimited(&b, "+", newString, limit) {
+		truncated = true
+	}
+	return finishLimitedPatch(b.String(), truncated, limit)
+}
+
+func finishLimitedPatch(content string, truncated bool, limit int) (string, bool) {
+	patch := strings.TrimSuffix(content, "\n")
 	if !truncated {
 		return patch, false
 	}
@@ -1018,7 +1039,7 @@ func grepFilenames(mode string, lines []string) []string {
 	for _, line := range lines {
 		name := line
 		if mode == "content" || mode == "count" {
-			if idx := strings.IndexByte(line, ':'); idx >= 0 {
+			if idx := strings.Index(line, ":"); idx >= 0 {
 				name = line[:idx]
 			}
 		}
@@ -1031,5 +1052,33 @@ func grepFilenames(mode string, lines []string) []string {
 	for name := range seen {
 		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
+}
+
+func clampOutputMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "files_with_matches", "count":
+		return strings.TrimSpace(mode)
+	default:
+		return "content"
+	}
+}
+
+func appendMaybe(args []string, flag, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return args
+	}
+	return append(args, flag, value)
+}
+
+func truncateLines(lines []string, offset, limit int) ([]string, bool) {
+	if offset > len(lines) {
+		return []string{}, false
+	}
+	lines = lines[offset:]
+	if limit <= 0 || len(lines) <= limit {
+		return lines, false
+	}
+	return lines[:limit], true
 }
