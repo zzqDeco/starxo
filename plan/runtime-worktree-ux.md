@@ -21,7 +21,7 @@
 
 ## Frontend
 - Added `WorktreeReviewPanel.vue` under the workspace drawer.
-- `WorkspacePanel.vue` mounts the review panel above the file browser and refreshes files after worktree changes.
+- `WorkspacePanel.vue` mounts the review panel above the file browser and refreshes files after both user-driven and agent-driven worktree changes.
 - `TimelineEventItem.vue` classifies worktree tools separately and renders structured metadata, status, diff stat, and patch sections; frontend patch rendering treats `diff` as the combined patch payload when present to avoid duplicating untracked file patches.
 - Locales include `workspace.worktree.*` and worktree tool labels.
 

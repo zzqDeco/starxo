@@ -143,10 +143,16 @@ watch(activeSessionId, () => {
   refreshState()
 })
 
+async function handleWorktreeChanged(evt: { sessionId?: string }) {
+  if (evt?.sessionId && evt.sessionId !== activeSessionId.value) return
+  await refreshState()
+  emit('changed')
+}
+
 onMounted(() => {
   eventCleanups = [
     EventsOn('runtime:worktree_changed', (evt: { sessionId?: string }) => {
-      if (!evt?.sessionId || evt.sessionId === activeSessionId.value) refreshState()
+      void handleWorktreeChanged(evt)
     }),
   ]
   refreshState()
