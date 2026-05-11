@@ -50,6 +50,10 @@ export function GetOrCreateRun(arg1) {
   return window['go']['service']['ChatService']['GetOrCreateRun'](arg1);
 }
 
+export function GetRuntimeLSPStatus(arg1) {
+  return window['go']['service']['ChatService']['GetRuntimeLSPStatus'](arg1);
+}
+
 export function GetSessionRunSnapshot(arg1) {
   return window['go']['service']['ChatService']['GetSessionRunSnapshot'](arg1);
 }

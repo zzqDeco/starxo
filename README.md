@@ -14,6 +14,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
 - **Runtime V2 Tool Surface** — Always-visible `ToolSearch`, direct file/search/edit/shell tools, dynamic `Agent` delegation, worktree isolation, deferred LSP/Skill/Web/Notebook tools, and managed background task output
+- **Runtime Tool Configuration** — Settings for WebSearch/TinyFish diagnostics and persistent LSP server mappings, including custom language server commands
 - **Tool Permissions** — Risky runtime and MCP tool calls enter a queued approval UI with deny, allow once, session grants, and grant management in Settings
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
@@ -80,6 +81,7 @@ starxo/
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 persistent language server manager
 │   │   ├── runtime_workspaces.go    #   Runtime V2 session-scoped worktree workspace manager
 │   │   ├── runtime_web_tools.go     #   Runtime V2 WebFetch/WebSearch tool implementations
+│   │   ├── websearch_diagnostics.go #   WebSearch/TinyFish configuration diagnostics
 │   │   ├── sandbox_svc.go           #   SandboxService: connect/disconnect/reconnect, health monitor (RWMutex)
 │   │   ├── session_svc.go           #   SessionService: session CRUD, multi-session state coordination
 │   │   ├── settings_svc.go         #   SettingsService: config management, connection testing

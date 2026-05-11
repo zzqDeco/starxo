@@ -15,7 +15,8 @@
 - 输出结果: `tools.LSPOutput`，包含 `engine=lsp:<language>`、language、格式化 JSON result 和 result count。
 
 ## 4. 关键实现细节
-- server key: `sessionID + workspacePath + language`，同一 session/workspace/language 复用同一个常驻进程。
+- server key: `sessionID + workspacePath + language + executable + command`，同一 session/workspace/language/command 复用同一个常驻进程。
+- `agent.lsp` 支持启用/禁用、请求超时、最大结果字节数、自定义 language server command 与扩展名映射。
 - 支持语言与命令：
   - Go: `gopls serve`
   - TypeScript/JavaScript: `typescript-language-server --stdio`
@@ -27,6 +28,7 @@
 - 每次文件查询前读取当前文件内容，首次发送 `textDocument/didOpen`，内容变化后发送 full-sync `textDocument/didChange`。
 - 收到 server request 时返回空结果，避免 `workspace/configuration` 等请求阻塞 server。
 - `ChatService.UpdateSandbox` 和 `InvalidateRunner` 会关闭所有常驻 LSP server，避免 SSH/sandbox 切换后保留旧进程。
+- `ChatService.GetRuntimeLSPStatus(sessionID)` 返回当前配置、活动 server、open docs、request count、last error，供设置页诊断使用。
 
 ## 5. 依赖关系
 - 内部依赖: `internal/sandbox`、`internal/tools`、`runtime_workspaces.go`
@@ -38,5 +40,5 @@
 - Worktree 模式下会按当前 active workspace 启动独立 server。
 
 ## 7. 维护建议
-- 新增语言时只扩展 language -> server command 映射和 languageId 映射。
+- 新增常规语言时可扩展内置 language -> server command 映射；项目级特殊语言优先通过 `agent.lsp.servers` 自定义配置。
 - 后续若支持 writable LSP 操作（rename/codeAction apply/format），必须拆成可写 tool 或在 permission spec 中单独走审批。

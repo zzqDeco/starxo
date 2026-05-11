@@ -16,6 +16,7 @@
 - 输出结果:
   - `tools.RuntimeTaskSnapshot`
   - `tools.RuntimeTaskOutput`
+- task snapshot 包含 `durationMs` 和 `outputSize`，供前端 Runtime Tasks 面板展示运行耗时和输出规模。
 - Wails events：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`
 
 ## 4. 关键实现细节
@@ -29,6 +30,7 @@
 - `CompactSnapshots(sessionID)` 将 task snapshot 转成 `model.RuntimeTaskCompact`，供 Runtime context compact 持久化。
 - `RestoreCompactTasks(...)` 从 compact state 恢复 task 可见性；原本 `running` 的 task 在 reload 后标记为 `failed`，因为进程已不再附着。
 - permission API 方法名仍保留在本文件，但实际队列和 grant 逻辑已下沉到 `runtime_permissions.go`。
+- `GetRuntimeLSPStatus(sessionID)` 也在本文件暴露为 Wails API，读取 runtime LSP manager 当前状态。
 - `wailsEmit` 对 nil context 短路，保证 Go 单测不会触发 Wails runtime fatal。
 
 ## 5. 依赖关系

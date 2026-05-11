@@ -39,8 +39,10 @@ type RuntimeTaskCompact struct {
 	Description string `json:"description,omitempty"`
 	Command     string `json:"command,omitempty"`
 	OutputPath  string `json:"outputPath,omitempty"`
+	OutputSize  int64  `json:"outputSize,omitempty"`
 	StartedAt   int64  `json:"startedAt,omitempty"`
 	FinishedAt  int64  `json:"finishedAt,omitempty"`
+	DurationMs  int64  `json:"durationMs,omitempty"`
 	ExitCode    int    `json:"exitCode,omitempty"`
 	Error       string `json:"error,omitempty"`
 }

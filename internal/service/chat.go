@@ -2866,6 +2866,9 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	}
 	provider := &deferredMCPProvider{chat: s, bundle: bundle}
 	ac := s.buildAgentContext()
+	if s.runtimeLSP != nil {
+		s.runtimeLSP.SetConfig(cfg.Agent.LSP)
+	}
 
 	topLevelCatalog := tools.NewToolCatalog()
 	runtimeEntries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)

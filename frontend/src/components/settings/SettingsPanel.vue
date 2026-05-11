@@ -1,11 +1,13 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { Close, Terminal, ShieldCheckmark, Cloud, Apps } from '@vicons/ionicons5'
+import { Close, Terminal, ShieldCheckmark, Cloud, Apps, Search, CodeSlash } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import SSHConfigForm from './SSHConfig.vue'
 import SandboxConfigForm from './SandboxConfig.vue'
 import LLMConfigForm from './LLMConfig.vue'
+import WebSearchConfigForm from './WebSearchConfig.vue'
+import LSPConfigForm from './LSPConfig.vue'
 import MCPConfigForm from './MCPConfig.vue'
 import RuntimePermissionsPanel from './RuntimePermissionsPanel.vue'
 import { useI18n } from 'vue-i18n'
@@ -33,6 +35,8 @@ const tabs = computed(() => [
   { name: 'ssh', label: t('settings.ssh.tab'), icon: Terminal },
   { name: 'sandbox', label: t('settings.sandbox.tab'), icon: ShieldCheckmark },
   { name: 'llm', label: t('settings.llm.tab'), icon: Cloud },
+  { name: 'websearch', label: t('settings.webSearch.tab'), icon: Search },
+  { name: 'lsp', label: t('settings.lsp.tab'), icon: CodeSlash },
   { name: 'permissions', label: t('permissions.tab'), icon: ShieldCheckmark },
   { name: 'mcp', label: t('settings.mcp.tab'), icon: Apps },
 ])
@@ -125,6 +129,8 @@ onBeforeUnmount(() => {
               <SSHConfigForm v-if="activeTab === 'ssh'" key="ssh" />
               <SandboxConfigForm v-else-if="activeTab === 'sandbox'" key="sandbox" />
               <LLMConfigForm v-else-if="activeTab === 'llm'" key="llm" />
+              <WebSearchConfigForm v-else-if="activeTab === 'websearch'" key="websearch" />
+              <LSPConfigForm v-else-if="activeTab === 'lsp'" key="lsp" />
               <RuntimePermissionsPanel v-else-if="activeTab === 'permissions'" key="permissions" />
               <MCPConfigForm v-else-if="activeTab === 'mcp'" key="mcp" />
             </Transition>
