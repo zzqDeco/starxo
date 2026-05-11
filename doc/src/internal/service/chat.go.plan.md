@@ -152,6 +152,7 @@
   - worktree 状态不依赖全局 active session，支持多会话并行
   - 桌面端可通过 ChatService 的 worktree UI API 审阅、合并或退出当前 session worktree
   - `WorktreeDiff` timeline 结果会在字段级截断后重新序列化，避免对整段 JSON 字符串做硬截断导致前端结构化 diff 展示失效
+  - `Write` / `Edit` timeline 结果同样会对 patch 字段做 JSON-safe 截断，保证前端结构化 diff UI 可解析
 - Runtime LSP manager：
   - 按 `sessionID + workspacePath + language` 复用远端常驻进程
   - `UpdateSandbox` / `InvalidateRunner` 会关闭所有 LSP server，避免跨 SSH/sandbox 配置复用旧进程
