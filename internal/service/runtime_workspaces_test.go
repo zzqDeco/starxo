@@ -23,6 +23,8 @@ type fakeWorktreeOperator struct {
 	prepareStderr  string
 	prepareExit    int
 	failMerge      bool
+	mergeStderr    string
+	conflictFiles  string
 }
 
 func (o *fakeWorktreeOperator) ReadFile(ctx context.Context, path string) (string, error) {
@@ -48,7 +50,14 @@ func (o *fakeWorktreeOperator) RunCommand(ctx context.Context, command []string)
 		return &commandline.CommandOutput{Stderr: o.stderr, ExitCode: o.exitCode}, nil
 	}
 	if o.failMerge && strings.Contains(joined, "merge --no-ff") {
-		return &commandline.CommandOutput{Stderr: "merge conflict", ExitCode: 1}, nil
+		stderr := o.mergeStderr
+		if stderr == "" {
+			stderr = "merge failed"
+		}
+		return &commandline.CommandOutput{Stderr: stderr, ExitCode: 1}, nil
+	}
+	if strings.Contains(joined, "diff --name-only --diff-filter=U") {
+		return &commandline.CommandOutput{Stdout: o.conflictFiles, ExitCode: 0}, nil
 	}
 	if strings.Contains(joined, "STARXO_WORKTREE_HEAD=") {
 		if o.prepareExit != 0 {
@@ -299,8 +308,8 @@ func TestRuntimeWorkspaceManagerMergeWorktreeAbortsFailedMergeAndKeepsActiveStat
 	}
 
 	_, err := manager.MergeWorktree(ctx, op, "/workspace", "merge feat", false)
-	if err == nil || !strings.Contains(err.Error(), "merge conflict") {
-		t.Fatalf("expected merge conflict error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "merge failed") {
+		t.Fatalf("expected merge failure error, got %v", err)
 	}
 	if got := manager.CurrentWorkspace(ctx, "/workspace"); got != "/workspace/.starxo/worktrees/feat" {
 		t.Fatalf("expected failed merge to keep active worktree, got %q", got)
@@ -308,5 +317,39 @@ func TestRuntimeWorkspaceManagerMergeWorktreeAbortsFailedMergeAndKeepsActiveStat
 	allCommands := strings.Join(op.commands, "\n")
 	if !strings.Contains(allCommands, "merge --abort") {
 		t.Fatalf("expected failed merge to abort parent merge state, got:\n%s", allCommands)
+	}
+}
+
+func TestRuntimeWorkspaceManagerMergeWorktreeReturnsConflictRecovery(t *testing.T) {
+	manager := newRuntimeWorkspaceManager(func() time.Time { return time.Unix(20, 0) })
+	op := &fakeWorktreeOperator{
+		failMerge:     true,
+		mergeStderr:   "CONFLICT (content): Merge conflict in main.go\nAutomatic merge failed; fix conflicts and then commit the result.",
+		conflictFiles: "main.go\npkg/app.go\nmain.go\n",
+	}
+	ctx := contextWithSessionID(context.Background(), "sess-worktree")
+	if _, err := manager.EnterWorktree(ctx, op, "/workspace", "feat"); err != nil {
+		t.Fatalf("enter worktree: %v", err)
+	}
+
+	out, err := manager.MergeWorktree(ctx, op, "/workspace", "merge feat", false)
+	if err != nil {
+		t.Fatalf("expected structured conflict output, got error %v", err)
+	}
+	if out.Action != "merge_conflict" || !out.Conflicted || out.Removed {
+		t.Fatalf("unexpected conflict output: %#v", out)
+	}
+	if got := strings.Join(out.ConflictFiles, ","); got != "main.go,pkg/app.go" {
+		t.Fatalf("unexpected conflict files: %#v", out.ConflictFiles)
+	}
+	if !strings.Contains(out.MergeOutput, "CONFLICT") || !strings.Contains(out.RecoveryHint, "worktree was preserved") {
+		t.Fatalf("expected merge output and recovery hint, got %#v", out)
+	}
+	if got := manager.CurrentWorkspace(ctx, "/workspace"); got != "/workspace/.starxo/worktrees/feat" {
+		t.Fatalf("expected conflict to keep active worktree, got %q", got)
+	}
+	allCommands := strings.Join(op.commands, "\n")
+	if !strings.Contains(allCommands, "diff --name-only --diff-filter=U") || !strings.Contains(allCommands, "merge --abort") {
+		t.Fatalf("expected conflict recovery to collect files and abort parent merge, got:\n%s", allCommands)
 	}
 }

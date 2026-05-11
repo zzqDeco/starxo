@@ -356,8 +356,25 @@ func (m *runtimeWorkspaceManager) MergeWorktree(ctx context.Context, op commandl
 		return tools.WorktreeMergeOutput{}, err
 	}
 	if output.ExitCode != 0 {
+		mergeOutput := runtimeWorktreeMergeOutputText(output)
+		if runtimeWorktreeLooksLikeConflict(mergeOutput) {
+			conflictFiles := runtimeWorktreeConflictFiles(ctx, op, state.OriginalWorkspace)
+			abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
+			return tools.WorktreeMergeOutput{
+				Action:         "merge_conflict",
+				WorkspacePath:  state.OriginalWorkspace,
+				WorktreePath:   state.WorktreePath,
+				WorktreeBranch: state.WorktreeBranch,
+				CommitMessage:  commitMessage,
+				Conflicted:     true,
+				ConflictFiles:  conflictFiles,
+				MergeOutput:    limitRuntimeWorktreeMergeOutput(mergeOutput, 6000),
+				RecoveryHint:   "Parent merge was aborted and the active worktree was preserved. Reconcile the listed files in the worktree, review again, then retry merge.",
+				Message:        "Worktree merge hit conflicts; parent merge was aborted and the worktree remains active.",
+			}, nil
+		}
 		abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
-		return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to merge worktree: %s", strings.TrimSpace(output.Stderr))
+		return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to merge worktree: %s", strings.TrimSpace(mergeOutput))
 	}
 	removed := false
 	if removeWorktree {
@@ -414,6 +431,57 @@ func abortRuntimeWorktreeMerge(ctx context.Context, op commandline.Operator, wor
 		return
 	}
 	_, _ = op.RunCommand(ctx, []string{"sh", "-lc", "git -C " + shellQuoteRuntime(workspace) + " merge --abort >/dev/null 2>&1 || true"})
+}
+
+func runtimeWorktreeMergeOutputText(output *commandline.CommandOutput) string {
+	if output == nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimSpace(output.Stdout) + "\n" + strings.TrimSpace(output.Stderr))
+}
+
+func runtimeWorktreeLooksLikeConflict(output string) bool {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(trimmed, "CONFLICT") ||
+		strings.Contains(lower, "automatic merge failed") ||
+		strings.Contains(lower, "fix conflicts")
+}
+
+func runtimeWorktreeConflictFiles(ctx context.Context, op commandline.Operator, workspace string) []string {
+	if op == nil || strings.TrimSpace(workspace) == "" {
+		return nil
+	}
+	cmd := "git -C " + shellQuoteRuntime(workspace) + " diff --name-only --diff-filter=U"
+	output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
+	if err != nil || output.ExitCode != 0 {
+		return nil
+	}
+	lines := strings.Split(output.Stdout, "\n")
+	files := make([]string, 0, len(lines))
+	seen := make(map[string]struct{})
+	for _, line := range lines {
+		file := strings.TrimSpace(line)
+		if file == "" {
+			continue
+		}
+		if _, ok := seen[file]; ok {
+			continue
+		}
+		seen[file] = struct{}{}
+		files = append(files, file)
+	}
+	return files
+}
+
+func limitRuntimeWorktreeMergeOutput(output string, maxBytes int) string {
+	if maxBytes <= 0 || len(output) <= maxBytes {
+		return output
+	}
+	return output[:maxBytes] + "\n...truncated..."
 }
 
 func runRuntimeWorktreeCommand(ctx context.Context, op commandline.Operator, cmd string) (string, error) {

@@ -277,6 +277,10 @@ export default {
       mergeConfirm: '将 {branch} 合并到 {target}？',
       mergeDone: 'Worktree 已合并',
       mergeFailed: '合并失败；活跃 worktree 已保留。',
+      conflictDetected: '检测到合并冲突，已保留 worktree。',
+      conflictTitle: '合并冲突',
+      conflictHint: '父工作区 merge 已回滚。请在 worktree 中处理冲突文件，重新审阅后再合并。',
+      conflictFiles: '冲突文件',
       actions: {
         refresh: '刷新 worktree',
         review: '审阅 worktree',

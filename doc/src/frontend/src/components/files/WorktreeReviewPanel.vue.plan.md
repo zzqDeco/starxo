@@ -12,6 +12,7 @@
 - 通过 ChatService Wails 绑定调用 `GetRuntimeWorktreeState`、`ReviewRuntimeWorktree`、`MergeRuntimeWorktree`、`ExitRuntimeWorktree`。
 - merge 前使用危险确认弹窗，提示目标 branch 和 original workspace。
 - merge 失败时保留错误信息，提示 active worktree 仍被保留，用户可再次 review 或 exit keep。
+- merge 返回 `conflicted=true` 时展示 warning、conflict files、后端 recovery hint 和 merge output；不把冲突当作成功合并，也不清空 review。
 - 监听 `runtime:worktree_changed` 事件，当前 session 命中时自动刷新状态。
 
 ## 维护建议

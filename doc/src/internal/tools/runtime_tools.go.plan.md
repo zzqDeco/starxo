@@ -57,6 +57,7 @@
 - LSP/Skill/Web/Notebook deferred tools 已通过相同 metadata contract 接入。
 - Worktree tools 会改变当前 session 的 active workspace，影响后续 runtime tool 路径解析。
 - Worktree review/merge tools 让 active worktree 具备从“隔离执行”到“审阅并合并回原 workspace”的闭环。
+- `WorktreeMergeOutput` 可表达 `merge_conflict`，携带 conflict files、merge output 和 recovery hint，供 agent 或 UI 继续恢复。
 
 ## 7. 维护建议
 - 新增 runtime tool 时先定义 metadata、permission 和 read-only 语义，再接入实现。

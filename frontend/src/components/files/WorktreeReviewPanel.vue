@@ -11,13 +11,20 @@ import type { service, tools } from '../../../wailsjs/go/models'
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
 
+type WorktreeMergeResult = tools.WorktreeMergeOutput & {
+  conflicted?: boolean
+  conflictFiles?: string[]
+  mergeOutput?: string
+  recoveryHint?: string
+}
+
 const { t } = useI18n()
 const sessionStore = useSessionStore()
 const feedback = useUiFeedback()
 
 const state = ref<service.RuntimeWorktreeStateDTO | null>(null)
 const review = ref<tools.WorktreeDiffOutput | null>(null)
-const lastMerge = ref<tools.WorktreeMergeOutput | null>(null)
+const lastMerge = ref<WorktreeMergeResult | null>(null)
 const lastError = ref('')
 const loading = ref(false)
 const reviewing = ref(false)
@@ -37,6 +44,7 @@ const reviewStatusLines = computed(() => nonEmptyLines(review.value?.status || '
 const diffStatLines = computed(() => nonEmptyLines(review.value?.diffStat || ''))
 const reviewPatch = computed(() => review.value?.diff || review.value?.untrackedDiff || '')
 const worktreeShortPath = computed(() => compactPath(state.value?.worktreePath || ''))
+const hasMergeConflict = computed(() => !!lastMerge.value?.conflicted)
 
 function nonEmptyLines(text: string) {
   return text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim() !== '')
@@ -91,7 +99,12 @@ async function mergeWorktree() {
   merging.value = true
   lastError.value = ''
   try {
-    lastMerge.value = await MergeRuntimeWorktree(activeSessionId.value, commitMessage.value, removeWorktree.value)
+    lastMerge.value = await MergeRuntimeWorktree(activeSessionId.value, commitMessage.value, removeWorktree.value) as WorktreeMergeResult
+    if (lastMerge.value.conflicted) {
+      feedback.info(t('workspace.worktree.conflictDetected'))
+      await refreshState()
+      return
+    }
     feedback.success(t('workspace.worktree.mergeDone'))
     review.value = null
     await refreshState()
@@ -262,7 +275,20 @@ onUnmounted(() => {
           {{ t('workspace.worktree.mergeFailed') }} {{ lastError }}
         </NAlert>
 
-        <NAlert v-if="lastMerge" type="success" class="worktree-alert">
+        <NAlert v-if="hasMergeConflict" type="warning" class="worktree-alert conflict-alert">
+          <template #icon><NIcon><Warning /></NIcon></template>
+          <div class="conflict-content">
+            <strong>{{ t('workspace.worktree.conflictTitle') }}</strong>
+            <p>{{ lastMerge?.recoveryHint || t('workspace.worktree.conflictHint') }}</p>
+            <div v-if="lastMerge?.conflictFiles?.length" class="conflict-files">
+              <span class="review-label">{{ t('workspace.worktree.conflictFiles') }}</span>
+              <code v-for="file in lastMerge.conflictFiles" :key="file">{{ file }}</code>
+            </div>
+            <pre v-if="lastMerge?.mergeOutput">{{ lastMerge.mergeOutput }}</pre>
+          </div>
+        </NAlert>
+
+        <NAlert v-else-if="lastMerge" type="success" class="worktree-alert">
           {{ lastMerge.message }}
         </NAlert>
 
@@ -442,6 +468,52 @@ onUnmounted(() => {
 
 .worktree-alert {
   font-size: 12px;
+}
+
+.conflict-content {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.conflict-content strong {
+  color: var(--text-secondary);
+}
+
+.conflict-content p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.conflict-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.conflict-files code {
+  max-width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: var(--bg-deepest);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.conflict-alert pre {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  font-family: var(--font-mono);
 }
 
 .merge-controls {
