@@ -1912,6 +1912,8 @@ func timelineToolResultLimit(toolName string) int {
 	switch toolName {
 	case tools.RuntimeToolWorktreeDiff:
 		return 24000
+	case tools.RuntimeToolWrite, "write_file", tools.RuntimeToolEdit, "str_replace_editor":
+		return 8000
 	case tools.RuntimeToolWorktreeMerge, tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree:
 		return 6000
 	default:
@@ -1921,10 +1923,76 @@ func timelineToolResultLimit(toolName string) int {
 
 func timelineToolResultContent(toolName string, result string) string {
 	limit := timelineToolResultLimit(toolName)
-	if toolName == tools.RuntimeToolWorktreeDiff {
+	switch toolName {
+	case tools.RuntimeToolWorktreeDiff:
 		return truncateWorktreeDiffTimelineJSON(result, limit)
+	case tools.RuntimeToolWrite, "write_file", tools.RuntimeToolEdit, "str_replace_editor":
+		return truncateFileDiffTimelineJSON(toolName, result, limit)
 	}
 	return truncateResult(result, limit)
+}
+
+func truncateFileDiffTimelineJSON(toolName string, result string, limit int) string {
+	if limit <= 0 || len(result) <= limit {
+		return result
+	}
+	switch toolName {
+	case tools.RuntimeToolWrite, "write_file":
+		var out tools.WriteOutput
+		if err := json.Unmarshal([]byte(result), &out); err != nil {
+			return truncateResult(result, limit)
+		}
+		next, ok := encodeTimelinePatchResult(limit, out.Patch, func(patch string, truncated bool) (string, error) {
+			out.Patch = patch
+			out.Truncated = out.Truncated || truncated
+			encoded, err := json.Marshal(out)
+			return string(encoded), err
+		})
+		if ok {
+			return next
+		}
+	case tools.RuntimeToolEdit, "str_replace_editor":
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err != nil {
+			return truncateResult(result, limit)
+		}
+		next, ok := encodeTimelinePatchResult(limit, out.Patch, func(patch string, truncated bool) (string, error) {
+			out.Patch = patch
+			out.Truncated = out.Truncated || truncated
+			encoded, err := json.Marshal(out)
+			return string(encoded), err
+		})
+		if ok {
+			return next
+		}
+	}
+	return truncateResult(result, limit)
+}
+
+func encodeTimelinePatchResult(limit int, patch string, encode func(string, bool) (string, error)) (string, bool) {
+	encoded, err := encode(patch, false)
+	if err != nil {
+		return "", false
+	}
+	if len(encoded) <= limit {
+		return encoded, true
+	}
+	for i := 0; i < 16 && len(encoded) > limit; i++ {
+		over := len(encoded) - limit
+		nextPatch, truncated := shrinkTimelineText(patch, over+256)
+		if !truncated {
+			return "", false
+		}
+		patch = nextPatch
+		encoded, err = encode(patch, true)
+		if err != nil {
+			return "", false
+		}
+	}
+	if len(encoded) > limit {
+		return "", false
+	}
+	return encoded, true
 }
 
 func truncateWorktreeDiffTimelineJSON(result string, limit int) string {

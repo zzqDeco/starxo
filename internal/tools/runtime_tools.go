@@ -31,7 +31,13 @@ const (
 	RuntimeToolWorktreeMerge = "WorktreeMerge"
 
 	runtimeLargeOutputThreshold = 32 * 1024
+	runtimeToolPatchLimit       = 20 * 1024
+	runtimeWriteOldPreviewLimit = runtimeToolPatchLimit / 3
 )
+
+type runtimeFilePreviewReader interface {
+	ReadFilePreview(ctx context.Context, path string, maxBytes int) (content string, bytes int64, lines int, exists bool, truncated bool, err error)
+}
 
 type RuntimeTaskRef struct {
 	TaskID     string `json:"taskId"`
@@ -121,10 +127,13 @@ type WriteInput struct {
 }
 
 type WriteOutput struct {
-	FilePath   string `json:"filePath"`
-	Created    bool   `json:"created"`
-	Bytes      int    `json:"bytes"`
-	LinesAdded int    `json:"linesAdded"`
+	FilePath     string `json:"filePath"`
+	Created      bool   `json:"created"`
+	Bytes        int    `json:"bytes"`
+	LinesAdded   int    `json:"linesAdded"`
+	LinesRemoved int    `json:"linesRemoved,omitempty"`
+	Patch        string `json:"patch,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
 }
 
 type EditInput struct {
@@ -140,6 +149,7 @@ type EditOutput struct {
 	LinesAdded   int    `json:"linesAdded"`
 	LinesRemoved int    `json:"linesRemoved"`
 	Patch        string `json:"patch,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
 }
 
 type GlobInput struct {
@@ -434,18 +444,27 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 			if err != nil {
 				return WriteOutput{}, err
 			}
-			created := false
-			if _, err := op.ReadFile(ctx, target); err != nil {
-				created = true
+			previous, err := readExistingFilePreview(ctx, op, target, runtimeWriteOldPreviewLimit)
+			if err != nil {
+				return WriteOutput{}, err
 			}
 			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
+			patch, patchTruncated := buildReplacementPatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
+			truncated := previous.Truncated || patchTruncated
+			linesRemoved := 0
+			if previous.Exists {
+				linesRemoved = previous.Lines
+			}
 			return WriteOutput{
-				FilePath:   target,
-				Created:    created,
-				Bytes:      len(input.Content),
-				LinesAdded: len(splitLines(input.Content)),
+				FilePath:     target,
+				Created:      !previous.Exists,
+				Bytes:        len(input.Content),
+				LinesAdded:   len(splitLines(input.Content)),
+				LinesRemoved: linesRemoved,
+				Patch:        patch,
+				Truncated:    truncated,
 			}, nil
 		})
 	if err != nil {
@@ -486,12 +505,14 @@ func newEditCatalogEntry(op commandline.Operator, workspacePath string, workspac
 			if err := op.WriteFile(ctx, target, next); err != nil {
 				return EditOutput{}, err
 			}
+			patch, truncated := buildReplacementPatchLimited(input.OldString, input.NewString, runtimeToolPatchLimit)
 			return EditOutput{
 				FilePath:     target,
 				Replacements: replacements,
 				LinesAdded:   countLinesDelta(input.NewString, input.OldString, true) * replacements,
 				LinesRemoved: countLinesDelta(input.NewString, input.OldString, false) * replacements,
-				Patch:        buildSimplePatch(input.OldString, input.NewString),
+				Patch:        patch,
+				Truncated:    truncated,
 			}, nil
 		})
 	if err != nil {
@@ -803,6 +824,44 @@ func cleanRemotePath(p string) string {
 	return cleaned
 }
 
+type existingFilePreview struct {
+	Exists    bool
+	Content   string
+	Bytes     int64
+	Lines     int
+	Truncated bool
+}
+
+func readExistingFilePreview(ctx context.Context, op commandline.Operator, target string, maxBytes int) (existingFilePreview, error) {
+	if previewer, ok := op.(runtimeFilePreviewReader); ok {
+		content, bytes, lines, exists, truncated, err := previewer.ReadFilePreview(ctx, target, maxBytes)
+		if err != nil {
+			return existingFilePreview{}, err
+		}
+		return existingFilePreview{
+			Exists:    exists,
+			Content:   content,
+			Bytes:     bytes,
+			Lines:     lines,
+			Truncated: truncated,
+		}, nil
+	}
+
+	// Non-remote test or legacy operators may not support bounded previews.
+	// Production RemoteOperator implements ReadFilePreview so large overwrites
+	// do not require reading the whole old file just to render a diff summary.
+	content, err := op.ReadFile(ctx, target)
+	if err != nil {
+		return existingFilePreview{Exists: false}, nil
+	}
+	return existingFilePreview{
+		Exists:  true,
+		Content: content,
+		Bytes:   int64(len(content)),
+		Lines:   len(splitLines(content)),
+	}, nil
+}
+
 func safeSearchPath(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -897,20 +956,92 @@ func countLinesDelta(newString, oldString string, added bool) int {
 }
 
 func buildSimplePatch(oldString, newString string) string {
-	oldLines := splitLines(oldString)
-	newLines := splitLines(newString)
+	patch, _ := buildSimplePatchLimited(oldString, newString, 0)
+	return patch
+}
+
+func buildSimplePatchLimited(oldString, newString string, limit int) (string, bool) {
 	var b strings.Builder
-	for _, line := range oldLines {
-		b.WriteString("-")
-		b.WriteString(line)
-		b.WriteString("\n")
+	truncated := !appendPatchContentLimited(&b, "-", oldString, limit)
+	if !truncated {
+		truncated = !appendPatchContentLimited(&b, "+", newString, limit)
 	}
-	for _, line := range newLines {
-		b.WriteString("+")
-		b.WriteString(line)
-		b.WriteString("\n")
+	return finishLimitedPatch(b.String(), truncated, limit)
+}
+
+func buildReplacementPatchLimited(oldString, newString string, limit int) (string, bool) {
+	if limit <= 0 {
+		return buildSimplePatchLimited(oldString, newString, limit)
 	}
-	return strings.TrimSuffix(b.String(), "\n")
+	oldBudget := limit / 2
+	if oldBudget < 1 {
+		oldBudget = 1
+	}
+	var b strings.Builder
+	truncated := !appendPatchContentLimited(&b, "-", oldString, oldBudget)
+	if !appendPatchContentLimited(&b, "+", newString, limit) {
+		truncated = true
+	}
+	return finishLimitedPatch(b.String(), truncated, limit)
+}
+
+func finishLimitedPatch(content string, truncated bool, limit int) (string, bool) {
+	patch := strings.TrimSuffix(content, "\n")
+	if !truncated {
+		return patch, false
+	}
+	marker := "\n... (patch truncated)"
+	if limit <= 0 {
+		return patch + marker, true
+	}
+	if limit <= len(marker) {
+		return "", true
+	}
+	if len(patch)+len(marker) <= limit {
+		return patch + marker, true
+	}
+	return patch[:limit-len(marker)] + marker, true
+}
+
+func appendPatchContentLimited(b *strings.Builder, prefix, content string, limit int) bool {
+	if content == "" {
+		return true
+	}
+	content = strings.TrimSuffix(content, "\n")
+	if content == "" {
+		return true
+	}
+	for {
+		line, rest, found := strings.Cut(content, "\n")
+		if !appendPatchLineLimited(b, prefix, line, limit) {
+			return false
+		}
+		if !found {
+			return true
+		}
+		content = rest
+	}
+}
+
+func appendPatchLineLimited(b *strings.Builder, prefix, line string, limit int) bool {
+	nextLen := b.Len() + len(prefix) + len(line) + 1
+	if limit > 0 && nextLen > limit {
+		remaining := limit - b.Len()
+		lineBudget := remaining - len(prefix) - 1
+		if lineBudget > 0 {
+			if lineBudget > len(line) {
+				lineBudget = len(line)
+			}
+			b.WriteString(prefix)
+			b.WriteString(line[:lineBudget])
+			b.WriteString("\n")
+		}
+		return false
+	}
+	b.WriteString(prefix)
+	b.WriteString(line)
+	b.WriteString("\n")
+	return true
 }
 
 func grepFilenames(mode string, lines []string) []string {
@@ -918,7 +1049,7 @@ func grepFilenames(mode string, lines []string) []string {
 	for _, line := range lines {
 		name := line
 		if mode == "content" || mode == "count" {
-			if idx := strings.IndexByte(line, ':'); idx >= 0 {
+			if idx := strings.Index(line, ":"); idx >= 0 {
 				name = line[:idx]
 			}
 		}
@@ -931,5 +1062,33 @@ func grepFilenames(mode string, lines []string) []string {
 	for name := range seen {
 		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
+}
+
+func clampOutputMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "files_with_matches", "count":
+		return strings.TrimSpace(mode)
+	default:
+		return "content"
+	}
+}
+
+func appendMaybe(args []string, flag, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return args
+	}
+	return append(args, flag, value)
+}
+
+func truncateLines(lines []string, offset, limit int) ([]string, bool) {
+	if offset > len(lines) {
+		return []string{}, false
+	}
+	lines = lines[offset:]
+	if limit <= 0 || len(lines) <= limit {
+		return lines, false
+	}
+	return lines[:limit], true
 }

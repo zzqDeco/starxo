@@ -146,6 +146,12 @@ export default {
       lines: 'lines',
       items: 'items',
       saved: 'saved',
+      created: 'created',
+      updated: 'updated',
+      replacements: 'replacement(s)',
+      bytes: 'bytes',
+      patch: 'Patch',
+      truncated: 'truncated',
     },
   },
   interrupt: {

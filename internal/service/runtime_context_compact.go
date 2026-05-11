@@ -256,13 +256,15 @@ func (r *SessionRun) recordWriteToolResult(argsJSON, resultJSON string, nowMilli
 	if strings.TrimSpace(out.FilePath) == "" {
 		return
 	}
-	summary := fmt.Sprintf("Write %s (%d bytes, +%d lines)", out.FilePath, out.Bytes, out.LinesAdded)
+	summary := fmt.Sprintf("Write %s (%d bytes, +%d -%d)", out.FilePath, out.Bytes, out.LinesAdded, out.LinesRemoved)
 	r.appendDiffSummary(model.RuntimeDiffSummary{
-		FilePath:   out.FilePath,
-		ToolName:   tools.RuntimeToolWrite,
-		LinesAdded: out.LinesAdded,
-		Summary:    summary,
-		UpdatedAt:  nowMillis,
+		FilePath:     out.FilePath,
+		ToolName:     tools.RuntimeToolWrite,
+		LinesAdded:   out.LinesAdded,
+		LinesRemoved: out.LinesRemoved,
+		Patch:        out.Patch,
+		Summary:      summary,
+		UpdatedAt:    nowMillis,
 	})
 }
 

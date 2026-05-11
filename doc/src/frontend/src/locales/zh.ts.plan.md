@@ -11,4 +11,5 @@
 - 新增 Runtime Tasks 面板、任务刷新、输出复制、停止任务文案。
 - 新增 `permissions` 文案，用于工具审批 modal 和 Settings / Permissions 授权管理面板。
 - 新增 `workspace.worktree` 和 worktree 工具文案，用于工作区抽屉审阅/合并 Runtime V2 worktree。
+- 新增 file/edit diff review 文案，用于 Runtime V2 `Write` / `Edit` timeline 结构化结果。
 - `containers.unavailable` 用于旧 Docker 记录。
