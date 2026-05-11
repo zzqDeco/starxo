@@ -25,6 +25,8 @@ type fakeWorktreeOperator struct {
 	failMerge      bool
 	mergeStderr    string
 	conflictFiles  string
+	abortExit      int
+	abortStderr    string
 }
 
 func (o *fakeWorktreeOperator) ReadFile(ctx context.Context, path string) (string, error) {
@@ -58,6 +60,9 @@ func (o *fakeWorktreeOperator) RunCommand(ctx context.Context, command []string)
 	}
 	if strings.Contains(joined, "diff --name-only --diff-filter=U") {
 		return &commandline.CommandOutput{Stdout: o.conflictFiles, ExitCode: 0}, nil
+	}
+	if strings.Contains(joined, "merge --abort") && o.abortExit != 0 {
+		return &commandline.CommandOutput{Stderr: o.abortStderr, ExitCode: o.abortExit}, nil
 	}
 	if strings.Contains(joined, "STARXO_WORKTREE_HEAD=") {
 		if o.prepareExit != 0 {
@@ -351,5 +356,28 @@ func TestRuntimeWorkspaceManagerMergeWorktreeReturnsConflictRecovery(t *testing.
 	allCommands := strings.Join(op.commands, "\n")
 	if !strings.Contains(allCommands, "diff --name-only --diff-filter=U") || !strings.Contains(allCommands, "merge --abort") {
 		t.Fatalf("expected conflict recovery to collect files and abort parent merge, got:\n%s", allCommands)
+	}
+}
+
+func TestRuntimeWorkspaceManagerMergeWorktreeConflictSurfacesAbortFailure(t *testing.T) {
+	manager := newRuntimeWorkspaceManager(func() time.Time { return time.Unix(20, 0) })
+	op := &fakeWorktreeOperator{
+		failMerge:     true,
+		mergeStderr:   "CONFLICT (content): Merge conflict in main.go\nAutomatic merge failed; fix conflicts and then commit the result.",
+		conflictFiles: "main.go\n",
+		abortExit:     1,
+		abortStderr:   "no merge to abort",
+	}
+	ctx := contextWithSessionID(context.Background(), "sess-worktree")
+	if _, err := manager.EnterWorktree(ctx, op, "/workspace", "feat"); err != nil {
+		t.Fatalf("enter worktree: %v", err)
+	}
+
+	_, err := manager.MergeWorktree(ctx, op, "/workspace", "merge feat", false)
+	if err == nil || !strings.Contains(err.Error(), "failed to abort parent merge") || !strings.Contains(err.Error(), "no merge to abort") {
+		t.Fatalf("expected abort failure to be surfaced, got %v", err)
+	}
+	if got := manager.CurrentWorkspace(ctx, "/workspace"); got != "/workspace/.starxo/worktrees/feat" {
+		t.Fatalf("expected abort failure to keep active worktree, got %q", got)
 	}
 }

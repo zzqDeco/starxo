@@ -1926,6 +1926,8 @@ func timelineToolResultContent(toolName string, result string) string {
 	switch toolName {
 	case tools.RuntimeToolWorktreeDiff:
 		return truncateWorktreeDiffTimelineJSON(result, limit)
+	case tools.RuntimeToolWorktreeMerge:
+		return truncateWorktreeMergeTimelineJSON(result, limit)
 	case tools.RuntimeToolWrite, "write_file", tools.RuntimeToolEdit, "str_replace_editor":
 		return truncateFileDiffTimelineJSON(toolName, result, limit)
 	}
@@ -2039,6 +2041,52 @@ func truncateWorktreeDiffTimelineJSON(result string, limit int) string {
 		case out.Status != "":
 			next, truncated := shrinkTimelineText(out.Status, over+256)
 			out.Status = next
+			reduced = truncated
+		case out.Message != "":
+			next, truncated := shrinkTimelineText(out.Message, over+128)
+			out.Message = next
+			reduced = truncated
+		}
+		if !reduced {
+			return truncateResult(result, limit)
+		}
+		encoded, err = json.Marshal(out)
+		if err != nil {
+			return truncateResult(result, limit)
+		}
+	}
+	if len(encoded) > limit {
+		return truncateResult(result, limit)
+	}
+	return string(encoded)
+}
+
+func truncateWorktreeMergeTimelineJSON(result string, limit int) string {
+	if limit <= 0 || len(result) <= limit {
+		return result
+	}
+	var out tools.WorktreeMergeOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return truncateResult(result, limit)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return truncateResult(result, limit)
+	}
+	for i := 0; i < 16 && len(encoded) > limit; i++ {
+		over := len(encoded) - limit
+		reduced := false
+		switch {
+		case out.MergeOutput != "":
+			next, truncated := shrinkTimelineText(out.MergeOutput, over+512)
+			out.MergeOutput = next
+			reduced = truncated
+		case len(out.ConflictFiles) > 20:
+			out.ConflictFiles = out.ConflictFiles[:20]
+			reduced = true
+		case out.RecoveryHint != "":
+			next, truncated := shrinkTimelineText(out.RecoveryHint, over+256)
+			out.RecoveryHint = next
 			reduced = truncated
 		case out.Message != "":
 			next, truncated := shrinkTimelineText(out.Message, over+128)

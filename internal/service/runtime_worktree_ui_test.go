@@ -96,6 +96,43 @@ func TestTimelineToolResultContentKeepsLargeWorktreeDiffJSONParseable(t *testing
 	}
 }
 
+func TestTimelineToolResultContentKeepsWorktreeMergeConflictJSONParseable(t *testing.T) {
+	result := tools.WorktreeMergeOutput{
+		Action:         "merge_conflict",
+		WorkspacePath:  "/workspace",
+		WorktreePath:   "/workspace/.starxo/worktrees/a",
+		WorktreeBranch: "starxo/a",
+		CommitMessage:  "merge a",
+		Conflicted:     true,
+		ConflictFiles:  []string{"main.go", "pkg/app.go"},
+		MergeOutput:    strings.Repeat("CONFLICT (content): Merge conflict in main.go\n", 300),
+		RecoveryHint:   "Parent merge was aborted and the active worktree was preserved.",
+		Message:        "Worktree merge hit conflicts; parent merge was aborted and the worktree remains active.",
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	if len(raw) <= timelineToolResultLimit(tools.RuntimeToolWorktreeMerge) {
+		t.Fatalf("test input should exceed timeline limit, got %d", len(raw))
+	}
+
+	content := timelineToolResultContent(tools.RuntimeToolWorktreeMerge, string(raw))
+	if len(content) > timelineToolResultLimit(tools.RuntimeToolWorktreeMerge) {
+		t.Fatalf("expected content within timeline limit, got %d", len(content))
+	}
+	var parsed tools.WorktreeMergeOutput
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		t.Fatalf("timeline content should remain valid JSON: %v\n%s", err, content)
+	}
+	if !parsed.Conflicted || parsed.Action != "merge_conflict" || len(parsed.ConflictFiles) != 2 || parsed.MergeOutput == "" {
+		t.Fatalf("timeline content lost conflict metadata: %#v", parsed)
+	}
+	if !strings.Contains(parsed.MergeOutput, "truncated for timeline") {
+		t.Fatalf("expected merge output to be JSON-aware truncated, got %q", parsed.MergeOutput)
+	}
+}
+
 func TestTimelineToolResultContentKeepsLargeEditJSONParseable(t *testing.T) {
 	result := tools.EditOutput{
 		FilePath:     "/workspace/main.go",

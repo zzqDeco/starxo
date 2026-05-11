@@ -352,14 +352,18 @@ func (m *runtimeWorkspaceManager) MergeWorktree(ctx context.Context, op commandl
 	mergeCmd := "git -C " + shellQuoteRuntime(state.OriginalWorkspace) + " merge --no-ff " + shellQuoteRuntime(mergeRef) + " -m " + shellQuoteRuntime(commitMessage)
 	output, err := op.RunCommand(ctx, []string{"sh", "-lc", mergeCmd})
 	if err != nil {
-		abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
+		if abortErr := abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace); abortErr != nil {
+			return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to merge worktree: %w; additionally failed to abort parent merge: %v", err, abortErr)
+		}
 		return tools.WorktreeMergeOutput{}, err
 	}
 	if output.ExitCode != 0 {
 		mergeOutput := runtimeWorktreeMergeOutputText(output)
 		if runtimeWorktreeLooksLikeConflict(mergeOutput) {
 			conflictFiles := runtimeWorktreeConflictFiles(ctx, op, state.OriginalWorkspace)
-			abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
+			if abortErr := abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace); abortErr != nil {
+				return tools.WorktreeMergeOutput{}, fmt.Errorf("worktree merge hit conflicts and failed to abort parent merge: %w; merge output: %s", abortErr, mergeOutput)
+			}
 			return tools.WorktreeMergeOutput{
 				Action:         "merge_conflict",
 				WorkspacePath:  state.OriginalWorkspace,
@@ -368,12 +372,14 @@ func (m *runtimeWorkspaceManager) MergeWorktree(ctx context.Context, op commandl
 				CommitMessage:  commitMessage,
 				Conflicted:     true,
 				ConflictFiles:  conflictFiles,
-				MergeOutput:    limitRuntimeWorktreeMergeOutput(mergeOutput, 6000),
+				MergeOutput:    limitRuntimeWorktreeMergeOutput(mergeOutput, 3000),
 				RecoveryHint:   "Parent merge was aborted and the active worktree was preserved. Reconcile the listed files in the worktree, review again, then retry merge.",
 				Message:        "Worktree merge hit conflicts; parent merge was aborted and the worktree remains active.",
 			}, nil
 		}
-		abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
+		if abortErr := abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace); abortErr != nil {
+			return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to merge worktree: %s; additionally failed to abort parent merge: %v", strings.TrimSpace(mergeOutput), abortErr)
+		}
 		return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to merge worktree: %s", strings.TrimSpace(mergeOutput))
 	}
 	removed := false
@@ -426,11 +432,18 @@ func (m *runtimeWorkspaceManager) activeState(ctx context.Context) (runtimeWorkt
 	return state, ok
 }
 
-func abortRuntimeWorktreeMerge(ctx context.Context, op commandline.Operator, workspace string) {
+func abortRuntimeWorktreeMerge(ctx context.Context, op commandline.Operator, workspace string) error {
 	if op == nil || strings.TrimSpace(workspace) == "" {
-		return
+		return fmt.Errorf("sandbox operator or workspace is not available")
 	}
-	_, _ = op.RunCommand(ctx, []string{"sh", "-lc", "git -C " + shellQuoteRuntime(workspace) + " merge --abort >/dev/null 2>&1 || true"})
+	output, err := op.RunCommand(ctx, []string{"sh", "-lc", "git -C " + shellQuoteRuntime(workspace) + " merge --abort"})
+	if err != nil {
+		return err
+	}
+	if output.ExitCode != 0 {
+		return fmt.Errorf("git merge --abort failed: %s", strings.TrimSpace(runtimeWorktreeMergeOutputText(output)))
+	}
+	return nil
 }
 
 func runtimeWorktreeMergeOutputText(output *commandline.CommandOutput) string {

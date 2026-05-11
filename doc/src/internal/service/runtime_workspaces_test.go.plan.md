@@ -23,6 +23,7 @@
 - worktree 分支被用户或 agent 切换时，`MergeWorktree` 会拒绝 merge 并保持 active worktree 状态。
 - failed merge 会触发 `git merge --abort`，同时保持 active worktree 状态供后续修复。
 - Git conflict merge 会返回结构化 `merge_conflict` output，包含去重后的 conflict files、merge output 和 recovery hint，并保持 active worktree。
+- Git conflict 后如果 `git merge --abort` 失败，会返回错误而不是误报结构化恢复成功。
 
 ## 5. 维护建议
 - 新增 worktree action 时同步补状态转换和命令构造测试。
