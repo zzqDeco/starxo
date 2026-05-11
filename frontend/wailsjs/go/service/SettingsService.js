@@ -41,3 +41,7 @@ export function TestLLMConnection(arg1) {
 export function TestSSHConnection(arg1) {
   return window['go']['service']['SettingsService']['TestSSHConnection'](arg1);
 }
+
+export function TestWebSearch(arg1, arg2) {
+  return window['go']['service']['SettingsService']['TestWebSearch'](arg1, arg2);
+}

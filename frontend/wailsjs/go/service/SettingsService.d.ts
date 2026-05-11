@@ -24,3 +24,5 @@ export function SetOnSettingsSave(arg1:any):Promise<void>;
 export function TestLLMConnection(arg1:config.LLMConfig):Promise<void>;
 
 export function TestSSHConnection(arg1:config.SSHConfig):Promise<void>;
+
+export function TestWebSearch(arg1:config.AppConfig,arg2:string):Promise<service.WebSearchSmokeResult>;

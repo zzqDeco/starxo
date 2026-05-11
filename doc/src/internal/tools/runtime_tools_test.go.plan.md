@@ -22,6 +22,7 @@
 - 大型 Bash 输出会写入持久化结果并在 inline stdout 中截断。
 - `Read` tool 会通过 fake workspace manager 使用当前 session active workspace。
 - deferred runtime tools 的 metadata 覆盖 LSP/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。
+- `WorktreeDiff` 是 read-only deferred；`WorktreeMerge` 是 writable deferred，plan mode 不直接加载。
 
 ## 5. 维护建议
 - 新增 Runtime V2 core tool 时同步补 alias/permission/path 或执行语义测试。

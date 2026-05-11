@@ -71,6 +71,14 @@ func (m fakeWorkspaceManager) ExitWorktree(ctx context.Context, op commandline.O
 	return WorktreeOutput{}, fmt.Errorf("not implemented")
 }
 
+func (m fakeWorkspaceManager) DiffWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, includePatch bool, maxBytes int) (WorktreeDiffOutput, error) {
+	return WorktreeDiffOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeWorkspaceManager) MergeWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, commitMessage string, removeWorktree bool) (WorktreeMergeOutput, error) {
+	return WorktreeMergeOutput{}, fmt.Errorf("not implemented")
+}
+
 func (m *fakeRuntimeTaskManager) StartShellTask(ctx context.Context, sessionID, command, description string, runner RuntimeTaskRunner) (RuntimeTaskRef, error) {
 	return RuntimeTaskRef{}, fmt.Errorf("not implemented")
 }
@@ -122,6 +130,20 @@ func TestRuntimeCoreCatalogEntriesExposeAliasesAndPlanGate(t *testing.T) {
 		RuntimeToolRead,
 		RuntimeToolTaskOutput,
 	})
+	assertCatalogNames(t, state.SearchablePoolForMode, []string{
+		RuntimeToolWorktreeDiff,
+	})
+
+	byName := map[string]CatalogEntry{}
+	for _, entry := range entries {
+		byName[entry.CanonicalName] = entry
+	}
+	if diff := byName[RuntimeToolWorktreeDiff]; !diff.ShouldDefer || !diff.ReadOnlyTrusted {
+		t.Fatalf("expected WorktreeDiff to be read-only deferred, got %#v", diff)
+	}
+	if merge := byName[RuntimeToolWorktreeMerge]; !merge.ShouldDefer || merge.ReadOnlyTrusted {
+		t.Fatalf("expected WorktreeMerge to require write permission, got %#v", merge)
+	}
 }
 
 func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {

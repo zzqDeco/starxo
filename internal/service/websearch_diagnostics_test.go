@@ -89,6 +89,22 @@ func TestDiagnoseWebSearchConfigWarnsForNonPublicEndpoint(t *testing.T) {
 	}
 }
 
+func TestSettingsServiceTestWebSearchReturnsFailureResult(t *testing.T) {
+	enabled := false
+	svc := &SettingsService{}
+	result, err := svc.TestWebSearch(config.AppConfig{
+		Agent: config.AgentConfig{
+			WebSearch: config.WebSearchConfig{Enabled: &enabled},
+		},
+	}, "runtime")
+	if err != nil {
+		t.Fatalf("test web search: %v", err)
+	}
+	if result.OK || result.Query != "runtime" || !strings.Contains(result.Message, "disabled") {
+		t.Fatalf("expected non-throwing disabled result, got %#v", result)
+	}
+}
+
 func webSearchDiagnosticCheckByID(checks []WebSearchDiagnosticCheck, id string) WebSearchDiagnosticCheck {
 	for _, check := range checks {
 		if check.ID == id {

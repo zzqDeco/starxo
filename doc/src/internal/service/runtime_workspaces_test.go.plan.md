@@ -6,7 +6,7 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 覆盖 Runtime V2 worktree manager 的 session workspace 切换和 dirty 删除保护。
+- 覆盖 Runtime V2 worktree manager 的 session workspace 切换、dirty 删除保护、diff review 和 merge restore 行为。
 
 ## 3. 输入与输出
 - 输入来源: fake commandline operator、带 sessionID 的 context。
@@ -18,6 +18,9 @@
 - `ExitWorktree(action=keep)` 恢复默认 workspace，并保留 worktree。
 - dirty worktree 在未设置 `discard_changes=true` 时拒绝 remove，并保持 active worktree 状态。
 - `CreateIsolatedWorktree` 不切换 session workspace；只有带 context override 的子 agent context 会路由到 isolated worktree。
+- `DiffWorktree` 返回 status/stat/patch 和单独的 untracked patch，并按 `max_bytes` 截断 patch。
+- `MergeWorktree` 会提交 worktree 修改、merge 到 parent、可选 remove worktree，并恢复默认 workspace。
+- failed merge 会触发 `git merge --abort`，同时保持 active worktree 状态供后续修复。
 
 ## 5. 维护建议
 - 新增 worktree action 时同步补状态转换和命令构造测试。

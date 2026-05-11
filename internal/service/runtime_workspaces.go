@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -246,6 +247,214 @@ func (m *runtimeWorkspaceManager) ExitWorktree(ctx context.Context, op commandli
 		WorktreeBranch: state.WorktreeBranch,
 		Message:        message,
 	}, nil
+}
+
+func (m *runtimeWorkspaceManager) DiffWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, includePatch bool, maxBytes int) (tools.WorktreeDiffOutput, error) {
+	if op == nil {
+		return tools.WorktreeDiffOutput{}, fmt.Errorf("sandbox operator is not available")
+	}
+	state, ok := m.activeState(ctx)
+	if !ok {
+		return tools.WorktreeDiffOutput{}, fmt.Errorf("no active worktree for this session")
+	}
+	if maxBytes <= 0 {
+		maxBytes = 20000
+	}
+	base, err := runRuntimeWorktreeCommand(ctx, op, "git -C "+shellQuoteRuntime(state.OriginalWorkspace)+" rev-parse HEAD")
+	if err != nil {
+		return tools.WorktreeDiffOutput{}, err
+	}
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return tools.WorktreeDiffOutput{}, fmt.Errorf("could not resolve original workspace HEAD")
+	}
+	status, err := runRuntimeWorktreeCommand(ctx, op, "git -C "+shellQuoteRuntime(state.WorktreePath)+" status --short")
+	if err != nil {
+		return tools.WorktreeDiffOutput{}, err
+	}
+	stat, err := runRuntimeWorktreeCommand(ctx, op, "git -C "+shellQuoteRuntime(state.WorktreePath)+" diff --stat --no-ext-diff "+shellQuoteRuntime(base))
+	if err != nil {
+		return tools.WorktreeDiffOutput{}, err
+	}
+	out := tools.WorktreeDiffOutput{
+		WorkspacePath:  state.OriginalWorkspace,
+		WorktreePath:   state.WorktreePath,
+		WorktreeBranch: state.WorktreeBranch,
+		Status:         strings.TrimRight(status, "\n"),
+		DiffStat:       strings.TrimRight(stat, "\n"),
+		Message:        "Active worktree changes are ready for review.",
+	}
+	if includePatch {
+		// MergeWorktree commits with git add -A, so review output must include
+		// untracked file contents in addition to the tracked diff.
+		untracked, err := runRuntimeWorktreeCommand(ctx, op, limitRuntimeWorktreeOutputCommand(runtimeUntrackedPatchCommand(state.WorktreePath), maxBytes))
+		if err != nil {
+			return tools.WorktreeDiffOutput{}, err
+		}
+		diff, err := runRuntimeWorktreeCommand(ctx, op, limitRuntimeWorktreeOutputCommand("git -C "+shellQuoteRuntime(state.WorktreePath)+" diff --no-ext-diff "+shellQuoteRuntime(base), maxBytes))
+		if err != nil {
+			return tools.WorktreeDiffOutput{}, err
+		}
+		out.UntrackedDiff, out.UntrackedTruncated = limitRuntimeDiff(untracked, maxBytes)
+		diff = combineRuntimeDiffs(untracked, diff)
+		if len(diff) > maxBytes {
+			out.Diff = diff[:maxBytes]
+			out.Truncated = true
+		} else {
+			out.Diff = diff
+		}
+	}
+	if strings.TrimSpace(out.Status) == "" && strings.TrimSpace(out.DiffStat) == "" {
+		out.Message = "Active worktree has no uncommitted changes."
+	}
+	return out, nil
+}
+
+func (m *runtimeWorkspaceManager) MergeWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, commitMessage string, removeWorktree bool) (tools.WorktreeMergeOutput, error) {
+	if op == nil {
+		return tools.WorktreeMergeOutput{}, fmt.Errorf("sandbox operator is not available")
+	}
+	state, ok := m.activeState(ctx)
+	if !ok {
+		return tools.WorktreeMergeOutput{}, fmt.Errorf("no active worktree for this session")
+	}
+	commitMessage = strings.TrimSpace(commitMessage)
+	if commitMessage == "" {
+		commitMessage = "Starxo runtime worktree merge"
+	}
+	prepareCmd := strings.Join([]string{
+		"set -e",
+		"parent_status=$(git -C " + shellQuoteRuntime(state.OriginalWorkspace) + " status --porcelain)",
+		"if [ -n \"$parent_status\" ]; then printf '%s\\n' \"parent workspace has uncommitted changes\" >&2; exit 2; fi",
+		"worktree_status=$(git -C " + shellQuoteRuntime(state.WorktreePath) + " status --porcelain)",
+		"if [ -n \"$worktree_status\" ]; then git -C " + shellQuoteRuntime(state.WorktreePath) + " add -A && git -C " + shellQuoteRuntime(state.WorktreePath) + " -c user.name=Starxo -c user.email=starxo@local commit -m " + shellQuoteRuntime(commitMessage) + "; fi",
+	}, "\n")
+	prepareOut, err := op.RunCommand(ctx, []string{"sh", "-lc", prepareCmd})
+	if err != nil {
+		return tools.WorktreeMergeOutput{}, err
+	}
+	if prepareOut.ExitCode != 0 {
+		return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to prepare worktree merge: %s", strings.TrimSpace(prepareOut.Stderr))
+	}
+	mergeCmd := "git -C " + shellQuoteRuntime(state.OriginalWorkspace) + " merge --no-ff " + shellQuoteRuntime(state.WorktreeBranch) + " -m " + shellQuoteRuntime(commitMessage)
+	output, err := op.RunCommand(ctx, []string{"sh", "-lc", mergeCmd})
+	if err != nil {
+		abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
+		return tools.WorktreeMergeOutput{}, err
+	}
+	if output.ExitCode != 0 {
+		abortRuntimeWorktreeMerge(ctx, op, state.OriginalWorkspace)
+		return tools.WorktreeMergeOutput{}, fmt.Errorf("failed to merge worktree: %s", strings.TrimSpace(output.Stderr))
+	}
+	removed := false
+	if removeWorktree {
+		removeCmd := strings.Join([]string{
+			"set -e",
+			"git -C " + shellQuoteRuntime(state.OriginalWorkspace) + " worktree remove " + shellQuoteRuntime(state.WorktreePath),
+			"git -C " + shellQuoteRuntime(state.OriginalWorkspace) + " branch -d " + shellQuoteRuntime(state.WorktreeBranch) + " >/dev/null 2>&1 || true",
+		}, "\n")
+		removeOut, err := op.RunCommand(ctx, []string{"sh", "-lc", removeCmd})
+		if err != nil {
+			return tools.WorktreeMergeOutput{}, err
+		}
+		if removeOut.ExitCode != 0 {
+			return tools.WorktreeMergeOutput{}, fmt.Errorf("merged worktree but failed to remove it: %s", strings.TrimSpace(removeOut.Stderr))
+		}
+		removed = true
+	}
+	sessionID := workspaceSessionID(ctx)
+	if sessionID == "" {
+		sessionID = "global"
+	}
+	m.mu.Lock()
+	delete(m.states, sessionID)
+	m.mu.Unlock()
+
+	message := "Merged worktree into the original sandbox workspace and restored the original workspace."
+	if removed {
+		message = "Merged worktree, removed it, and restored the original sandbox workspace."
+	}
+	return tools.WorktreeMergeOutput{
+		Action:         "merge",
+		WorkspacePath:  state.OriginalWorkspace,
+		WorktreePath:   state.WorktreePath,
+		WorktreeBranch: state.WorktreeBranch,
+		CommitMessage:  commitMessage,
+		Removed:        removed,
+		Message:        message,
+	}, nil
+}
+
+func (m *runtimeWorkspaceManager) activeState(ctx context.Context) (runtimeWorktreeState, bool) {
+	sessionID := workspaceSessionID(ctx)
+	if sessionID == "" {
+		sessionID = "global"
+	}
+	m.mu.RLock()
+	state, ok := m.states[sessionID]
+	m.mu.RUnlock()
+	return state, ok
+}
+
+func abortRuntimeWorktreeMerge(ctx context.Context, op commandline.Operator, workspace string) {
+	if op == nil || strings.TrimSpace(workspace) == "" {
+		return
+	}
+	_, _ = op.RunCommand(ctx, []string{"sh", "-lc", "git -C " + shellQuoteRuntime(workspace) + " merge --abort >/dev/null 2>&1 || true"})
+}
+
+func runRuntimeWorktreeCommand(ctx context.Context, op commandline.Operator, cmd string) (string, error) {
+	output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
+	if err != nil {
+		return "", err
+	}
+	if output.ExitCode != 0 {
+		return "", fmt.Errorf("worktree command failed: %s", strings.TrimSpace(output.Stderr))
+	}
+	return output.Stdout, nil
+}
+
+func runtimeUntrackedPatchCommand(worktreePath string) string {
+	quoted := shellQuoteRuntime(worktreePath)
+	return strings.Join([]string{
+		"wt=" + quoted,
+		"git -C " + quoted + " ls-files --others --exclude-standard | while IFS= read -r file; do",
+		"  [ -n \"$file\" ] || continue",
+		"  [ -f \"$wt/$file\" ] || continue",
+		"  printf 'diff --git a/%s b/%s\\nnew file mode 100644\\n--- /dev/null\\n+++ b/%s\\n' \"$file\" \"$file\" \"$file\"",
+		"  sed 's/^/+/' \"$wt/$file\"",
+		"  printf '\\n'",
+		"done",
+	}, "\n")
+}
+
+func limitRuntimeWorktreeOutputCommand(cmd string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return cmd
+	}
+	return "(\n" + cmd + "\n) | head -c " + strconv.Itoa(maxBytes+1)
+}
+
+func combineRuntimeDiffs(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimRight(part, "\n")
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return strings.Join(out, "\n")
+}
+
+func limitRuntimeDiff(diff string, maxBytes int) (string, bool) {
+	if maxBytes <= 0 {
+		return diff, false
+	}
+	if len(diff) <= maxBytes {
+		return diff, false
+	}
+	return diff[:maxBytes], true
 }
 
 func workspaceSessionID(ctx context.Context) string {

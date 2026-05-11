@@ -1681,6 +1681,32 @@ export namespace service {
 		}
 	}
 
+	export class WebSearchSmokeResult {
+	    ok: boolean;
+	    query: string;
+	    provider: string;
+	    url: string;
+	    results: string[];
+	    resultCount: number;
+	    durationMs: number;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WebSearchSmokeResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.query = source["query"];
+	        this.provider = source["provider"];
+	        this.url = source["url"];
+	        this.results = source["results"];
+	        this.resultCount = source["resultCount"];
+	        this.durationMs = source["durationMs"];
+	        this.message = source["message"];
+	    }
+	}
 	export class WorkspaceCleanupResultDTO {
 	    tmpPath: string;
 	    removedEntries: number;

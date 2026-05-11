@@ -334,6 +334,7 @@ export default {
       location: 'Location',
       language: 'Language',
       diagnostics: 'Run diagnostics',
+      smokeTest: 'Smoke test',
       ready: 'Ready',
       needsFix: 'Needs fix',
     },
@@ -352,6 +353,7 @@ export default {
       extensions: '.ext, .ext2',
       status: 'Refresh LSP status',
       runningServers: 'servers',
+      builtIn: 'built-in',
     },
     mcp: {
       tab: 'MCP Servers',

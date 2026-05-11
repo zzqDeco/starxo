@@ -334,6 +334,7 @@ export default {
       location: '地区',
       language: '语言',
       diagnostics: '运行诊断',
+      smokeTest: 'Smoke 测试',
       ready: '就绪',
       needsFix: '需要修复',
     },
@@ -352,6 +353,7 @@ export default {
       extensions: '.ext, .ext2',
       status: '刷新 LSP 状态',
       runningServers: '个 server',
+      builtIn: '内置',
     },
     mcp: {
       tab: 'MCP 服务器',
