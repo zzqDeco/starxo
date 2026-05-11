@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"starxo/internal/config"
 	"starxo/internal/tools"
@@ -38,10 +39,59 @@ type WebSearchProviderDiagnostic struct {
 	PublicEndpoint bool   `json:"publicEndpoint"`
 }
 
+type WebSearchSmokeResult struct {
+	OK          bool     `json:"ok"`
+	Query       string   `json:"query"`
+	Provider    string   `json:"provider"`
+	URL         string   `json:"url"`
+	Results     []string `json:"results"`
+	ResultCount int      `json:"resultCount"`
+	DurationMs  int64    `json:"durationMs"`
+	Message     string   `json:"message"`
+}
+
 func (s *SettingsService) DiagnoseWebSearch(cfg config.AppConfig) (WebSearchDiagnosticsResult, error) {
 	config.MigrateLegacyDockerConfig(&cfg)
 	config.NormalizeAppConfig(&cfg)
 	return diagnoseWebSearchConfig(s.ctx, cfg.Agent.WebSearch), nil
+}
+
+func (s *SettingsService) TestWebSearch(cfg config.AppConfig, query string) (WebSearchSmokeResult, error) {
+	config.MigrateLegacyDockerConfig(&cfg)
+	config.NormalizeAppConfig(&cfg)
+	query = strings.TrimSpace(query)
+	if query == "" {
+		query = "Starxo runtime search diagnostic"
+	}
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+	out, err := runWebSearch(ctx, cfg.Agent.WebSearch, webSearchInput{Query: query, Limit: 3})
+	return webSearchSmokeResult(query, time.Since(start), out, err), nil
+}
+
+func webSearchSmokeResult(query string, duration time.Duration, out webSearchOutput, err error) WebSearchSmokeResult {
+	result := WebSearchSmokeResult{
+		Query:      query,
+		DurationMs: duration.Milliseconds(),
+	}
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	result.Provider = out.Provider
+	result.URL = out.URL
+	result.Results = out.Results
+	result.ResultCount = len(out.Results)
+	if result.ResultCount == 0 {
+		result.Message = fmt.Sprintf("WebSearch returned zero results from %s; check provider configuration and result parsing.", out.Provider)
+		return result
+	}
+	result.OK = true
+	result.Message = fmt.Sprintf("WebSearch returned %d result(s) from %s.", len(out.Results), out.Provider)
+	return result
 }
 
 func diagnoseWebSearchConfig(ctx context.Context, cfg config.WebSearchConfig) WebSearchDiagnosticsResult {

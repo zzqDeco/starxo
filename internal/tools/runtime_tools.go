@@ -27,6 +27,8 @@ const (
 	RuntimeToolExitPlanMode  = "ExitPlanMode"
 	RuntimeToolEnterWorktree = "EnterWorktree"
 	RuntimeToolExitWorktree  = "ExitWorktree"
+	RuntimeToolWorktreeDiff  = "WorktreeDiff"
+	RuntimeToolWorktreeMerge = "WorktreeMerge"
 
 	runtimeLargeOutputThreshold = 32 * 1024
 )
@@ -77,6 +79,8 @@ type RuntimeWorkspaceManager interface {
 	CurrentWorkspace(ctx context.Context, defaultWorkspace string) string
 	EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (WorktreeOutput, error)
 	ExitWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, action string, discardChanges bool) (WorktreeOutput, error)
+	DiffWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, includePatch bool, maxBytes int) (WorktreeDiffOutput, error)
+	MergeWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, commitMessage string, removeWorktree bool) (WorktreeMergeOutput, error)
 }
 
 type BashInput struct {
@@ -210,6 +214,39 @@ type WorktreeOutput struct {
 	Message        string `json:"message"`
 }
 
+type WorktreeDiffInput struct {
+	IncludePatch bool `json:"include_patch,omitempty" jsonschema:"description=include patch content in addition to status and stat"`
+	MaxBytes     int  `json:"max_bytes,omitempty" jsonschema:"description=max patch bytes when include_patch is true; default 20000"`
+}
+
+type WorktreeDiffOutput struct {
+	WorkspacePath      string `json:"workspacePath"`
+	WorktreePath       string `json:"worktreePath"`
+	WorktreeBranch     string `json:"worktreeBranch"`
+	Status             string `json:"status"`
+	DiffStat           string `json:"diffStat"`
+	Diff               string `json:"diff,omitempty"`
+	UntrackedDiff      string `json:"untrackedDiff,omitempty"`
+	Truncated          bool   `json:"truncated,omitempty"`
+	UntrackedTruncated bool   `json:"untrackedTruncated,omitempty"`
+	Message            string `json:"message"`
+}
+
+type WorktreeMergeInput struct {
+	CommitMessage  string `json:"commit_message,omitempty" jsonschema:"description=commit and merge message; defaults to Starxo runtime worktree merge"`
+	RemoveWorktree bool   `json:"remove_worktree,omitempty" jsonschema:"description=remove the worktree and delete its local branch after a successful merge"`
+}
+
+type WorktreeMergeOutput struct {
+	Action         string `json:"action"`
+	WorkspacePath  string `json:"workspacePath"`
+	WorktreePath   string `json:"worktreePath"`
+	WorktreeBranch string `json:"worktreeBranch"`
+	CommitMessage  string `json:"commitMessage,omitempty"`
+	Removed        bool   `json:"removed"`
+	Message        string `json:"message"`
+}
+
 func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager, workspaces RuntimeWorkspaceManager) ([]CatalogEntry, error) {
 	builders := []func() (CatalogEntry, error){
 		func() (CatalogEntry, error) { return newBashCatalogEntry(op, workspacePath, tasks, workspaces) },
@@ -223,6 +260,8 @@ func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string,
 		newExitPlanModeCatalogEntry,
 		func() (CatalogEntry, error) { return newEnterWorktreeCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newExitWorktreeCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newWorktreeDiffCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newWorktreeMergeCatalogEntry(op, workspacePath, workspaces) },
 	}
 	entries := make([]CatalogEntry, 0, len(builders))
 	for _, build := range builders {
@@ -653,6 +692,40 @@ func newExitWorktreeCatalogEntry(op commandline.Operator, workspacePath string, 
 		return CatalogEntry{}, err
 	}
 	return deferredRuntimeCatalogEntry(RuntimeToolExitWorktree, "Exit Worktree", "Exit a worktree session created by EnterWorktree.", ToolClassRuntime, false, t), nil
+}
+
+func newWorktreeDiffCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolWorktreeDiff,
+		"Review the current runtime worktree status, diff stat, and optional patch.",
+		func(ctx context.Context, input WorktreeDiffInput) (WorktreeDiffOutput, error) {
+			if workspaces == nil {
+				return WorktreeDiffOutput{}, fmt.Errorf("runtime worktree manager is not available")
+			}
+			return workspaces.DiffWorktree(ctx, op, workspacePath, input.IncludePatch, input.MaxBytes)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	entry := deferredRuntimeCatalogEntry(RuntimeToolWorktreeDiff, "Worktree Diff", "Review current runtime worktree changes.", ToolClassRuntimeFile, true, t)
+	entry.SearchHint = "worktree diff review status patch changes"
+	return entry, nil
+}
+
+func newWorktreeMergeCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolWorktreeMerge,
+		"Commit and merge the active runtime worktree back into the original sandbox workspace.",
+		func(ctx context.Context, input WorktreeMergeInput) (WorktreeMergeOutput, error) {
+			if workspaces == nil {
+				return WorktreeMergeOutput{}, fmt.Errorf("runtime worktree manager is not available")
+			}
+			return workspaces.MergeWorktree(ctx, op, workspacePath, input.CommitMessage, input.RemoveWorktree)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	entry := deferredRuntimeCatalogEntry(RuntimeToolWorktreeMerge, "Worktree Merge", "Merge current runtime worktree changes back to the original workspace.", ToolClassRuntimeFile, false, t)
+	entry.SearchHint = "worktree merge commit apply changes original workspace"
+	return entry, nil
 }
 
 func currentWorkspace(ctx context.Context, defaultWorkspace string, workspaces RuntimeWorkspaceManager) string {

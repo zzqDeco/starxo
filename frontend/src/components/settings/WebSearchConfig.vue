@@ -5,13 +5,16 @@ import { Flash, Search } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
-import { DiagnoseWebSearch } from '../../../wailsjs/go/service/SettingsService'
+import { DiagnoseWebSearch, TestWebSearch } from '../../../wailsjs/go/service/SettingsService'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const feedback = useUiFeedback()
 const diagnosing = ref(false)
+const testingSearch = ref(false)
 const diagnostics = ref<any | null>(null)
+const smoke = ref<any | null>(null)
+const smokeQuery = ref('Starxo runtime search diagnostic')
 
 const webSearch = computed(() => {
   if (!settingsStore.settings.agent.webSearch) {
@@ -65,6 +68,17 @@ async function runDiagnostics() {
     feedback.error(t('settings.webSearch.diagnostics'), e)
   } finally {
     diagnosing.value = false
+  }
+}
+
+async function runSmokeTest() {
+  testingSearch.value = true
+  try {
+    smoke.value = await TestWebSearch(settingsStore.settings as any, smokeQuery.value)
+  } catch (e) {
+    feedback.error(t('settings.webSearch.smokeTest'), e)
+  } finally {
+    testingSearch.value = false
   }
 }
 
@@ -125,11 +139,32 @@ function statusType(status?: string) {
     </NForm>
 
     <div class="form-actions">
+      <NInput v-model:value="smokeQuery" size="small" class="smoke-query mono-input" />
       <NButton size="small" :loading="diagnosing" @click="runDiagnostics">
         <template #icon><NIcon><Flash /></NIcon></template>
         {{ t('settings.webSearch.diagnostics') }}
       </NButton>
+      <NButton size="small" :loading="testingSearch" @click="runSmokeTest">
+        <template #icon><NIcon><Search /></NIcon></template>
+        {{ t('settings.webSearch.smokeTest') }}
+      </NButton>
     </div>
+
+    <section v-if="smoke" class="diagnostics">
+      <div class="diagnostics-head">
+        <NIcon size="18"><Search /></NIcon>
+        <strong>{{ smoke.message }}</strong>
+        <NTag size="small" :type="smoke.ok ? 'success' : 'error'">
+          {{ smoke.ok ? t('settings.webSearch.ready') : t('settings.webSearch.needsFix') }}
+        </NTag>
+      </div>
+      <div v-if="smoke.url" class="smoke-url">{{ smoke.provider }} · {{ smoke.url }}</div>
+      <div v-if="smoke.results?.length" class="smoke-results">
+        <div v-for="(result, index) in smoke.results" :key="`${index}:${result}`" class="smoke-result">
+          {{ result }}
+        </div>
+      </div>
+    </section>
 
     <section v-if="diagnostics" class="diagnostics">
       <div class="diagnostics-head">
@@ -189,6 +224,7 @@ function statusType(status?: string) {
 .section-actions,
 .form-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -204,6 +240,10 @@ function statusType(status?: string) {
 
 .full-width {
   width: 100%;
+}
+
+.smoke-query {
+  max-width: 300px;
 }
 
 .diagnostics {
@@ -233,5 +273,29 @@ function statusType(status?: string) {
 .provider-message {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.smoke-url,
+.smoke-result {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.smoke-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  .form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .smoke-query {
+    max-width: none;
+  }
 }
 </style>
