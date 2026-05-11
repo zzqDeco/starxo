@@ -19,9 +19,11 @@ import (
 )
 
 type fakeLSPRuntimeOperator struct {
-	files         map[string]string
-	startCount    int
-	startCommands [][]string
+	files          map[string]string
+	failWriteOnce  map[string]error
+	startCount     int
+	startCommands  [][]string
+	processFactory func() sandbox.RuntimeProcess
 }
 
 func (o *fakeLSPRuntimeOperator) ReadFile(ctx context.Context, filePath string) (string, error) {
@@ -33,6 +35,10 @@ func (o *fakeLSPRuntimeOperator) ReadFile(ctx context.Context, filePath string) 
 }
 
 func (o *fakeLSPRuntimeOperator) WriteFile(ctx context.Context, filePath string, content string) error {
+	if err, ok := o.failWriteOnce[filePath]; ok {
+		delete(o.failWriteOnce, filePath)
+		return err
+	}
 	o.files[filePath] = content
 	return nil
 }
@@ -57,17 +63,22 @@ func (o *fakeLSPRuntimeOperator) RunCommand(ctx context.Context, command []strin
 func (o *fakeLSPRuntimeOperator) StartProcess(ctx context.Context, command []string) (sandbox.RuntimeProcess, error) {
 	o.startCount++
 	o.startCommands = append(o.startCommands, append([]string(nil), command...))
+	if o.processFactory != nil {
+		return o.processFactory(), nil
+	}
 	return newFakeLanguageServerProcess(), nil
 }
 
 type fakeLanguageServerProcess struct {
-	clientInW  *io.PipeWriter
-	clientOutR *io.PipeReader
-	killOnce   sync.Once
-	done       chan struct{}
+	clientInW       *io.PipeWriter
+	clientOutR      *io.PipeReader
+	killOnce        sync.Once
+	done            chan struct{}
+	formatResult    any
+	formatResultSet bool
 }
 
-func newFakeLanguageServerProcess() *fakeLanguageServerProcess {
+func newFakeLanguageServerProcess(options ...func(*fakeLanguageServerProcess)) *fakeLanguageServerProcess {
 	clientInR, clientInW := io.Pipe()
 	clientOutR, clientOutW := io.Pipe()
 	p := &fakeLanguageServerProcess{
@@ -75,8 +86,18 @@ func newFakeLanguageServerProcess() *fakeLanguageServerProcess {
 		clientOutR: clientOutR,
 		done:       make(chan struct{}),
 	}
+	for _, option := range options {
+		option(p)
+	}
 	go p.serve(clientInR, clientOutW)
 	return p
+}
+
+func fakeLanguageServerFormatResult(result any) func(*fakeLanguageServerProcess) {
+	return func(p *fakeLanguageServerProcess) {
+		p.formatResult = result
+		p.formatResultSet = true
+	}
 }
 
 func (p *fakeLanguageServerProcess) Stdin() io.WriteCloser { return p.clientInW }
@@ -141,13 +162,17 @@ func (p *fakeLanguageServerProcess) serve(r io.Reader, w io.WriteCloser) {
 				},
 			}
 		case "textDocument/formatting":
-			result = []map[string]any{{
-				"range": map[string]any{
-					"start": map[string]any{"line": 0, "character": 0},
-					"end":   map[string]any{"line": 2, "character": 0},
-				},
-				"newText": "package main\n\nfunc old() {}\n",
-			}}
+			if p.formatResultSet {
+				result = p.formatResult
+			} else {
+				result = []map[string]any{{
+					"range": map[string]any{
+						"start": map[string]any{"line": 0, "character": 0},
+						"end":   map[string]any{"line": 2, "character": 0},
+					},
+					"newText": "package main\n\nfunc old() {}\n",
+				}}
+			}
 		default:
 			result = nil
 		}
@@ -248,6 +273,33 @@ func TestRuntimeLSPManagerAppliesFormattingEdit(t *testing.T) {
 	}
 }
 
+func TestRuntimeLSPManagerHandlesNoopFormattingEdit(t *testing.T) {
+	op := &fakeLSPRuntimeOperator{
+		files: map[string]string{
+			"/workspace/main.go": "package main\n\nfunc old() {}\n",
+		},
+		processFactory: func() sandbox.RuntimeProcess {
+			return newFakeLanguageServerProcess(fakeLanguageServerFormatResult(nil))
+		},
+	}
+	manager := newRuntimeLSPManager(nil)
+	defer manager.CloseAll()
+
+	out, handled, err := manager.Edit(context.Background(), op, "/workspace", nil, tools.LSPEditInput{
+		Operation: "format",
+		FilePath:  "main.go",
+	})
+	if err != nil {
+		t.Fatalf("noop format: %v", err)
+	}
+	if !handled || out.EditCount != 0 || len(out.ChangedFiles) != 0 {
+		t.Fatalf("unexpected noop format output: handled=%v out=%#v", handled, out)
+	}
+	if got := op.files["/workspace/main.go"]; got != "package main\n\nfunc old() {}\n" {
+		t.Fatalf("noop format should not modify content: %q", got)
+	}
+}
+
 func TestRuntimeLSPApplyWorkspaceEditRejectsUnsupportedDocumentChanges(t *testing.T) {
 	op := &fakeLSPRuntimeOperator{files: map[string]string{
 		"/workspace/main.go": "package main\n",
@@ -278,6 +330,31 @@ func TestRuntimeLSPApplyWorkspaceEditDoesNotPartiallyWrite(t *testing.T) {
 	}
 	if got := op.files["/workspace/a.go"]; got != "old\n" {
 		t.Fatalf("first file should not be written before all edits validate, got %q", got)
+	}
+}
+
+func TestRuntimeLSPApplyWorkspaceEditRollsBackFailedWrites(t *testing.T) {
+	op := &fakeLSPRuntimeOperator{
+		files: map[string]string{
+			"/workspace/a.go": "oldA\n",
+			"/workspace/b.go": "oldB\n",
+		},
+		failWriteOnce: map[string]error{"/workspace/b.go": fmt.Errorf("disk full")},
+	}
+	raw := json.RawMessage(`{"changes":{
+		"file:///workspace/a.go":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":4}},"newText":"newA"}],
+		"file:///workspace/b.go":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":4}},"newText":"newB"}]
+	}}`)
+
+	_, err := runtimeLSPApplyWorkspaceEdit(context.Background(), op, "/workspace", "/workspace", nil, raw)
+	if err == nil || !strings.Contains(err.Error(), "rolled back") {
+		t.Fatalf("expected rollback error, got %v", err)
+	}
+	if got := op.files["/workspace/a.go"]; got != "oldA\n" {
+		t.Fatalf("first file should be rolled back, got %q", got)
+	}
+	if got := op.files["/workspace/b.go"]; got != "oldB\n" {
+		t.Fatalf("failed file should be restored, got %q", got)
 	}
 }
 

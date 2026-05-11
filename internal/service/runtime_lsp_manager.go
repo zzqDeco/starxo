@@ -247,6 +247,17 @@ func (m *runtimeLSPManager) Edit(ctx context.Context, op commandline.Operator, w
 		return tools.LSPEditOutput{}, false, err
 	}
 	if opName == "format" {
+		if runtimeLSPFormatHasNoTextEdits(workspaceEdit) {
+			return tools.LSPEditOutput{
+				Operation:    opName,
+				Engine:       "lsp:" + spec.Language,
+				Language:     spec.Language,
+				FilePath:     input.FilePath,
+				ChangedFiles: nil,
+				EditCount:    0,
+				Summary:      "No LSP edits were needed.",
+			}, true, nil
+		}
 		workspaceEdit, err = runtimeLSPTextEditsAsWorkspaceEdit(workspaceEdit, targetPath)
 		if err != nil {
 			return tools.LSPEditOutput{}, false, err
@@ -536,7 +547,11 @@ func (s *runtimeLSPServer) edit(ctx context.Context, operation, filePath string,
 		s.markRequestError(err.Error())
 		return nil, err
 	}
-	if len(bytes.TrimSpace(result)) == 0 || bytes.Equal(bytes.TrimSpace(result), []byte("null")) {
+	trimmed := bytes.TrimSpace(result)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("LSP %s returned no edits", method)
+	}
+	if bytes.Equal(trimmed, []byte("null")) && operation != "format" {
 		return nil, fmt.Errorf("LSP %s returned no edits", method)
 	}
 	return result, nil
@@ -815,6 +830,12 @@ type runtimeLSPApplyResult struct {
 	EditCount    int
 }
 
+type runtimeLSPPendingWrite struct {
+	target   string
+	original string
+	content  string
+}
+
 type runtimeLSPPosition struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`
@@ -856,11 +877,7 @@ func runtimeLSPApplyWorkspaceEdit(ctx context.Context, op commandline.Operator, 
 	}
 	sort.Strings(files)
 	result := runtimeLSPApplyResult{ChangedFiles: files}
-	type pendingWrite struct {
-		target  string
-		content string
-	}
-	pending := make([]pendingWrite, 0, len(files))
+	pending := make([]runtimeLSPPendingWrite, 0, len(files))
 	for _, file := range files {
 		target, err := runtimeLSPWorkspaceFilePath(ctx, file, workspacePath, workspaces)
 		if err != nil {
@@ -878,15 +895,29 @@ func runtimeLSPApplyWorkspaceEdit(ctx context.Context, op commandline.Operator, 
 			return runtimeLSPApplyResult{}, fmt.Errorf("apply edits to %s: %w", file, err)
 		}
 		editCount := len(editsByFile[file])
-		pending = append(pending, pendingWrite{target: target, content: next})
+		pending = append(pending, runtimeLSPPendingWrite{target: target, original: content, content: next})
 		result.EditCount += editCount
 	}
-	for _, write := range pending {
+	for i, write := range pending {
 		if err := op.WriteFile(ctx, write.target, write.content); err != nil {
-			return runtimeLSPApplyResult{}, err
+			return runtimeLSPApplyResult{}, runtimeLSPRollbackWrites(ctx, op, pending[:i+1], err)
 		}
 	}
 	return result, nil
+}
+
+func runtimeLSPRollbackWrites(ctx context.Context, op commandline.Operator, writes []runtimeLSPPendingWrite, writeErr error) error {
+	rollbackErrs := make([]string, 0)
+	for i := len(writes) - 1; i >= 0; i-- {
+		write := writes[i]
+		if err := op.WriteFile(ctx, write.target, write.original); err != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Sprintf("%s: %v", write.target, err))
+		}
+	}
+	if len(rollbackErrs) > 0 {
+		return fmt.Errorf("write LSP edit: %w; rollback failed: %s", writeErr, strings.Join(rollbackErrs, "; "))
+	}
+	return fmt.Errorf("write LSP edit: %w; rolled back previous file changes", writeErr)
 }
 
 func runtimeLSPWorkspaceEditByFile(raw json.RawMessage, workspace string) (map[string][]runtimeLSPTextEdit, error) {
@@ -958,6 +989,18 @@ func runtimeLSPTextEditsAsWorkspaceEdit(raw json.RawMessage, targetPath string) 
 		return nil, err
 	}
 	return data, nil
+}
+
+func runtimeLSPFormatHasNoTextEdits(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return true
+	}
+	var edits []runtimeLSPTextEdit
+	if err := json.Unmarshal(trimmed, &edits); err != nil {
+		return false
+	}
+	return len(edits) == 0
 }
 
 func runtimeLSPFilePathFromURI(uri, workspace string) (string, error) {

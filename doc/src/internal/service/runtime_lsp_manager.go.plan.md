@@ -27,6 +27,8 @@
 - `workspace_symbol` 使用 query string。
 - `rename` / `format` 通过独立 writable `LSPEdit` tool 调用，解析 LSP `WorkspaceEdit` / `TextEdit[]`，校验目标 URI 仍在当前 workspace 内，再经 operator 写回文件。
 - LSP text edit 使用 0-based line + UTF-16 character position，写回前按倒序 range 应用，避免后续 edit 影响前面 offset。
+- `format` 返回 `null` 或空 `TextEdit[]` 时按成功 no-op 处理，不丢弃常驻 server。
+- 多文件 edit 写入失败时会尽力回滚已写入文件，避免返回错误后留下明显的半应用状态。
 - 每次文件查询前读取当前文件内容，首次发送 `textDocument/didOpen`，内容变化后发送 full-sync `textDocument/didChange`。
 - 收到 server request 时返回空结果，避免 `workspace/configuration` 等请求阻塞 server。
 - `ChatService.UpdateSandbox` 和 `InvalidateRunner` 会关闭所有常驻 LSP server，避免 SSH/sandbox 切换后保留旧进程。
