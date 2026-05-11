@@ -135,9 +135,19 @@ const parsedTodos = computed<TodoItem[]>(() => {
 
 const parsedToolResult = computed<Record<string, any> | null>(() => parseJSON<Record<string, any>>(props.event.toolResult))
 const isWorktreeTool = computed(() => ['EnterWorktree', 'ExitWorktree', 'WorktreeDiff', 'WorktreeMerge'].includes(props.event.toolName || ''))
+const isWriteTool = computed(() => ['Write', 'write_file'].includes(props.event.toolName || ''))
+const isEditTool = computed(() => ['Edit', 'str_replace_editor'].includes(props.event.toolName || ''))
+const isDiffResultTool = computed(() => isWriteTool.value || isEditTool.value)
 const worktreeStatusLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.status || '')))
 const worktreeStatLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.diffStat || '')))
 const worktreePatch = computed(() => parsedToolResult.value?.diff || parsedToolResult.value?.untrackedDiff || '')
+const editPatch = computed(() => String(parsedToolResult.value?.patch || ''))
+const diffLinesSummary = computed(() => {
+  const added = Number(parsedToolResult.value?.linesAdded || 0)
+  const removed = Number(parsedToolResult.value?.linesRemoved || 0)
+  if (added === 0 && removed === 0) return ''
+  return `+${added} -${removed}`
+})
 
 function nonEmptyLines(value: string) {
   return value.split('\n').filter((line) => line.trim() !== '')
@@ -160,13 +170,13 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
-  if (name === 'write_file') {
+  if (name === 'Write' || name === 'write_file') {
     return {
       category: 'file',
       color: 'var(--agent-file-manager)',
       action: t('message.tool.write'),
-      primary: args?.path || '-',
-      secondary: result ? t('message.tool.saved') : undefined,
+      primary: parsed?.filePath || args?.file_path || args?.path || '-',
+      secondary: parsed ? `${parsed.created ? t('message.tool.created') : t('message.tool.updated')} ${diffLinesSummary.value || ''}`.trim() : result ? t('message.tool.saved') : undefined,
     }
   }
 
@@ -180,14 +190,14 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
-  if (name === 'str_replace_editor') {
+  if (name === 'Edit' || name === 'str_replace_editor') {
     const cmd = args?.command || 'edit'
     return {
       category: 'edit',
       color: 'var(--agent-code-writer)',
       action: t('message.tool.edit'),
-      primary: args?.path || '-',
-      secondary: cmd,
+      primary: parsed?.filePath || args?.file_path || args?.path || '-',
+      secondary: parsed ? `${parsed.replacements || 0} ${t('message.tool.replacements')} ${diffLinesSummary.value || ''}`.trim() : cmd,
     }
   }
 
@@ -415,7 +425,24 @@ const canOpenWorkspacePath = computed(() => {
               <div class="tool-section-label">{{ t('message.arguments') }}</div>
               <pre class="tool-code" :class="{ 'tool-code-shell': toolInfo.category === 'shell' }">{{ formatArgs(event.toolArgs) }}</pre>
             </div>
-            <div v-if="event.toolResult && isWorktreeTool && parsedToolResult" class="tool-section">
+            <div v-if="event.toolResult && isDiffResultTool && parsedToolResult" class="tool-section">
+              <div class="tool-section-label">{{ t('message.result') }}</div>
+              <div class="diff-result">
+                <div class="diff-result-meta">
+                  <span v-if="parsedToolResult.filePath" :title="parsedToolResult.filePath">{{ parsedToolResult.filePath }}</span>
+                  <span v-if="isWriteTool">{{ parsedToolResult.created ? t('message.tool.created') : t('message.tool.updated') }}</span>
+                  <span v-if="isEditTool">{{ parsedToolResult.replacements || 0 }} {{ t('message.tool.replacements') }}</span>
+                  <span v-if="diffLinesSummary">{{ diffLinesSummary }}</span>
+                  <span v-if="parsedToolResult.bytes">{{ parsedToolResult.bytes }} {{ t('message.tool.bytes') }}</span>
+                  <span v-if="parsedToolResult.truncated">{{ t('message.tool.truncated') }}</span>
+                </div>
+                <div v-if="editPatch" class="diff-result-block patch">
+                  <span>{{ t('message.tool.patch') }}</span>
+                  <pre>{{ editPatch }}</pre>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="event.toolResult && isWorktreeTool && parsedToolResult" class="tool-section">
               <div class="tool-section-label">{{ t('message.result') }}</div>
               <div class="worktree-result">
                 <div class="worktree-result-meta">
@@ -852,6 +879,60 @@ const canOpenWorkspacePath = computed(() => {
 
 .worktree-result-block.patch pre {
   max-height: 300px;
+}
+
+.diff-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.diff-result-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.diff-result-block {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-deepest);
+  padding: 7px;
+}
+
+.diff-result-block span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.diff-result-block pre {
+  max-height: 300px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .tool-executing {

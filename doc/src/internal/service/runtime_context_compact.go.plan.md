@@ -25,7 +25,7 @@
 - `refreshRuntimeContextCompact(...)` 是 compact state 的统一构建入口，并只读取当前 `sessionID` 的 todo bucket。
 - compact summary 是 deterministic summary，不调用 LLM。
 - `Read`/`read_file` 记录 file path、line range、total lines 和返回内容 hash。
-- `Write`/`write_file`、`Edit`/`str_replace_editor` 记录最近 diff summary。
+- `Write`/`write_file`、`Edit`/`str_replace_editor` 记录最近 diff summary，包括增删行、替换数和可用 patch 摘要。
 - `prepareMessagesForRun(...)` 在每次 agent run 前刷新 compact state，并调用 context 层 token-aware windowing。
 
 ## 5. 维护建议

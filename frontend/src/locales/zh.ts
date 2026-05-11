@@ -146,6 +146,12 @@ export default {
       lines: '行',
       items: '项',
       saved: '已保存',
+      created: '已创建',
+      updated: '已更新',
+      replacements: '处替换',
+      bytes: '字节',
+      patch: 'Patch',
+      truncated: '已截断',
     },
   },
   interrupt: {

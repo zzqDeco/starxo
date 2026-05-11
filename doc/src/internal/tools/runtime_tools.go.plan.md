@@ -43,7 +43,8 @@
 - `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash` 会通过 `RuntimeWorkspaceManager.CurrentWorkspace` 解析 session 当前 workspace，因此可透明运行在 active worktree 中。
 - `Bash` 支持 foreground/background。background 通过 task manager 持久化输出。
 - `Read` 支持 line offset/limit。
-- `Edit` 使用精确字符串替换并返回 patch 摘要、行数变化和是否替换成功。
+- `Write` 返回 created/bytes/linesAdded/linesRemoved 和 bounded patch，方便前端结构化审阅写入结果。
+- `Edit` 使用精确字符串替换并返回 bounded patch 摘要、行数变化和是否替换成功。
 - `Glob` 通过远端 `find` 稳定排序；`Grep` 通过远端 `rg` 并支持 `content/count/files_with_matches`。
 
 ## 5. 依赖关系

@@ -31,6 +31,7 @@ const (
 	RuntimeToolWorktreeMerge = "WorktreeMerge"
 
 	runtimeLargeOutputThreshold = 32 * 1024
+	runtimeToolPatchLimit       = 20 * 1024
 )
 
 type RuntimeTaskRef struct {
@@ -121,10 +122,13 @@ type WriteInput struct {
 }
 
 type WriteOutput struct {
-	FilePath   string `json:"filePath"`
-	Created    bool   `json:"created"`
-	Bytes      int    `json:"bytes"`
-	LinesAdded int    `json:"linesAdded"`
+	FilePath     string `json:"filePath"`
+	Created      bool   `json:"created"`
+	Bytes        int    `json:"bytes"`
+	LinesAdded   int    `json:"linesAdded"`
+	LinesRemoved int    `json:"linesRemoved,omitempty"`
+	Patch        string `json:"patch,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
 }
 
 type EditInput struct {
@@ -140,6 +144,7 @@ type EditOutput struct {
 	LinesAdded   int    `json:"linesAdded"`
 	LinesRemoved int    `json:"linesRemoved"`
 	Patch        string `json:"patch,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
 }
 
 type GlobInput struct {
@@ -435,17 +440,26 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 				return WriteOutput{}, err
 			}
 			created := false
-			if _, err := op.ReadFile(ctx, target); err != nil {
+			previous, err := op.ReadFile(ctx, target)
+			if err != nil {
 				created = true
 			}
 			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
+			patch, truncated := buildSimplePatchLimited(previous, input.Content, runtimeToolPatchLimit)
+			linesRemoved := 0
+			if !created {
+				linesRemoved = len(splitLines(previous))
+			}
 			return WriteOutput{
-				FilePath:   target,
-				Created:    created,
-				Bytes:      len(input.Content),
-				LinesAdded: len(splitLines(input.Content)),
+				FilePath:     target,
+				Created:      created,
+				Bytes:        len(input.Content),
+				LinesAdded:   len(splitLines(input.Content)),
+				LinesRemoved: linesRemoved,
+				Patch:        patch,
+				Truncated:    truncated,
 			}, nil
 		})
 	if err != nil {
@@ -486,12 +500,14 @@ func newEditCatalogEntry(op commandline.Operator, workspacePath string, workspac
 			if err := op.WriteFile(ctx, target, next); err != nil {
 				return EditOutput{}, err
 			}
+			patch, truncated := buildSimplePatchLimited(input.OldString, input.NewString, runtimeToolPatchLimit)
 			return EditOutput{
 				FilePath:     target,
 				Replacements: replacements,
 				LinesAdded:   countLinesDelta(input.NewString, input.OldString, true) * replacements,
 				LinesRemoved: countLinesDelta(input.NewString, input.OldString, false) * replacements,
-				Patch:        buildSimplePatch(input.OldString, input.NewString),
+				Patch:        patch,
+				Truncated:    truncated,
 			}, nil
 		})
 	if err != nil {
@@ -897,6 +913,11 @@ func countLinesDelta(newString, oldString string, added bool) int {
 }
 
 func buildSimplePatch(oldString, newString string) string {
+	patch, _ := buildSimplePatchLimited(oldString, newString, 0)
+	return patch
+}
+
+func buildSimplePatchLimited(oldString, newString string, limit int) (string, bool) {
 	oldLines := splitLines(oldString)
 	newLines := splitLines(newString)
 	var b strings.Builder
@@ -910,7 +931,15 @@ func buildSimplePatch(oldString, newString string) string {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	return strings.TrimSuffix(b.String(), "\n")
+	patch := strings.TrimSuffix(b.String(), "\n")
+	if limit <= 0 || len(patch) <= limit {
+		return patch, false
+	}
+	marker := "\n... (patch truncated)"
+	if limit <= len(marker) {
+		return "", true
+	}
+	return patch[:limit-len(marker)] + marker, true
 }
 
 func grepFilenames(mode string, lines []string) []string {

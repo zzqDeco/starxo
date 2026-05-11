@@ -181,6 +181,48 @@ func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {
 	}
 }
 
+func TestRuntimeWriteToolReturnsStructuredPatchForOverwrite(t *testing.T) {
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/main.go": "old\nvalue\n"}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var write CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolWrite {
+			write = entry
+			break
+		}
+	}
+	if write.Tool == nil {
+		t.Fatalf("write tool not found")
+	}
+	invokable, ok := write.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("write tool is not invokable: %T", write.Tool)
+	}
+	payload, _ := json.Marshal(WriteInput{FilePath: "main.go", Content: "new\nvalue\nextra\n"})
+	result, err := invokable.InvokableRun(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("write tool run: %v", err)
+	}
+	if got := op.files["/workspace/main.go"]; got != "new\nvalue\nextra\n" {
+		t.Fatalf("expected overwritten file, got %q", got)
+	}
+	var out WriteOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("expected JSON write result: %v\n%s", err, result)
+	}
+	if out.Created || out.LinesAdded != 3 || out.LinesRemoved != 2 {
+		t.Fatalf("unexpected write diff metadata: %#v", out)
+	}
+	if !strings.Contains(out.Patch, "-old") || !strings.Contains(out.Patch, "+new") {
+		t.Fatalf("expected write patch, got %#v", out)
+	}
+}
+
 func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
 	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/.starxo/worktrees/feat/main.go": "package main\n"}}
 	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, fakeWorkspaceManager{workspace: "/workspace/.starxo/worktrees/feat"})

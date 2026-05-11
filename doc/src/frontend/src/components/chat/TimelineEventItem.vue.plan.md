@@ -25,6 +25,9 @@
 - 文件/编辑类工具若 `primary` 是容器绝对路径，会显示工作区打开按钮，调用 `openWorkspacePath(path)` 打开抽屉并预览文件。
 - 结果处理:
   - toolResult 超过 500 字符默认截断，可手动展开
+- Runtime diff 工具:
+  - `Write` / `Edit` / `write_file` / `str_replace_editor` 的 JSON 结果按文件、增删行、替换数、bytes、patch 分块展示
+  - 无法解析为结构化 JSON 的历史结果仍走原始结果展示
 - worktree 工具:
   - `EnterWorktree` / `ExitWorktree` / `WorktreeDiff` / `WorktreeMerge` 使用专门分类和图标
   - `WorktreeDiff` 结果按 metadata、status、diff stat、patch 分块展示，而不是只展示原始 JSON

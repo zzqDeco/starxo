@@ -170,6 +170,8 @@ Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `Workt
 
 Runtime worktrees now have a review/merge loop: `WorktreeDiff` reports active worktree status, diff stat, and optional patch content; `WorktreeMerge` commits active worktree changes, merges them back into the original sandbox workspace, optionally removes the worktree, and restores the parent workspace. Merge refuses to run while the parent workspace has uncommitted changes. The workspace drawer also shows the active session worktree, can review/copy/merge it with confirmation, and the file browser follows the active worktree path.
 
+File-changing runtime tools now emit structured diff metadata. `Write` and `Edit` timeline events show created/updated state, replacement counts, `+/-` line counts, bytes, and bounded patch previews instead of requiring users to inspect raw JSON.
+
 `WebSearch` defaults to DuckDuckGo HTML search and can be redirected through `agent.webSearch.providers`. `type: "tinyfish"` is a dedicated TinyFish Search API adapter for `GET https://api.search.tinyfish.ai` with `X-API-Key` read from `TINYFISH_API_KEY` by default; it supports TinyFish `query`, `location`, `language`, and `page` parameters and parses `results[].title/url/snippet`. `type: "http"` remains available for custom GET/POST providers with headers, body templates, and JSON path extraction.
 
 Settings include static WebSearch diagnostics and an explicit WebSearch smoke test. The smoke test runs only when clicked, then reports provider, URL, duration, and compact results.
