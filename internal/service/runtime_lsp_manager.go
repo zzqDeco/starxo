@@ -1029,9 +1029,10 @@ func runtimeLSPApplyTextEdits(content string, edits []runtimeLSPTextEdit) (strin
 	type indexedEdit struct {
 		edit       runtimeLSPTextEdit
 		start, end int
+		index      int
 	}
 	indexed := make([]indexedEdit, 0, len(edits))
-	for _, edit := range edits {
+	for i, edit := range edits {
 		start, err := runtimeLSPPositionOffset(content, edit.Range.Start)
 		if err != nil {
 			return "", err
@@ -1043,10 +1044,13 @@ func runtimeLSPApplyTextEdits(content string, edits []runtimeLSPTextEdit) (strin
 		if start > end {
 			return "", fmt.Errorf("invalid edit range: start %d after end %d", start, end)
 		}
-		indexed = append(indexed, indexedEdit{edit: edit, start: start, end: end})
+		indexed = append(indexed, indexedEdit{edit: edit, start: start, end: end, index: i})
 	}
 	sort.SliceStable(indexed, func(i, j int) bool {
 		if indexed[i].start == indexed[j].start {
+			if indexed[i].end == indexed[j].end {
+				return indexed[i].index > indexed[j].index
+			}
 			return indexed[i].end > indexed[j].end
 		}
 		return indexed[i].start > indexed[j].start

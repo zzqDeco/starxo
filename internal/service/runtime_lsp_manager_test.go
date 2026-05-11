@@ -407,6 +407,31 @@ func TestRuntimeLSPApplyWorkspaceEditAcceptsAbsoluteActiveWorktreeTargets(t *tes
 	}
 }
 
+func TestRuntimeLSPApplyTextEditsPreservesSamePositionInsertOrder(t *testing.T) {
+	got, err := runtimeLSPApplyTextEdits("x", []runtimeLSPTextEdit{
+		{
+			Range: runtimeLSPRange{
+				Start: runtimeLSPPosition{Line: 0, Character: 0},
+				End:   runtimeLSPPosition{Line: 0, Character: 0},
+			},
+			NewText: "A",
+		},
+		{
+			Range: runtimeLSPRange{
+				Start: runtimeLSPPosition{Line: 0, Character: 0},
+				End:   runtimeLSPPosition{Line: 0, Character: 0},
+			},
+			NewText: "B",
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply same-position inserts: %v", err)
+	}
+	if got != "ABx" {
+		t.Fatalf("expected same-position inserts to preserve source order, got %q", got)
+	}
+}
+
 func TestRuntimeLSPManagerUsesConfiguredServerAndStatus(t *testing.T) {
 	op := &fakeLSPRuntimeOperator{files: map[string]string{
 		"/workspace/app.foo": "symbol demo\n",
