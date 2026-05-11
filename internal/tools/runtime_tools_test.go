@@ -223,6 +223,19 @@ func TestRuntimeWriteToolReturnsStructuredPatchForOverwrite(t *testing.T) {
 	}
 }
 
+func TestBuildSimplePatchLimitedBoundsPreview(t *testing.T) {
+	patch, truncated := buildSimplePatchLimited(strings.Repeat("old line\n", 1000), strings.Repeat("new line\n", 1000), 512)
+	if !truncated {
+		t.Fatalf("expected patch to be truncated")
+	}
+	if len(patch) > 512 {
+		t.Fatalf("expected bounded patch, got %d bytes", len(patch))
+	}
+	if !strings.Contains(patch, "patch truncated") {
+		t.Fatalf("expected truncation marker, got %q", patch)
+	}
+}
+
 func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
 	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/.starxo/worktrees/feat/main.go": "package main\n"}}
 	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, fakeWorkspaceManager{workspace: "/workspace/.starxo/worktrees/feat"})

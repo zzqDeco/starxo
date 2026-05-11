@@ -12,7 +12,7 @@
 ## Backend
 - Extended `tools.WriteOutput` with `linesRemoved`, `patch`, and `truncated`.
 - Extended `tools.EditOutput` with `truncated`.
-- Added bounded simple patch generation so large edit/write payloads cannot dominate timeline output.
+- Added bounded simple patch generation so large edit/write payloads are truncated while building the preview instead of after constructing the full patch.
 - Updated runtime compact diff summaries to preserve write patch and removed-line metadata.
 
 ## Frontend

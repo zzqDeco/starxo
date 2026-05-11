@@ -918,28 +918,57 @@ func buildSimplePatch(oldString, newString string) string {
 }
 
 func buildSimplePatchLimited(oldString, newString string, limit int) (string, bool) {
-	oldLines := splitLines(oldString)
-	newLines := splitLines(newString)
 	var b strings.Builder
-	for _, line := range oldLines {
-		b.WriteString("-")
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	for _, line := range newLines {
-		b.WriteString("+")
-		b.WriteString(line)
-		b.WriteString("\n")
+	truncated := !appendPatchContentLimited(&b, "-", oldString, limit)
+	if !truncated {
+		truncated = !appendPatchContentLimited(&b, "+", newString, limit)
 	}
 	patch := strings.TrimSuffix(b.String(), "\n")
-	if limit <= 0 || len(patch) <= limit {
+	if !truncated {
 		return patch, false
 	}
 	marker := "\n... (patch truncated)"
+	if limit <= 0 {
+		return patch + marker, true
+	}
 	if limit <= len(marker) {
 		return "", true
 	}
+	if len(patch)+len(marker) <= limit {
+		return patch + marker, true
+	}
 	return patch[:limit-len(marker)] + marker, true
+}
+
+func appendPatchContentLimited(b *strings.Builder, prefix, content string, limit int) bool {
+	if content == "" {
+		return true
+	}
+	content = strings.TrimSuffix(content, "\n")
+	if content == "" {
+		return true
+	}
+	for {
+		line, rest, found := strings.Cut(content, "\n")
+		if !appendPatchLineLimited(b, prefix, line, limit) {
+			return false
+		}
+		if !found {
+			return true
+		}
+		content = rest
+	}
+}
+
+func appendPatchLineLimited(b *strings.Builder, prefix, line string, limit int) bool {
+	nextLen := b.Len() + len(prefix) + len(line) + 1
+	if limit > 0 && nextLen > limit {
+		return false
+	}
+	b.WriteString(prefix)
+	b.WriteString(line)
+	b.WriteString("\n")
+	return true
 }
 
 func grepFilenames(mode string, lines []string) []string {
