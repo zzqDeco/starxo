@@ -2081,9 +2081,10 @@ func truncateWorktreeMergeTimelineJSON(result string, limit int) string {
 			next, truncated := shrinkTimelineText(out.MergeOutput, over+512)
 			out.MergeOutput = next
 			reduced = truncated
-		case len(out.ConflictFiles) > 20:
-			out.ConflictFiles = out.ConflictFiles[:20]
-			reduced = true
+		case len(out.ConflictFiles) > 0:
+			next, truncated := shrinkTimelineConflictFiles(out.ConflictFiles, over+512)
+			out.ConflictFiles = next
+			reduced = truncated
 		case out.RecoveryHint != "":
 			next, truncated := shrinkTimelineText(out.RecoveryHint, over+256)
 			out.RecoveryHint = next
@@ -2105,6 +2106,39 @@ func truncateWorktreeMergeTimelineJSON(result string, limit int) string {
 		return truncateResult(result, limit)
 	}
 	return string(encoded)
+}
+
+func shrinkTimelineConflictFiles(files []string, removeBytes int) ([]string, bool) {
+	if len(files) == 0 {
+		return files, false
+	}
+	next := append([]string(nil), files...)
+	changed := false
+	if len(next) > 20 {
+		omitted := len(next) - 20
+		next = append(next[:20], fmt.Sprintf("... (%d more files)", omitted))
+		changed = true
+	}
+	for i, file := range next {
+		if len(file) <= 160 {
+			continue
+		}
+		next[i] = file[:120] + "..." + file[len(file)-32:]
+		changed = true
+	}
+	if changed {
+		return next, true
+	}
+	if len(next) > 1 {
+		omitted := len(next) - 1
+		return []string{next[0], fmt.Sprintf("... (%d more files)", omitted)}, true
+	}
+	shortened, truncated := shrinkTimelineText(next[0], removeBytes+128)
+	if truncated {
+		next[0] = shortened
+		return next, true
+	}
+	return files, false
 }
 
 func shrinkTimelineText(value string, removeBytes int) (string, bool) {
