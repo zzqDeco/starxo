@@ -30,6 +30,10 @@ export function DenyToolPermission(arg1) {
   return window['go']['service']['ChatService']['DenyToolPermission'](arg1);
 }
 
+export function ExitRuntimeWorktree(arg1, arg2, arg3) {
+  return window['go']['service']['ChatService']['ExitRuntimeWorktree'](arg1, arg2, arg3);
+}
+
 export function ExportSessionSnapshot(arg1) {
   return window['go']['service']['ChatService']['ExportSessionSnapshot'](arg1);
 }
@@ -52,6 +56,10 @@ export function GetOrCreateRun(arg1) {
 
 export function GetRuntimeLSPStatus(arg1) {
   return window['go']['service']['ChatService']['GetRuntimeLSPStatus'](arg1);
+}
+
+export function GetRuntimeWorktreeState(arg1) {
+  return window['go']['service']['ChatService']['GetRuntimeWorktreeState'](arg1);
 }
 
 export function GetSessionRunSnapshot(arg1) {
@@ -82,6 +90,10 @@ export function ListToolPermissionRequests(arg1) {
   return window['go']['service']['ChatService']['ListToolPermissionRequests'](arg1);
 }
 
+export function MergeRuntimeWorktree(arg1, arg2, arg3) {
+  return window['go']['service']['ChatService']['MergeRuntimeWorktree'](arg1, arg2, arg3);
+}
+
 export function PruneDiscoveredToolsForSave(arg1, arg2) {
   return window['go']['service']['ChatService']['PruneDiscoveredToolsForSave'](arg1, arg2);
 }
@@ -108,6 +120,10 @@ export function ResumeWithAnswer(arg1) {
 
 export function ResumeWithChoice(arg1) {
   return window['go']['service']['ChatService']['ResumeWithChoice'](arg1);
+}
+
+export function ReviewRuntimeWorktree(arg1, arg2, arg3) {
+  return window['go']['service']['ChatService']['ReviewRuntimeWorktree'](arg1, arg2, arg3);
 }
 
 export function RevokeToolPermissionGrant(arg1, arg2) {

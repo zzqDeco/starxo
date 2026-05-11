@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NIcon, NButton } from 'naive-ui'
 import {
   Build, CheckmarkCircle, Reload, InformationCircle, AlertCircle,
-  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle, FolderOpen
+  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle, FolderOpen, GitBranch, GitMerge
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
@@ -41,7 +41,7 @@ const isResultTruncated = computed(() =>
 )
 
 // ---------- Tool categorization ----------
-type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'other'
+type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'worktree' | 'other'
 
 interface ToolDisplayInfo {
   category: ToolCategory
@@ -82,6 +82,11 @@ function jsonInline(v: unknown): string {
   } catch {
     return ''
   }
+}
+
+function parseJSON<T = any>(value?: string): T | null {
+  if (!value) return null
+  try { return JSON.parse(value) as T } catch { return null }
 }
 
 function todoStats(todos: TodoItem[]): string {
@@ -128,11 +133,22 @@ const parsedTodos = computed<TodoItem[]>(() => {
   return []
 })
 
+const parsedToolResult = computed<Record<string, any> | null>(() => parseJSON<Record<string, any>>(props.event.toolResult))
+const isWorktreeTool = computed(() => ['EnterWorktree', 'ExitWorktree', 'WorktreeDiff', 'WorktreeMerge'].includes(props.event.toolName || ''))
+const worktreeStatusLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.status || '')))
+const worktreeStatLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.diffStat || '')))
+const worktreePatch = computed(() => parsedToolResult.value?.diff || parsedToolResult.value?.untrackedDiff || '')
+
+function nonEmptyLines(value: string) {
+  return value.split('\n').filter((line) => line.trim() !== '')
+}
+
 const toolInfo = computed<ToolDisplayInfo>(() => {
   const name = props.event.toolName || ''
   const args = tryParseArgs(props.event.toolArgs)
   const result = props.event.toolResult || ''
   const exitCode = parseExitCode(result)
+  const parsed = parsedToolResult.value
 
   if (name === 'read_file') {
     return {
@@ -240,6 +256,36 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
+  if (name === 'EnterWorktree' || name === 'ExitWorktree') {
+    return {
+      category: 'worktree',
+      color: 'var(--accent-cyan)',
+      action: name === 'EnterWorktree' ? t('message.tool.worktreeEnter') : t('message.tool.worktreeExit'),
+      primary: parsed?.worktreeBranch || parsed?.worktreePath || args?.name || args?.action || '-',
+      secondary: parsed?.action || undefined,
+    }
+  }
+
+  if (name === 'WorktreeDiff') {
+    return {
+      category: 'worktree',
+      color: 'var(--accent-cyan)',
+      action: t('message.tool.worktreeDiff'),
+      primary: parsed?.worktreeBranch || parsed?.worktreePath || '-',
+      secondary: parsed ? `${worktreeStatusLines.value.length} status · ${worktreeStatLines.value.length} stat` : undefined,
+    }
+  }
+
+  if (name === 'WorktreeMerge') {
+    return {
+      category: 'worktree',
+      color: 'var(--accent-emerald)',
+      action: t('message.tool.worktreeMerge'),
+      primary: parsed?.worktreeBranch || args?.commit_message || '-',
+      secondary: parsed?.removed ? t('message.tool.worktreeRemoved') : parsed?.action,
+    }
+  }
+
   return {
     category: 'other',
     color: 'var(--agent-default)',
@@ -334,6 +380,8 @@ const canOpenWorkspacePath = computed(() => {
             <Terminal v-else-if="toolInfo.category === 'shell'" />
             <People v-else-if="toolInfo.category === 'agent'" />
             <InformationCircle v-else-if="toolInfo.category === 'notify'" />
+            <GitMerge v-else-if="event.toolName === 'WorktreeMerge'" />
+            <GitBranch v-else-if="toolInfo.category === 'worktree'" />
             <Build v-else />
           </NIcon>
           <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
@@ -367,7 +415,31 @@ const canOpenWorkspacePath = computed(() => {
               <div class="tool-section-label">{{ t('message.arguments') }}</div>
               <pre class="tool-code" :class="{ 'tool-code-shell': toolInfo.category === 'shell' }">{{ formatArgs(event.toolArgs) }}</pre>
             </div>
-            <div v-if="event.toolResult" class="tool-section">
+            <div v-if="event.toolResult && isWorktreeTool && parsedToolResult" class="tool-section">
+              <div class="tool-section-label">{{ t('message.result') }}</div>
+              <div class="worktree-result">
+                <div class="worktree-result-meta">
+                  <span v-if="parsedToolResult.worktreeBranch">{{ parsedToolResult.worktreeBranch }}</span>
+                  <span v-if="parsedToolResult.worktreePath" :title="parsedToolResult.worktreePath">{{ parsedToolResult.worktreePath }}</span>
+                  <span v-if="parsedToolResult.message">{{ parsedToolResult.message }}</span>
+                </div>
+                <div v-if="event.toolName === 'WorktreeDiff'" class="worktree-result-grid">
+                  <div class="worktree-result-block">
+                    <span>{{ t('workspace.worktree.status') }}</span>
+                    <pre>{{ parsedToolResult.status || t('workspace.worktree.noStatus') }}</pre>
+                  </div>
+                  <div class="worktree-result-block">
+                    <span>{{ t('workspace.worktree.diffStat') }}</span>
+                    <pre>{{ parsedToolResult.diffStat || t('workspace.worktree.noDiffStat') }}</pre>
+                  </div>
+                </div>
+                <div v-if="worktreePatch" class="worktree-result-block patch">
+                  <span>{{ t('workspace.worktree.patch') }}</span>
+                  <pre>{{ worktreePatch }}</pre>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="event.toolResult" class="tool-section">
               <div class="tool-section-label">{{ t('message.result') }}</div>
               <pre class="tool-code tool-result-code">{{ truncatedResult }}</pre>
               <NButton
@@ -552,6 +624,10 @@ const canOpenWorkspacePath = computed(() => {
   border-left: 3px solid var(--agent-orchestrator);
 }
 
+.tool-strip-worktree {
+  border-left: 3px solid var(--accent-cyan);
+}
+
 .tool-strip-other {
   border-left: 3px solid var(--text-muted);
 }
@@ -714,6 +790,70 @@ const canOpenWorkspacePath = computed(() => {
   border-left: 3px solid var(--accent-emerald-dim);
 }
 
+.worktree-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.worktree-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.worktree-result-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.worktree-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 8px;
+}
+
+.worktree-result-block {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-deepest);
+  padding: 7px;
+}
+
+.worktree-result-block span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.worktree-result-block pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.worktree-result-block.patch pre {
+  max-height: 300px;
+}
+
 .tool-executing {
   font-size: 11px;
   color: var(--text-faint);
@@ -724,6 +864,12 @@ const canOpenWorkspacePath = computed(() => {
   margin-top: 4px;
   font-size: 11px !important;
   color: var(--accent-cyan) !important;
+}
+
+@media (max-width: 760px) {
+  .worktree-result-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Transfer inline (fallback) */

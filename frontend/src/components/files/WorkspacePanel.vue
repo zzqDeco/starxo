@@ -6,6 +6,7 @@ import type { FileInfo, WorkspaceInfo } from '@/types/config'
 import SplitHandle from '@/components/layout/SplitHandle.vue'
 import FileTransfer from './FileTransfer.vue'
 import CodePreview from './CodePreview.vue'
+import WorktreeReviewPanel from './WorktreeReviewPanel.vue'
 import { CleanupSandboxTmp, DownloadFile, GetWorkspaceInfo, ListWorkspaceFiles, ReadFilePreview } from '../../../wailsjs/go/service/FileService'
 import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
@@ -308,6 +309,8 @@ onUnmounted(() => {
         <strong>{{ formatBytes(workspaceInfo?.totalSize || 0) }}</strong>
       </div>
     </div>
+
+    <WorktreeReviewPanel @changed="refreshFiles" />
 
     <div class="workspace-body">
       <div class="tree-pane" :style="{ width: treeWidth + 'px' }">

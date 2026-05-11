@@ -44,7 +44,7 @@ func NewApp() *App {
 		containerStore:   containerStore,
 		chatService:      chatSvc,
 		sandboxService:   sandboxSvc,
-		fileService:      service.NewFileService(sandboxSvc),
+		fileService:      service.NewFileService(sandboxSvc, chatSvc),
 		settingsService:  service.NewSettingsService(store),
 		sessionService:   sessionSvc,
 		containerService: containerSvc,

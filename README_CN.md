@@ -168,7 +168,7 @@ wails dev
 
 当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`WorktreeDiff`、`WorktreeMerge`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
 
-Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active worktree 状态、diff stat 和可选 patch；`WorktreeMerge` 会提交 active worktree 修改，合并回原沙箱 workspace，可选移除 worktree，并恢复父会话 workspace。父 workspace 有未提交修改时会拒绝 merge。
+Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active worktree 状态、diff stat 和可选 patch；`WorktreeMerge` 会提交 active worktree 修改，合并回原沙箱 workspace，可选移除 worktree，并恢复父会话 workspace。父 workspace 有未提交修改时会拒绝 merge。工作区抽屉也会显示当前会话的 active worktree，可直接审阅、复制、确认合并，并且文件浏览会跟随 active worktree 路径。
 
 `WebSearch` 默认使用 DuckDuckGo HTML 搜索，也可以通过 `agent.webSearch.providers` 切换 provider。`type: "tinyfish"` 是专用 TinyFish Search API 适配器，对齐 `GET https://api.search.tinyfish.ai`，默认从 `TINYFISH_API_KEY` 读取 API key 并写入 `X-API-Key`，支持 TinyFish `query`、`location`、`language`、`page` 参数，并解析 `results[].title/url/snippet`。`type: "http"` 继续用于自定义 GET/POST provider，支持 headers、body template 和 JSON path 提取。
 

@@ -10,4 +10,5 @@
 - 新增沙箱诊断、远端修复指南、工作区元信息和 tmp 清理文案。
 - 新增 Runtime Tasks 面板、任务刷新、输出复制、停止任务文案。
 - 新增 `permissions` 文案，用于工具审批 modal 和 Settings / Permissions 授权管理面板。
+- 新增 `workspace.worktree` 和 worktree 工具文案，用于工作区抽屉审阅/合并 Runtime V2 worktree。
 - `containers.unavailable` 用于旧 Docker 记录。

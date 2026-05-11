@@ -17,7 +17,7 @@
 
 ## 4. 关键实现细节
 - 工具分类:
-  - `file`, `edit`, `shell`, `agent`, `todo`, `notify`, `other`
+  - `file`, `edit`, `shell`, `agent`, `todo`, `notify`, `worktree`, `other`
 - 摘要条信息:
   - `action`（动作）
   - `primary`（主信息，如路径/命令）
@@ -25,6 +25,9 @@
 - 文件/编辑类工具若 `primary` 是容器绝对路径，会显示工作区打开按钮，调用 `openWorkspacePath(path)` 打开抽屉并预览文件。
 - 结果处理:
   - toolResult 超过 500 字符默认截断，可手动展开
+- worktree 工具:
+  - `EnterWorktree` / `ExitWorktree` / `WorktreeDiff` / `WorktreeMerge` 使用专门分类和图标
+  - `WorktreeDiff` 结果按 metadata、status、diff stat、patch 分块展示，而不是只展示原始 JSON
 - todo 工具策略:
   - `write_todos/update_todo` 仅显示摘要统计，不再内嵌 `TodoBoard`
   - `hasDetails` 对 todo 分类返回 false，避免重复展开冗余内容
@@ -42,6 +45,7 @@
 ## 6. 变更影响面
 - 时间线中 todo 工具的可视形态由“详情组件”改为“摘要条”，减少视觉堆叠。
 - 文件路径可以从时间线跳转到 WorkspacePanel，提高工具事件与文件预览的联动。
+- Runtime worktree 工具在时间线中更容易审阅，避免用户只看到大段 JSON。
 
 ## 7. 维护建议
 - 新增工具名时在 `toolInfo` 中显式分类，避免落入 `other` 丢失语义。

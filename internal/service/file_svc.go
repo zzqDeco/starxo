@@ -19,13 +19,18 @@ type FileService struct {
 	ctx            context.Context
 	sandbox        *SandboxService
 	sessionService *SessionService
+	chatService    *ChatService
 }
 
 // NewFileService creates a new FileService.
-func NewFileService(sandbox *SandboxService) *FileService {
-	return &FileService{
+func NewFileService(sandbox *SandboxService, chat ...*ChatService) *FileService {
+	svc := &FileService{
 		sandbox: sandbox,
 	}
+	if len(chat) > 0 {
+		svc.chatService = chat[0]
+	}
+	return svc
 }
 
 // SetContext stores the Wails application context. Called from app.go startup.
@@ -40,17 +45,28 @@ func (s *FileService) SetSessionService(ss *SessionService) {
 
 // workspacePath returns the current workspace path from the session or a default.
 func (s *FileService) workspacePath() string {
+	defaultWorkspace := "/workspace"
 	if s.sandbox != nil {
 		if mgr := s.sandbox.Manager(); mgr != nil {
 			if workspace := mgr.WorkspacePath(); workspace != "" {
+				defaultWorkspace = workspace
+			}
+		}
+	}
+	if defaultWorkspace == "/workspace" && s.sessionService != nil {
+		if workspace := strings.TrimSpace(s.sessionService.GetWorkspacePath()); workspace != "" {
+			defaultWorkspace = workspace
+		}
+	}
+	if s.chatService != nil && s.chatService.runtimeWorkspaces != nil {
+		if sessionID := s.chatService.GetActiveSessionID(); sessionID != "" {
+			workspace := s.chatService.runtimeWorkspaces.CurrentWorkspace(contextWithSessionID(context.Background(), sessionID), defaultWorkspace)
+			if strings.TrimSpace(workspace) != "" {
 				return workspace
 			}
 		}
 	}
-	if s.sessionService != nil {
-		return s.sessionService.GetWorkspacePath()
-	}
-	return "/workspace"
+	return defaultWorkspace
 }
 
 // SelectAndUploadFile opens a native file dialog, then uploads the selected file
@@ -185,7 +201,8 @@ for dirpath, dirnames, filenames in os.walk(root):
         })
 items.sort(key=lambda item: item["path"])
 print(json.dumps(items))`
-	output, err := op.RunCommand(s.ctx, []string{"python3", "-c", script})
+	cmd := "cd " + shellQuoteRuntime(s.workspacePath()) + " && python3 -c " + shellQuoteRuntime(script)
+	output, err := op.RunCommand(s.ctx, []string{"sh", "-lc", cmd})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
@@ -225,7 +242,7 @@ func (s *FileService) GetWorkspaceInfo() (WorkspaceInfoDTO, error) {
 	info.SandboxID = runtime.RuntimeID()
 	info.SandboxName = runtime.RuntimeName()
 	info.Runtime = runtime.RuntimeKind()
-	info.WorkspacePath = runtime.WorkspacePath()
+	info.WorkspacePath = s.workspacePath()
 	if !info.Active {
 		return info, nil
 	}
@@ -234,7 +251,8 @@ func (s *FileService) GetWorkspaceInfo() (WorkspaceInfoDTO, error) {
 	if op == nil {
 		return info, nil
 	}
-	output, err := op.RunCommand(s.ctx, []string{"sh", "-lc", "files=$(find . -type f 2>/dev/null | wc -l | tr -d ' '); bytes=$(du -sk . 2>/dev/null | awk '{printf \"%d\", $1 * 1024}'); printf '%s %s\\n' \"${files:-0}\" \"${bytes:-0}\""})
+	cmd := "cd " + shellQuoteRuntime(info.WorkspacePath) + " && files=$(find . -type f 2>/dev/null | wc -l | tr -d ' '); bytes=$(du -sk . 2>/dev/null | awk '{printf \"%d\", $1 * 1024}'); printf '%s %s\\n' \"${files:-0}\" \"${bytes:-0}\""
+	output, err := op.RunCommand(s.ctx, []string{"sh", "-lc", cmd})
 	if err != nil {
 		return info, fmt.Errorf("failed to inspect workspace: %w", err)
 	}

@@ -10,4 +10,5 @@
 - 新增 sandbox diagnostics、remote fix guide、workspace metadata/tmp cleanup 文案。
 - 新增 Runtime Tasks panel、task refresh、output copy、task stop 文案。
 - 新增 `permissions` copy for the tool approval modal and Settings / Permissions grant management panel.
+- 新增 `workspace.worktree` 和 worktree tool labels，用于工作区抽屉审阅/合并 Runtime V2 worktree。
 - `containers.unavailable` 用于旧 Docker 记录。
