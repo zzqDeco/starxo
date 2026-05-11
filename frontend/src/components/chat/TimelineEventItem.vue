@@ -137,7 +137,7 @@ const parsedToolResult = computed<Record<string, any> | null>(() => parseJSON<Re
 const isWorktreeTool = computed(() => ['EnterWorktree', 'ExitWorktree', 'WorktreeDiff', 'WorktreeMerge'].includes(props.event.toolName || ''))
 const worktreeStatusLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.status || '')))
 const worktreeStatLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.diffStat || '')))
-const worktreePatch = computed(() => [parsedToolResult.value?.untrackedDiff, parsedToolResult.value?.diff].filter(Boolean).join('\n'))
+const worktreePatch = computed(() => parsedToolResult.value?.diff || parsedToolResult.value?.untrackedDiff || '')
 
 function nonEmptyLines(value: string) {
   return value.split('\n').filter((line) => line.trim() !== '')

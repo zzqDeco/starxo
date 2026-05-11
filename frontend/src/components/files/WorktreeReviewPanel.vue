@@ -35,6 +35,7 @@ const hasReview = computed(() => !!review.value)
 const hasChanges = computed(() => !!review.value && (!!review.value.status || !!review.value.diffStat || !!review.value.diff || !!review.value.untrackedDiff))
 const reviewStatusLines = computed(() => nonEmptyLines(review.value?.status || ''))
 const diffStatLines = computed(() => nonEmptyLines(review.value?.diffStat || ''))
+const reviewPatch = computed(() => review.value?.diff || review.value?.untrackedDiff || '')
 const worktreeShortPath = computed(() => compactPath(state.value?.worktreePath || ''))
 
 function nonEmptyLines(text: string) {
@@ -124,8 +125,7 @@ async function copyReview() {
   const parts = [
     review.value?.status,
     review.value?.diffStat,
-    review.value?.untrackedDiff,
-    review.value?.diff,
+    reviewPatch.value,
   ].filter(Boolean)
   if (parts.length === 0) return
   await navigator.clipboard.writeText(parts.join('\n\n'))
@@ -245,9 +245,9 @@ onUnmounted(() => {
               <pre>{{ review?.diffStat || t('workspace.worktree.noDiffStat') }}</pre>
             </div>
           </div>
-          <div v-if="review?.untrackedDiff || review?.diff" class="review-block patch">
+          <div v-if="reviewPatch" class="review-block patch">
             <span class="review-label">{{ t('workspace.worktree.patch') }}</span>
-            <pre>{{ [review?.untrackedDiff, review?.diff].filter(Boolean).join('\n') }}</pre>
+            <pre>{{ reviewPatch }}</pre>
           </div>
         </div>
 
