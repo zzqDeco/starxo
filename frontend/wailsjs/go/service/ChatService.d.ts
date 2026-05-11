@@ -32,6 +32,8 @@ export function GetMode():Promise<string>;
 
 export function GetOrCreateRun(arg1:string):Promise<service.SessionRun>;
 
+export function GetRuntimeLSPStatus(arg1:string):Promise<service.RuntimeLSPStatus>;
+
 export function GetSessionRunSnapshot(arg1:string):Promise<boolean>;
 
 export function InvalidateRunner():Promise<void>;

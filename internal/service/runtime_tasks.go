@@ -11,6 +11,7 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"starxo/internal/config"
 	"starxo/internal/model"
 	"starxo/internal/tools"
 )
@@ -83,7 +84,10 @@ func (m *runtimeTaskManager) StartShellTask(ctx context.Context, sessionID, comm
 		m.mu.Lock()
 		task := m.tasks[taskID]
 		if task != nil {
-			task.snapshot.FinishedAt = m.now().UnixMilli()
+			finishedAt := m.now().UnixMilli()
+			task.snapshot.FinishedAt = finishedAt
+			task.snapshot.DurationMs = maxRuntimeTaskDuration(0, finishedAt-task.snapshot.StartedAt)
+			task.snapshot.OutputSize = int64(len(content))
 			task.snapshot.ExitCode = out.ExitCode
 			if task.snapshot.Status == runtimeTaskStatusKilled {
 				// Keep explicit stop status even if the process reports a later error.
@@ -150,7 +154,10 @@ func (m *runtimeTaskManager) StartAgentTask(ctx context.Context, sessionID, desc
 		m.mu.Lock()
 		task := m.tasks[taskID]
 		if task != nil {
-			task.snapshot.FinishedAt = m.now().UnixMilli()
+			finishedAt := m.now().UnixMilli()
+			task.snapshot.FinishedAt = finishedAt
+			task.snapshot.DurationMs = maxRuntimeTaskDuration(0, finishedAt-task.snapshot.StartedAt)
+			task.snapshot.OutputSize = int64(len(content))
 			if task.snapshot.Status == runtimeTaskStatusKilled {
 				// Keep explicit stop status.
 			} else if runErr != nil {
@@ -234,6 +241,7 @@ func (m *runtimeTaskManager) StopTask(ctx context.Context, taskID string) (tools
 	if task.snapshot.Status == runtimeTaskStatusRunning {
 		task.snapshot.Status = runtimeTaskStatusKilled
 		task.snapshot.FinishedAt = m.now().UnixMilli()
+		task.snapshot.DurationMs = maxRuntimeTaskDuration(0, task.snapshot.FinishedAt-task.snapshot.StartedAt)
 		if task.cancel != nil {
 			task.cancel()
 		}
@@ -295,8 +303,10 @@ func (m *runtimeTaskManager) CompactSnapshots(sessionID string) []model.RuntimeT
 			Description: snapshot.Description,
 			Command:     snapshot.Command,
 			OutputPath:  snapshot.OutputPath,
+			OutputSize:  snapshot.OutputSize,
 			StartedAt:   snapshot.StartedAt,
 			FinishedAt:  snapshot.FinishedAt,
+			DurationMs:  snapshot.DurationMs,
 			ExitCode:    snapshot.ExitCode,
 			Error:       snapshot.Error,
 		})
@@ -343,12 +353,21 @@ func (m *runtimeTaskManager) RestoreCompactTasks(sessionID string, tasks []model
 			Description: task.Description,
 			Command:     task.Command,
 			OutputPath:  task.OutputPath,
+			OutputSize:  task.OutputSize,
 			StartedAt:   task.StartedAt,
 			FinishedAt:  finishedAt,
+			DurationMs:  task.DurationMs,
 			ExitCode:    task.ExitCode,
 			Error:       errText,
 		}}
 	}
+}
+
+func maxRuntimeTaskDuration(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *runtimeTaskManager) getTaskSnapshot(taskID string) (tools.RuntimeTaskSnapshot, bool) {
@@ -448,6 +467,24 @@ func (s *ChatService) ListRuntimeTasks(sessionID string) ([]tools.RuntimeTaskSna
 		return nil, fmt.Errorf("runtime task manager is not available")
 	}
 	return manager.List(sessionID), nil
+}
+
+func (s *ChatService) GetRuntimeLSPStatus(sessionID string) (RuntimeLSPStatus, error) {
+	s.mu.Lock()
+	manager := s.runtimeLSP
+	store := s.store
+	s.mu.Unlock()
+	if manager == nil {
+		return RuntimeLSPStatus{}, fmt.Errorf("runtime LSP manager is not available")
+	}
+	if store != nil {
+		cfg := store.Get()
+		if cfg != nil {
+			config.NormalizeAppConfig(cfg)
+			manager.SetConfig(cfg.Agent.LSP)
+		}
+	}
+	return manager.Status(sessionID), nil
 }
 
 func (s *ChatService) ReadRuntimeTaskOutput(taskID string, offset int, limit int) (tools.RuntimeTaskOutput, error) {

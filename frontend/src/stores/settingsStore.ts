@@ -37,6 +37,12 @@ const defaultSettings: AppSettings = {
       enabled: true,
       defaultProvider: 'duckduckgo',
       providers: []
+    },
+    lsp: {
+      enabled: true,
+      requestTimeoutMs: 15000,
+      maxResultBytes: 16384,
+      servers: []
     }
   }
 }
@@ -60,7 +66,13 @@ export const useSettingsStore = defineStore('settings', () => {
           if (typeof src.docker.network === 'boolean') merged.sandbox.network = src.docker.network
         }
         if (src.llm) Object.assign(merged.llm, src.llm)
-        if (src.agent) Object.assign(merged.agent, src.agent)
+        if (src.agent) {
+          Object.assign(merged.agent, src.agent)
+          merged.agent.webSearch = { ...defaultSettings.agent.webSearch, ...(src.agent.webSearch || {}) }
+          merged.agent.lsp = { ...defaultSettings.agent.lsp, ...(src.agent.lsp || {}) }
+          merged.agent.webSearch.providers = Array.isArray(src.agent.webSearch?.providers) ? src.agent.webSearch.providers : []
+          merged.agent.lsp.servers = Array.isArray(src.agent.lsp?.servers) ? src.agent.lsp.servers : []
+        }
         if (src.mcp) {
           merged.mcp.servers = Array.isArray(src.mcp.servers) ? src.mcp.servers : []
         }

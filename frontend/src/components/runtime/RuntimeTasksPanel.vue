@@ -143,12 +143,27 @@ function formatTime(ms?: number) {
 }
 
 function formatDuration(task: tools.RuntimeTaskSnapshot) {
+  if ((task as any).durationMs) {
+    return formatDurationMs((task as any).durationMs)
+  }
   if (!task.startedAt) return '-'
   const end = task.finishedAt || Date.now()
-  const seconds = Math.max(0, Math.round((end - task.startedAt) / 1000))
+  return formatDurationMs(end - task.startedAt)
+}
+
+function formatDurationMs(ms?: number) {
+  if (!ms) return '0s'
+  const seconds = Math.max(0, Math.round(ms / 1000))
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ${seconds % 60}s`
+}
+
+function formatBytes(bytes?: number) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function taskTitle(task: tools.RuntimeTaskSnapshot) {
@@ -314,6 +329,7 @@ onUnmounted(() => {
               <span>{{ selectedTask.type }}</span>
               <span>{{ selectedTask.status }}</span>
               <span>{{ formatDuration(selectedTask) }}</span>
+              <span>{{ formatBytes((selectedTask as any).outputSize || output?.size || 0) }}</span>
             </div>
             <pre v-if="selectedTask.command" class="task-command">{{ selectedTask.command }}</pre>
             <pre class="task-output">{{ output?.content || t('runtimeTasks.noOutput') }}</pre>

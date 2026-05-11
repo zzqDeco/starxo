@@ -62,6 +62,21 @@ export interface WebSearchConfig {
   providers?: WebSearchProviderConfig[]
 }
 
+export interface RuntimeLSPServerConfig {
+  language: string
+  executable?: string
+  command?: string[]
+  extensions?: string[]
+  disabled?: boolean
+}
+
+export interface RuntimeLSPConfig {
+  enabled?: boolean
+  requestTimeoutMs?: number
+  maxResultBytes?: number
+  servers?: RuntimeLSPServerConfig[]
+}
+
 export interface AppSettings {
   ssh: SSHConfig
   sandbox: SandboxConfig
@@ -74,7 +89,7 @@ export interface AppSettings {
   }
   llm: LLMConfig
   mcp: { servers: MCPServerConfig[] }
-  agent: { maxIterations: number; webSearch?: WebSearchConfig }
+  agent: { maxIterations: number; webSearch?: WebSearchConfig; lsp?: RuntimeLSPConfig }
 }
 
 export interface FileInfo {
