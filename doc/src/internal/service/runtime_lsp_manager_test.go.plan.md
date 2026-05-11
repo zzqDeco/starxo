@@ -24,6 +24,7 @@
 - `WorkspaceEdit.documentChanges` 中暂不支持的 rename/create/delete 资源操作会明确失败，不静默忽略。
 - 多文件 edit 会先完成所有目标读取和 edit 计算再写入，避免后续文件失败导致前面文件半写入。
 - 多文件 edit 写入阶段如果后续文件失败，会尽力回滚前面已写文件。
+- Worktree 模式下，active worktree 内的绝对 `file://` edit target 不会被 `/workspace/...` alias 重复映射。
 
 ## 5. 维护建议
 - 新增 LSP lifecycle 行为时优先补 fake JSON-RPC server 测试，避免依赖真实远端 language server。

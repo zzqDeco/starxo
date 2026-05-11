@@ -26,6 +26,33 @@ type fakeLSPRuntimeOperator struct {
 	processFactory func() sandbox.RuntimeProcess
 }
 
+type fakeLSPWorkspaceManager struct {
+	current string
+}
+
+func (m fakeLSPWorkspaceManager) CurrentWorkspace(ctx context.Context, defaultWorkspace string) string {
+	if m.current == "" {
+		return defaultWorkspace
+	}
+	return m.current
+}
+
+func (m fakeLSPWorkspaceManager) EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (tools.WorktreeOutput, error) {
+	return tools.WorktreeOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeLSPWorkspaceManager) ExitWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, action string, discardChanges bool) (tools.WorktreeOutput, error) {
+	return tools.WorktreeOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeLSPWorkspaceManager) DiffWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, includePatch bool, maxBytes int) (tools.WorktreeDiffOutput, error) {
+	return tools.WorktreeDiffOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeLSPWorkspaceManager) MergeWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, commitMessage string, removeWorktree bool) (tools.WorktreeMergeOutput, error) {
+	return tools.WorktreeMergeOutput{}, fmt.Errorf("not implemented")
+}
+
 func (o *fakeLSPRuntimeOperator) ReadFile(ctx context.Context, filePath string) (string, error) {
 	content, ok := o.files[filePath]
 	if !ok {
@@ -355,6 +382,28 @@ func TestRuntimeLSPApplyWorkspaceEditRollsBackFailedWrites(t *testing.T) {
 	}
 	if got := op.files["/workspace/b.go"]; got != "oldB\n" {
 		t.Fatalf("failed file should be restored, got %q", got)
+	}
+}
+
+func TestRuntimeLSPApplyWorkspaceEditAcceptsAbsoluteActiveWorktreeTargets(t *testing.T) {
+	activeWorkspace := "/workspace/.starxo/worktrees/feat"
+	target := activeWorkspace + "/main.go"
+	op := &fakeLSPRuntimeOperator{files: map[string]string{
+		target: "old\n",
+	}}
+	raw := json.RawMessage(`{"changes":{
+		"file:///workspace/.starxo/worktrees/feat/main.go":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"newText":"new"}]
+	}}`)
+
+	out, err := runtimeLSPApplyWorkspaceEdit(context.Background(), op, activeWorkspace, "/workspace", fakeLSPWorkspaceManager{current: activeWorkspace}, raw)
+	if err != nil {
+		t.Fatalf("apply worktree absolute edit: %v", err)
+	}
+	if out.EditCount != 1 || len(out.ChangedFiles) != 1 || out.ChangedFiles[0] != target {
+		t.Fatalf("unexpected worktree edit output: %#v", out)
+	}
+	if got := op.files[target]; got != "new\n" {
+		t.Fatalf("expected active worktree file to be edited, got %q", got)
 	}
 }
 

@@ -1445,18 +1445,35 @@ func runtimeLSPWorkspaceFilePath(ctx context.Context, filePath, workspacePath st
 	if p == "" {
 		return "", fmt.Errorf("file_path is required")
 	}
-	if p == "/workspace" {
+	switch {
+	case p == "/workspace":
 		p = workspace
-	} else if strings.HasPrefix(p, "/workspace/") {
-		p = path.Join(workspace, strings.TrimPrefix(p, "/workspace/"))
-	} else if !strings.HasPrefix(p, "/") {
+	case strings.HasPrefix(p, "/"):
+		cleaned := cleanRuntimeRemotePath(p)
+		if runtimeLSPPathInside(cleaned, workspace) {
+			p = cleaned
+		} else if strings.HasPrefix(p, "/workspace/") {
+			p = path.Join(workspace, strings.TrimPrefix(p, "/workspace/"))
+		} else {
+			p = cleaned
+		}
+	default:
 		p = path.Join(workspace, p)
 	}
 	p = cleanRuntimeRemotePath(p)
-	if p != workspace && !strings.HasPrefix(p, workspace+"/") {
+	if !runtimeLSPPathInside(p, workspace) {
 		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, workspace)
 	}
 	return p, nil
+}
+
+func runtimeLSPPathInside(p, root string) bool {
+	p = cleanRuntimeRemotePath(p)
+	root = cleanRuntimeRemotePath(root)
+	if p == "" || root == "" {
+		return false
+	}
+	return p == root || strings.HasPrefix(p, root+"/")
 }
 
 func runtimeLSPFileURI(filePath string) string {
