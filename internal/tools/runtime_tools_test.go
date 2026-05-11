@@ -210,6 +210,43 @@ func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {
 	}
 }
 
+func TestRuntimeEditToolReservesReplacementPreview(t *testing.T) {
+	oldText := strings.Repeat("old-value-", 3000)
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/main.txt": oldText}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var edit CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolEdit {
+			edit = entry
+			break
+		}
+	}
+	invokable, ok := edit.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("edit tool is not invokable: %T", edit.Tool)
+	}
+	payload, _ := json.Marshal(EditInput{FilePath: "main.txt", OldString: oldText, NewString: "new-value\n"})
+	result, err := invokable.InvokableRun(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("edit tool run: %v", err)
+	}
+	var out EditOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("expected JSON edit result: %v\n%s", err, result)
+	}
+	if !out.Truncated {
+		t.Fatalf("expected truncated edit preview for large replacement: %#v", out)
+	}
+	if !strings.Contains(out.Patch, "+new-value") {
+		t.Fatalf("expected edit patch to reserve replacement text, got %q", out.Patch)
+	}
+}
+
 func TestRuntimeWriteToolReturnsStructuredPatchForOverwrite(t *testing.T) {
 	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/main.go": "old\nvalue\n"}}
 	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
@@ -333,8 +370,8 @@ func TestBuildSimplePatchLimitedKeepsLongLinePrefix(t *testing.T) {
 	}
 }
 
-func TestBuildWritePatchLimitedReservesNewContentBudget(t *testing.T) {
-	patch, truncated := buildWritePatchLimited(strings.Repeat("removed\n", 10000), "replacement\n", 512)
+func TestBuildReplacementPatchLimitedReservesNewContentBudget(t *testing.T) {
+	patch, truncated := buildReplacementPatchLimited(strings.Repeat("removed\n", 10000), "replacement\n", 512)
 	if !truncated {
 		t.Fatalf("expected patch to be truncated")
 	}

@@ -451,7 +451,7 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
-			patch, patchTruncated := buildWritePatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
+			patch, patchTruncated := buildReplacementPatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
 			truncated := previous.Truncated || patchTruncated
 			linesRemoved := 0
 			if previous.Exists {
@@ -505,7 +505,7 @@ func newEditCatalogEntry(op commandline.Operator, workspacePath string, workspac
 			if err := op.WriteFile(ctx, target, next); err != nil {
 				return EditOutput{}, err
 			}
-			patch, truncated := buildSimplePatchLimited(input.OldString, input.NewString, runtimeToolPatchLimit)
+			patch, truncated := buildReplacementPatchLimited(input.OldString, input.NewString, runtimeToolPatchLimit)
 			return EditOutput{
 				FilePath:     target,
 				Replacements: replacements,
@@ -969,7 +969,7 @@ func buildSimplePatchLimited(oldString, newString string, limit int) (string, bo
 	return finishLimitedPatch(b.String(), truncated, limit)
 }
 
-func buildWritePatchLimited(oldString, newString string, limit int) (string, bool) {
+func buildReplacementPatchLimited(oldString, newString string, limit int) (string, bool) {
 	if limit <= 0 {
 		return buildSimplePatchLimited(oldString, newString, limit)
 	}

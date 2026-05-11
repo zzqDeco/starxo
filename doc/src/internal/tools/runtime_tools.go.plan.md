@@ -44,7 +44,7 @@
 - `Bash` 支持 foreground/background。background 通过 task manager 持久化输出。
 - `Read` 支持 line offset/limit。
 - `Write` 返回 created/bytes/linesAdded/linesRemoved 和 bounded patch，方便前端结构化审阅写入结果；覆盖旧文件时优先使用 operator 的 bounded preview，且为新增内容保留 patch 预算，避免为生成 diff 读取完整大文件或只显示删除内容。
-- `Edit` 使用精确字符串替换并返回 bounded patch 摘要、行数变化和是否替换成功。
+- `Edit` 使用精确字符串替换并返回 bounded patch 摘要、行数变化和是否替换成功；大段替换时和 `Write` 一样为 replacement 内容保留 patch 预算。
 - bounded patch 对超长单行保留可容纳的行前缀，再追加 truncation marker，避免只显示“已截断”而没有实际变更内容。
 - `Glob` 通过远端 `find` 稳定排序；`Grep` 通过远端 `rg` 并支持 `content/count/files_with_matches`。
 

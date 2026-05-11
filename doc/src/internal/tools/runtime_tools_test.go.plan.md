@@ -16,6 +16,7 @@
 - legacy aliases 映射到 canonical runtime tool names。
 - plan mode current loaded 只保留 read-only trusted runtime tools。
 - `Edit` tool 能通过 invokable contract 修改文件并返回 patch。
+- `Edit` tool 替换大段旧文本时仍会在 patch 中保留 replacement 内容。
 - `Write` tool 覆盖已有文件时返回 created=false、增删行和 patch metadata。
 - `Write` tool 覆盖大型已有文件时使用 bounded preview，不调用全量 `ReadFile`。
 - `Write` tool 的 bounded patch 会为写入的新内容保留预算，大文件覆盖小文件时仍能看到新增内容预览。
