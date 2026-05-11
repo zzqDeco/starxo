@@ -76,7 +76,11 @@ func (s *ChatService) MergeRuntimeWorktree(sessionID string, commitMessage strin
 	}
 	out, err := s.runtimeWorkspaces.MergeWorktree(ctx, op, s.getWorkspacePath(), commitMessage, removeWorktree)
 	if err == nil {
-		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sid, "action": "merge"})
+		action := "merge"
+		if out.Conflicted {
+			action = "merge_conflict"
+		}
+		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sid, "action": action})
 	}
 	return out, err
 }

@@ -248,13 +248,17 @@ type WorktreeMergeInput struct {
 }
 
 type WorktreeMergeOutput struct {
-	Action         string `json:"action"`
-	WorkspacePath  string `json:"workspacePath"`
-	WorktreePath   string `json:"worktreePath"`
-	WorktreeBranch string `json:"worktreeBranch"`
-	CommitMessage  string `json:"commitMessage,omitempty"`
-	Removed        bool   `json:"removed"`
-	Message        string `json:"message"`
+	Action         string   `json:"action"`
+	WorkspacePath  string   `json:"workspacePath"`
+	WorktreePath   string   `json:"worktreePath"`
+	WorktreeBranch string   `json:"worktreeBranch"`
+	CommitMessage  string   `json:"commitMessage,omitempty"`
+	Removed        bool     `json:"removed"`
+	Conflicted     bool     `json:"conflicted,omitempty"`
+	ConflictFiles  []string `json:"conflictFiles,omitempty"`
+	MergeOutput    string   `json:"mergeOutput,omitempty"`
+	RecoveryHint   string   `json:"recoveryHint,omitempty"`
+	Message        string   `json:"message"`
 }
 
 func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager, workspaces RuntimeWorkspaceManager) ([]CatalogEntry, error) {

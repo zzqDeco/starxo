@@ -11,7 +11,7 @@
 ## 关键实现细节
 - `GetRuntimeWorktreeState(sessionID)` 支持空 sessionID，空值时读取 ChatService 当前 active session。
 - `ReviewRuntimeWorktree(...)` 调用 `DiffWorktree`，返回 status、diff stat 和可选 patch。
-- `MergeRuntimeWorktree(...)` 调用 `MergeWorktree`，成功后发出 `runtime:worktree_changed`。
+- `MergeRuntimeWorktree(...)` 调用 `MergeWorktree`，成功后发出 `runtime:worktree_changed`；结构化 conflict output 不作为错误抛出，但事件 action 使用 `merge_conflict`，避免监听方误判为成功合并。
 - `ExitRuntimeWorktree(...)` 复用 `ExitWorktree` 的 keep/remove 语义，成功后发出 `runtime:worktree_changed`。
 - UI API 只操作已有 active worktree；不存在 active worktree 时直接返回明确错误，避免隐式创建。
 

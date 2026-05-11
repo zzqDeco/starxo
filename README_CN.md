@@ -168,7 +168,7 @@ wails dev
 
 当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`WorktreeDiff`、`WorktreeMerge`、`LSP`、`LSPEdit`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`LSPEdit` 通过 permission queue 暴露可写的 language-server rename/format 操作。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
 
-Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active worktree 状态、diff stat 和可选 patch；`WorktreeMerge` 会提交 active worktree 修改，合并回原沙箱 workspace，可选移除 worktree，并恢复父会话 workspace。父 workspace 有未提交修改时会拒绝 merge。工作区抽屉也会显示当前会话的 active worktree，可直接审阅、复制、确认合并，并且文件浏览会跟随 active worktree 路径。
+Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active worktree 状态、diff stat 和可选 patch；`WorktreeMerge` 会提交 active worktree 修改，合并回原沙箱 workspace，可选移除 worktree，并恢复父会话 workspace。父 workspace 有未提交修改时会拒绝 merge；遇到 Git 冲突时会先 abort 父 workspace 的 merge 状态，再返回结构化冲突文件和恢复提示。工作区抽屉也会显示当前会话的 active worktree，可直接审阅、复制、确认合并，并且文件浏览会跟随 active worktree 路径。
 
 会修改文件的 runtime tools 现在会输出结构化 diff 元数据。`Write` 和 `Edit` 的 timeline 事件会展示创建/更新状态、替换数、`+/-` 行数、字节数和受限 patch 预览，不再要求用户阅读原始 JSON。
 

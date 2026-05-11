@@ -277,6 +277,10 @@ export default {
       mergeConfirm: 'Merge {branch} into {target}?',
       mergeDone: 'Worktree merged',
       mergeFailed: 'Merge failed; the active worktree was preserved.',
+      conflictDetected: 'Merge conflicts detected; worktree preserved.',
+      conflictTitle: 'Merge conflicts',
+      conflictHint: 'The parent workspace merge was aborted. Resolve the conflicting files in the worktree, review again, then retry merge.',
+      conflictFiles: 'Conflict files',
       actions: {
         refresh: 'Refresh worktree',
         review: 'Review worktree',

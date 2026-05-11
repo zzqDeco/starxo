@@ -28,7 +28,9 @@
 - patch 采集命令在远端通过 `head -c maxBytes+1` 先截断，再由 Go 侧设置 `truncated` / `untrackedTruncated`，避免大文件把完整 patch 拉回本地。
 - `MergeWorktree` 先拒绝 dirty parent workspace，再把 worktree 的未提交修改提交到 `starxo/<slug>` 分支，解析当前 worktree `HEAD`，随后在原 workspace 执行 `git merge --no-ff <worktree-head-sha>`。
 - merge prepare 阶段会在提交前后校验 active worktree 当前分支仍等于记录的 `starxo/<slug>`；如果用户或 agent 在 worktree 内切到其他分支，会拒绝 merge，避免把修改提交到未被合并的分支。
-- `MergeWorktree` 将 prepare 和 merge 分成两次远端调用；如果 merge 调用返回错误或非零 exit code，会对原 workspace 执行 `git merge --abort || true` 后返回错误，避免 parent workspace 留在冲突状态。
+- `MergeWorktree` 将 prepare 和 merge 分成两次远端调用；如果 merge 调用返回非零 exit code 且像 Git conflict，会先读取 `diff --name-only --diff-filter=U`，再对原 workspace 执行 `git merge --abort`。
+- 只有确认 abort 成功后才返回 `action=merge_conflict` 的结构化恢复结果并保留 active worktree；abort 失败会作为错误冒泡，避免误报 parent workspace 已恢复。
+- 非冲突 merge 失败仍会执行 `git merge --abort` 后返回错误，避免 parent workspace 留在中间状态。
 - `MergeWorktree(remove_worktree=true)` 在 merge 成功后移除 worktree 并尝试删除本地分支；无论是否移除，成功后都会恢复 session 的原 workspace。
 - `CurrentWorkspace` 被 Runtime V2 core/deferred tools 调用，统一决定当前 session 的实际执行目录。
 - `CompactSnapshot(...)` / `RestoreCompactSnapshot(...)` 让 active worktree routing 可随 Runtime context compact 持久化和恢复。
@@ -47,4 +49,4 @@
 ## 7. 维护建议
 - 不要把 active worktree 存到全局 active session；必须继续从 tool context 读取 sessionID。
 - 删除 worktree 时保持 dirty guard，避免误删 agent 生成但尚未审阅的修改。
-- merge 失败时不要清理 active state；让用户或 agent 能继续查看 conflict/dirty 状态。
+- merge 失败或冲突时不要清理 active state；让用户或 agent 能继续查看 worktree、处理冲突并重试。
