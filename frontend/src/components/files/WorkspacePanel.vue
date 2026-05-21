@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { useWailsEvent } from '@/composables/useWailsEvent'
+import { useContainerStore } from '@/stores/containerStore'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -31,6 +32,7 @@ const treeWidth = ref(220)
 const showTransfer = ref(false)
 const { t } = useI18n()
 const feedback = useUiFeedback()
+const containerStore = useContainerStore()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
 const cleaningTmp = ref(false)
 let refreshRequestID = 0
@@ -140,6 +142,7 @@ async function refreshFiles() {
   } catch (e) {
     console.warn('Failed to list files:', e)
     if (requestID === refreshRequestID) {
+      workspaceInfo.value = null
       files.value = []
       selectedPath.value = ''
       previewContent.value = ''
@@ -269,8 +272,11 @@ useWailsEvent('container:deactivated', () => {
   clearWorkspaceState()
 })
 
-useWailsEvent('container:destroyed', () => {
-  clearWorkspaceState()
+useWailsEvent('container:destroyed', (data: { containerID?: string }) => {
+  const destroyedID = data?.containerID
+  if (destroyedID && (destroyedID === workspaceInfo.value?.sandboxID || destroyedID === containerStore.activeContainerID)) {
+    clearWorkspaceState()
+  }
 })
 
 useWailsEvent('ssh:disconnected', () => {
