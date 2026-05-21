@@ -64,17 +64,18 @@ type FileInfoDTO struct {
 }
 
 type WorkspaceInfoDTO struct {
-	SSHConnected  bool   `json:"sshConnected"`
-	Active        bool   `json:"active"`
-	SandboxID     string `json:"sandboxID,omitempty"`
-	SandboxName   string `json:"sandboxName,omitempty"`
-	Runtime       string `json:"runtime,omitempty"`
-	WorkspacePath string `json:"workspacePath,omitempty"`
-	SSHHost       string `json:"sshHost,omitempty"`
-	SSHPort       int    `json:"sshPort,omitempty"`
-	FileCount     int    `json:"fileCount"`
-	TotalSize     int64  `json:"totalSize"`
-	RefreshedAt   int64  `json:"refreshedAt"`
+	SSHConnected      bool   `json:"sshConnected"`
+	Active            bool   `json:"active"`
+	ActiveContainerID string `json:"activeContainerID,omitempty"`
+	SandboxID         string `json:"sandboxID,omitempty"`
+	SandboxName       string `json:"sandboxName,omitempty"`
+	Runtime           string `json:"runtime,omitempty"`
+	WorkspacePath     string `json:"workspacePath,omitempty"`
+	SSHHost           string `json:"sshHost,omitempty"`
+	SSHPort           int    `json:"sshPort,omitempty"`
+	FileCount         int    `json:"fileCount"`
+	TotalSize         int64  `json:"totalSize"`
+	RefreshedAt       int64  `json:"refreshedAt"`
 }
 
 type WorkspaceCleanupResultDTO struct {

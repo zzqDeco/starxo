@@ -1768,6 +1768,7 @@ export namespace service {
 	export class WorkspaceInfoDTO {
 	    sshConnected: boolean;
 	    active: boolean;
+	    activeContainerID?: string;
 	    sandboxID?: string;
 	    sandboxName?: string;
 	    runtime?: string;
@@ -1786,6 +1787,7 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sshConnected = source["sshConnected"];
 	        this.active = source["active"];
+	        this.activeContainerID = source["activeContainerID"];
 	        this.sandboxID = source["sandboxID"];
 	        this.sandboxName = source["sandboxName"];
 	        this.runtime = source["runtime"];

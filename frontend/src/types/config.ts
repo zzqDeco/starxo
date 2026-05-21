@@ -139,6 +139,7 @@ export interface SandboxDiagnosticsResult {
 export interface WorkspaceInfo {
   sshConnected: boolean
   active: boolean
+  activeContainerID?: string
   sandboxID?: string
   sandboxName?: string
   runtime?: string

@@ -26,7 +26,7 @@
   - 选择文件后加载预览内容
   - 收到工具时间线发来的 workspace path 后，自动选择路径并加载预览
   - 收到 `container:ready` / `container:activated` / `session:switched` 后自动刷新 workspace 信息与文件树
-  - 收到 `container:deactivated` / `container:destroyed` / `ssh:disconnected` 后清空文件树、选中路径、预览和搜索
+  - 收到 `container:deactivated` / `ssh:disconnected` 后清空文件树、选中路径、预览和搜索；`container:destroyed` 只在销毁当前 tracked registry container ID 时清空
 - 分栏:
   - 左侧树 + 右侧 `CodePreview`
   - 中间 `SplitHandle` 拖拽宽度（`starxo-workspace-tree-width`）
@@ -37,6 +37,7 @@
   - mounted 期间监听 `starxo:workspace-open-path`
 - worktree review 成功 merge 或 exit 后触发 `refreshFiles`，确保文件树跟随后端 active workspace 状态。
 - 刷新和预览请求使用请求序号校验，避免 sandbox 销毁后旧响应写回 stale 文件内容。
+- `currentWorkspaceContainerID` 只来自 lifecycle event payload 或 `GetWorkspaceInfo.activeContainerID`，避免从全局 store 读取到异步切换过程中的旧 active container。
 
 ## 5. 依赖关系
 - 内部依赖:

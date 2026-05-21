@@ -12,7 +12,6 @@ import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { useWailsEvent } from '@/composables/useWailsEvent'
-import { useContainerStore } from '@/stores/containerStore'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -32,7 +31,6 @@ const treeWidth = ref(220)
 const showTransfer = ref(false)
 const { t } = useI18n()
 const feedback = useUiFeedback()
-const containerStore = useContainerStore()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
 const currentWorkspaceContainerID = ref('')
 const cleaningTmp = ref(false)
@@ -132,8 +130,8 @@ async function refreshFiles() {
       clearWorkspaceState(false)
       return
     }
-    if (containerStore.activeContainerID) {
-      currentWorkspaceContainerID.value = containerStore.activeContainerID
+    if (info.activeContainerID) {
+      currentWorkspaceContainerID.value = info.activeContainerID
     }
     const result = await ListWorkspaceFiles()
     if (requestID !== refreshRequestID) return
@@ -271,8 +269,8 @@ useWailsEvent('container:activated', (data: { containerID?: string }) => {
   refreshFiles()
 })
 
-useWailsEvent('session:switched', () => {
-  currentWorkspaceContainerID.value = containerStore.activeContainerID
+useWailsEvent('session:switched', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
   refreshFiles()
 })
 
