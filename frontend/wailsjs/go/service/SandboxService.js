@@ -50,6 +50,10 @@ export function Manager() {
   return window['go']['service']['SandboxService']['Manager']();
 }
 
+export function RunTerminalCommand(arg1) {
+  return window['go']['service']['SandboxService']['RunTerminalCommand'](arg1);
+}
+
 export function SetContext(arg1) {
   return window['go']['service']['SandboxService']['SetContext'](arg1);
 }

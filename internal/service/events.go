@@ -40,6 +40,14 @@ type TerminalOutputEvent struct {
 	ExitCode int    `json:"exitCode"`
 }
 
+// TerminalCommandResult is returned for a user-submitted sandbox terminal command.
+type TerminalCommandResult struct {
+	Command  string `json:"command"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exitCode"`
+}
+
 // SandboxProgressEvent is sent during sandbox connection setup.
 type SandboxProgressEvent struct {
 	Step    string `json:"step"`

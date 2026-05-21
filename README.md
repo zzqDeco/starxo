@@ -23,7 +23,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
 - **File Transfer** — Upload/download support via SFTP directly into each persistent sandbox workspace, with workspace metadata, path copy, and tmp cleanup
-- **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, workspace drawer, persistent runtime dock, and composer-level mode controls
+- **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, lifecycle-aware workspace drawer, persistent runtime dock, sandbox command terminal, and composer-level mode controls
 
 ## Tech Stack
 
@@ -253,6 +253,8 @@ Both flags are disabled by default and are not intended as production-facing con
 The Sandbox settings tab can run a full remote diagnostics pass before saving settings. Linux checks cover `bwrap`, `python3`, Python venv creation, user namespace sysctls, AppArmor's unprivileged user namespace restriction, and a bwrap smoke command. macOS checks cover `sandbox-exec`, `python3`, and a minimal Seatbelt smoke command.
 
 Normal Linux package dependencies can be installed with the Install runtime button. Host security changes such as `sysctl` or AppArmor adjustments are never executed automatically; Starxo only displays copyable commands so the operator can review and run them manually.
+
+Sandbox creation reports each setup step, including Python venv creation, pip upgrade, and package installation. Python bootstrap commands obey `commandTimeoutSec`; pip failures include remote network, index, and proxy guidance, and incomplete sandbox directories are cleaned up best-effort. The runtime terminal executes one command at a time in the active sandbox workspace and is disabled when no sandbox is active.
 
 ## Data Storage
 

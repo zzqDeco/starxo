@@ -442,6 +442,11 @@ export default {
     output: '输出',
     waitingForOutput: '等待输出...',
     clear: '清空终端',
+    commandPlaceholder: '在当前沙箱工作区执行命令',
+    connectFirst: '请先连接 SSH',
+    activateSandboxFirst: '请先激活沙箱',
+    run: '执行',
+    commandFailed: '命令失败',
   },
   layout: {
     terminal: '终端',

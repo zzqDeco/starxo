@@ -385,6 +385,14 @@ onMounted(async () => {
     containerStore.clearActiveContainer()
   })
 
+  // Container destroyed
+  onWailsEvent('container:destroyed', (data: { containerID?: string }) => {
+    if (!data?.containerID || containerStore.activeContainerID === data.containerID) {
+      containerStore.clearActiveContainer()
+    }
+    containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
+  })
+
   // Timeline events (unified event stream — filtered by sessionId)
   onWailsEvent('agent:timeline', (data: TurnEvent) => {
     if (!data || !isActiveSession(data)) return

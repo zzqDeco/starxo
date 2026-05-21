@@ -442,6 +442,11 @@ export default {
     output: 'Output',
     waitingForOutput: 'Waiting for output...',
     clear: 'Clear terminal',
+    commandPlaceholder: 'Run a command in the active sandbox workspace',
+    connectFirst: 'Connect SSH first',
+    activateSandboxFirst: 'Activate a sandbox first',
+    run: 'Run',
+    commandFailed: 'Command failed',
   },
   layout: {
     terminal: 'Terminal',

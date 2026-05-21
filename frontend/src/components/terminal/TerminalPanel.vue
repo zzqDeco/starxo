@@ -1,11 +1,12 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { NButton, NIcon, NTooltip } from 'naive-ui'
-import { TrashOutline, Cube } from '@vicons/ionicons5'
+import { NButton, NIcon, NInput, NTooltip } from 'naive-ui'
+import { TrashOutline, Cube, PaperPlaneOutline } from '@vicons/ionicons5'
 import { useWailsEvent } from '@/composables/useWailsEvent'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useContainerStore } from '@/stores/containerStore'
 import { useI18n } from 'vue-i18n'
+import { RunTerminalCommand } from '../../../wailsjs/go/service/SandboxService'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -15,13 +16,21 @@ const terminalEl = ref<HTMLElement | null>(null)
 const lines = ref<Array<{ text: string; type: 'stdout' | 'stderr' | 'info' }>>([])
 const autoScroll = ref(true)
 const lineCount = ref(0)
+const commandInput = ref('')
+const commandRunning = ref(false)
 
 let termInstance: any = null
 let fitAddon: any = null
-let xtermLoaded = false
+const xtermLoaded = ref(false)
 
 const sshConnected = computed(() => connectionStore.sshConnected)
 const activeContainer = computed(() => containerStore.activeContainerID || '')
+const canRunCommand = computed(() => sshConnected.value && !!activeContainer.value && !commandRunning.value)
+const commandPlaceholder = computed(() => {
+  if (!sshConnected.value) return t('terminal.connectFirst')
+  if (!activeContainer.value) return t('terminal.activateSandboxFirst')
+  return t('terminal.commandPlaceholder')
+})
 
 function formatTime(): string {
   const now = new Date()
@@ -29,7 +38,7 @@ function formatTime(): string {
 }
 
 async function initXterm() {
-  if (!terminalEl.value || xtermLoaded) return
+  if (!terminalEl.value || xtermLoaded.value) return
   try {
     const { Terminal } = await import('@xterm/xterm')
     const { FitAddon } = await import('@xterm/addon-fit')
@@ -73,7 +82,7 @@ async function initXterm() {
     termInstance.loadAddon(fitAddon)
     termInstance.open(terminalEl.value)
     fitAddon.fit()
-    xtermLoaded = true
+    xtermLoaded.value = true
 
     termInstance.writeln('\x1b[36m\x1b[1m  Starxo Terminal  \x1b[0m')
     termInstance.writeln('\x1b[90m  AI Coding Agent v0.1.0\x1b[0m')
@@ -82,13 +91,13 @@ async function initXterm() {
     lineCount.value = 4
   } catch (e) {
     console.warn('xterm not available, falling back to simple terminal:', e)
-    xtermLoaded = false
+    xtermLoaded.value = false
   }
 }
 
 function writeToTerminal(data: string, isError = false) {
   lineCount.value++
-  if (termInstance && xtermLoaded) {
+  if (termInstance && xtermLoaded.value) {
     if (isError) {
       termInstance.writeln(`\x1b[31m${data}\x1b[0m`)
     } else {
@@ -108,9 +117,44 @@ function writeToTerminal(data: string, isError = false) {
   }
 }
 
+function writeCommandEcho(command: string) {
+  lineCount.value++
+  if (termInstance && xtermLoaded.value) {
+    termInstance.writeln(`\x1b[90m$\x1b[0m ${command}`)
+  } else {
+    lines.value.push({ text: `$ ${command}`, type: 'info' })
+    if (autoScroll.value) {
+      nextTick(() => {
+        const el = terminalEl.value
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    }
+  }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error || t('terminal.commandFailed'))
+}
+
+async function submitCommand() {
+  const command = commandInput.value.trim()
+  if (!command || !canRunCommand.value) return
+  commandInput.value = ''
+  writeCommandEcho(command)
+  commandRunning.value = true
+  try {
+    await RunTerminalCommand(command)
+  } catch (e) {
+    writeToTerminal(`${t('terminal.commandFailed')}: ${errorMessage(e)}`, true)
+  } finally {
+    commandRunning.value = false
+  }
+}
+
 function clearTerminal() {
   lineCount.value = 0
-  if (termInstance && xtermLoaded) {
+  if (termInstance && xtermLoaded.value) {
     termInstance.clear()
   } else {
     lines.value = []
@@ -126,7 +170,7 @@ useWailsEvent<{ stdout?: string; stderr?: string; exitCode?: number }>('terminal
 })
 
 useWailsEvent('container:ready', () => {
-  if (termInstance && xtermLoaded) {
+  if (termInstance && xtermLoaded.value) {
     termInstance.writeln(`\x1b[32m[${formatTime()}] Sandbox connected and ready.\x1b[0m`)
     termInstance.writeln('')
     lineCount.value += 2
@@ -134,7 +178,7 @@ useWailsEvent('container:ready', () => {
 })
 
 useWailsEvent<{ step: string; percent: number }>('container:progress', (data) => {
-  if (termInstance && xtermLoaded) {
+  if (termInstance && xtermLoaded.value) {
     termInstance.writeln(`\x1b[36m[${formatTime()}] [${data.percent}%] ${data.step}\x1b[0m`)
     lineCount.value++
   }
@@ -148,7 +192,7 @@ onUnmounted(() => {
   if (termInstance) {
     termInstance.dispose()
     termInstance = null
-    xtermLoaded = false
+    xtermLoaded.value = false
   }
 })
 
@@ -157,7 +201,7 @@ const resizeObserver = ref<ResizeObserver | null>(null)
 onMounted(() => {
   if (terminalEl.value) {
     resizeObserver.value = new ResizeObserver(() => {
-      if (fitAddon && xtermLoaded) {
+      if (fitAddon && xtermLoaded.value) {
         try { fitAddon.fit() } catch (_) { /* ignore */ }
       }
     })
@@ -205,6 +249,30 @@ onUnmounted(() => {
         </div>
       </template>
     </div>
+    <form class="terminal-command-bar" @submit.prevent="submitCommand">
+      <span class="terminal-prompt">$</span>
+      <NInput
+        v-model:value="commandInput"
+        size="small"
+        class="terminal-command-input"
+        :placeholder="commandPlaceholder"
+        :disabled="!sshConnected || !activeContainer"
+        :loading="commandRunning"
+        clearable
+      />
+      <NButton
+        size="small"
+        secondary
+        attr-type="submit"
+        :disabled="!canRunCommand || !commandInput.trim()"
+        :loading="commandRunning"
+      >
+        <template #icon>
+          <NIcon size="14"><PaperPlaneOutline /></NIcon>
+        </template>
+        {{ t('terminal.run') }}
+      </NButton>
+    </form>
     <!-- Status Bar -->
     <div class="terminal-status-bar">
       <div class="status-left">
@@ -269,6 +337,28 @@ onUnmounted(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.terminal-command-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.terminal-prompt {
+  flex: 0 0 auto;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.terminal-command-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .term-line {
