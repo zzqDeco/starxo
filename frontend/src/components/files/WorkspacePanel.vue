@@ -34,6 +34,7 @@ const { t } = useI18n()
 const feedback = useUiFeedback()
 const containerStore = useContainerStore()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
+const currentWorkspaceContainerID = ref('')
 const cleaningTmp = ref(false)
 let refreshRequestID = 0
 let previewRequestID = 0
@@ -131,6 +132,9 @@ async function refreshFiles() {
       clearWorkspaceState(false)
       return
     }
+    if (containerStore.activeContainerID) {
+      currentWorkspaceContainerID.value = containerStore.activeContainerID
+    }
     const result = await ListWorkspaceFiles()
     if (requestID !== refreshRequestID) return
     files.value = (result as unknown as FileInfo[]) || []
@@ -160,6 +164,7 @@ function clearWorkspaceState(invalidateRequests = true) {
   }
   previewRequestID++
   workspaceInfo.value = null
+  currentWorkspaceContainerID.value = ''
   files.value = []
   selectedPath.value = ''
   previewContent.value = ''
@@ -256,15 +261,18 @@ async function openPath(path: string) {
 
 let stopWorkspaceBridge: (() => void) | null = null
 
-useWailsEvent('container:ready', () => {
+useWailsEvent('container:ready', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
   refreshFiles()
 })
 
-useWailsEvent('container:activated', () => {
+useWailsEvent('container:activated', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
   refreshFiles()
 })
 
 useWailsEvent('session:switched', () => {
+  currentWorkspaceContainerID.value = containerStore.activeContainerID
   refreshFiles()
 })
 
@@ -274,7 +282,7 @@ useWailsEvent('container:deactivated', () => {
 
 useWailsEvent('container:destroyed', (data: { containerID?: string }) => {
   const destroyedID = data?.containerID
-  if (destroyedID && (destroyedID === workspaceInfo.value?.sandboxID || destroyedID === containerStore.activeContainerID)) {
+  if (destroyedID && destroyedID === currentWorkspaceContainerID.value) {
     clearWorkspaceState()
   }
 })
