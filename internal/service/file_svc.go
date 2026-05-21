@@ -239,6 +239,7 @@ func (s *FileService) GetWorkspaceInfo() (WorkspaceInfoDTO, error) {
 		return info, nil
 	}
 	info.Active = runtime.IsActive()
+	info.ActiveContainerID = s.sandbox.ActiveContainerRegID()
 	info.SandboxID = runtime.RuntimeID()
 	info.SandboxName = runtime.RuntimeName()
 	info.Runtime = runtime.RuntimeKind()

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -105,6 +106,8 @@ type SandboxInstance struct {
 	VenvPath      string
 	ProfilePath   string
 }
+
+type SandboxProgressFunc func(step string, percent int)
 
 type remoteCommandRunner interface {
 	RunCommand(ctx context.Context, cmd string) (stdout, stderr string, exitCode int, err error)
@@ -413,10 +416,14 @@ func (m *RemoteRuntimeManager) runDiagnostic(ctx context.Context, b *diagnosticB
 	b.addCheck(check)
 }
 
-func (m *RemoteRuntimeManager) CreateSandbox(ctx context.Context, excludeIDs []string) (*SandboxInstance, error) {
+func (m *RemoteRuntimeManager) CreateSandbox(ctx context.Context, excludeIDs []string, onProgress SandboxProgressFunc) (*SandboxInstance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if onProgress == nil {
+		onProgress = func(string, int) {}
+	}
 
+	onProgress("Checking sandbox runtime", 10)
 	if err := m.ensureKindLocked(ctx); err != nil {
 		return nil, err
 	}
@@ -434,15 +441,30 @@ func (m *RemoteRuntimeManager) CreateSandbox(ctx context.Context, excludeIDs []s
 		return nil, err
 	}
 	inst := m.instanceFor(root, id, fmt.Sprintf("starxo-sandbox-%s", id))
+	created := false
+	cleanupOnFailure := func(cause error) error {
+		if !created {
+			return cause
+		}
+		if cleanupErr := m.cleanupSandboxRootLocked(context.Background(), inst.RootPath); cleanupErr != nil {
+			return fmt.Errorf("%w; failed to clean incomplete sandbox %s: %v", cause, inst.RootPath, cleanupErr)
+		}
+		return cause
+	}
+
+	onProgress("Creating sandbox directories", 20)
 	if err := m.createDirsLocked(ctx, inst); err != nil {
 		return nil, err
 	}
-	if err := m.bootstrapLocked(ctx, inst); err != nil {
-		return nil, err
+	created = true
+
+	if err := m.bootstrapLocked(ctx, inst, onProgress); err != nil {
+		return nil, cleanupOnFailure(err)
 	}
 	if m.kind == RuntimeSeatbelt {
+		onProgress("Writing Seatbelt profile", 90)
 		if err := m.writeSeatbeltProfileLocked(ctx, inst); err != nil {
-			return nil, err
+			return nil, cleanupOnFailure(err)
 		}
 	}
 	m.instance = inst
@@ -515,6 +537,27 @@ func (m *RemoteRuntimeManager) Destroy(ctx context.Context) error {
 		return fmt.Errorf("failed to destroy sandbox %s: %s", m.instance.ID, stderr)
 	}
 	m.instance = nil
+	return nil
+}
+
+func (m *RemoteRuntimeManager) cleanupSandboxRootLocked(ctx context.Context, root string) error {
+	root = cleanRemotePath(root)
+	if root == "" || root == "/" || root == "." {
+		return fmt.Errorf("refusing to remove unsafe sandbox path %q", root)
+	}
+	runCtx := ctx
+	cancel := func() {}
+	if _, ok := ctx.Deadline(); !ok {
+		runCtx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	}
+	defer cancel()
+	_, stderr, exitCode, err := m.ssh.RunCommand(runCtx, fmt.Sprintf("rm -rf -- %s", shellQuote(root)))
+	if err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("failed to remove incomplete sandbox root %s: %s", root, stderr)
+	}
 	return nil
 }
 
@@ -837,34 +880,85 @@ func (m *RemoteRuntimeManager) instanceFor(root, id, name string) *SandboxInstan
 
 func (m *RemoteRuntimeManager) createDirsLocked(ctx context.Context, inst *SandboxInstance) error {
 	cmd := fmt.Sprintf("mkdir -p -- %s %s", shellQuote(inst.WorkspacePath), shellQuote(inst.TmpPath))
-	_, stderr, exitCode, err := m.ssh.RunCommand(ctx, cmd)
-	if err != nil {
+	return m.runSetupCommandLocked(ctx, "create sandbox directories", cmd, false)
+}
+
+func (m *RemoteRuntimeManager) bootstrapLocked(ctx context.Context, inst *SandboxInstance, onProgress SandboxProgressFunc) error {
+	if !m.cfg.BootstrapPython {
+		return nil
+	}
+	if onProgress == nil {
+		onProgress = func(string, int) {}
+	}
+	packages := strings.TrimSpace(strings.Join(shellQuoteArgs(m.cfg.PythonPackages), " "))
+	onProgress("Creating Python virtual environment", 40)
+	if err := m.runSetupCommandLocked(ctx, "create Python virtual environment", fmt.Sprintf("python3 -m venv %s", shellQuote(inst.VenvPath)), false); err != nil {
 		return err
 	}
-	if exitCode != 0 {
-		return fmt.Errorf("failed to create sandbox directories: %s", stderr)
+	if packages != "" {
+		onProgress("Upgrading sandbox pip", 60)
+		if err := m.runSetupCommandLocked(ctx, "upgrade sandbox pip", fmt.Sprintf("%s/bin/python -m pip install --upgrade pip", shellQuote(inst.VenvPath)), true); err != nil {
+			return err
+		}
+		onProgress("Installing sandbox Python packages", 75)
+		if err := m.runSetupCommandLocked(ctx, "install sandbox Python packages", fmt.Sprintf("%s/bin/pip install --no-cache-dir --timeout 30 --retries 2 %s", shellQuote(inst.VenvPath), packages), true); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (m *RemoteRuntimeManager) bootstrapLocked(ctx context.Context, inst *SandboxInstance) error {
-	if !m.cfg.BootstrapPython {
-		return nil
-	}
-	packages := strings.TrimSpace(strings.Join(shellQuoteArgs(m.cfg.PythonPackages), " "))
-	cmd := fmt.Sprintf("python3 -m venv %s", shellQuote(inst.VenvPath))
-	if packages != "" {
-		cmd += fmt.Sprintf(" && %s/bin/python -m pip install --upgrade pip", shellQuote(inst.VenvPath))
-		cmd += fmt.Sprintf(" && %s/bin/pip install --no-cache-dir %s", shellQuote(inst.VenvPath), packages)
-	}
-	stdout, stderr, exitCode, err := m.ssh.RunCommand(ctx, cmd)
+func (m *RemoteRuntimeManager) runSetupCommandLocked(ctx context.Context, step, cmd string, networkHint bool) error {
+	runCtx, cancel := m.setupCommandContext(ctx)
+	defer cancel()
+	stdout, stderr, exitCode, err := m.ssh.RunCommand(runCtx, m.remoteSetupCommand(cmd))
 	if err != nil {
-		return fmt.Errorf("failed to bootstrap Python sandbox: %w", err)
+		return m.setupCommandError(step, stdout, stderr, exitCode, err, networkHint)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("failed to bootstrap Python sandbox (exit %d): stdout=%s stderr=%s", exitCode, stdout, stderr)
+		return m.setupCommandError(step, stdout, stderr, exitCode, nil, networkHint)
 	}
 	return nil
+}
+
+func (m *RemoteRuntimeManager) setupCommandContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if m.cfg.CommandTimeoutSec <= 0 {
+		return ctx, func() {}
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, time.Duration(m.cfg.CommandTimeoutSec+10)*time.Second)
+}
+
+func (m *RemoteRuntimeManager) remoteSetupCommand(cmd string) string {
+	if m.cfg.CommandTimeoutSec <= 0 {
+		return cmd
+	}
+	quoted := shellQuote(cmd)
+	return fmt.Sprintf("if command -v timeout >/dev/null 2>&1; then timeout --kill-after=5s %ds sh -lc %s; else sh -lc %s; fi",
+		m.cfg.CommandTimeoutSec, quoted, quoted)
+}
+
+func (m *RemoteRuntimeManager) setupCommandError(step, stdout, stderr string, exitCode int, err error, networkHint bool) error {
+	timeout := m.cfg.CommandTimeoutSec
+	hint := ""
+	if networkHint {
+		hint = "; check the remote network, pip index, or proxy settings"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || exitCode == 124 || exitCode == 137 {
+		if timeout > 0 {
+			return fmt.Errorf("%s timed out after %d seconds%s", step, timeout, hint)
+		}
+		return fmt.Errorf("%s timed out%s", step, hint)
+	}
+	if err != nil {
+		return fmt.Errorf("%s failed%s: %w", step, hint, err)
+	}
+	return fmt.Errorf("%s failed (exit %d)%s: stdout=%s stderr=%s", step, exitCode, hint, strings.TrimSpace(stdout), strings.TrimSpace(stderr))
 }
 
 func (m *RemoteRuntimeManager) inspectLocked(ctx context.Context, inst *SandboxInstance) (bool, bool, error) {

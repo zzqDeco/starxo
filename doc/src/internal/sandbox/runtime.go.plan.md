@@ -13,7 +13,7 @@
 - `Detect(ctx) (RuntimeCheckResult, error)`：检测 runtime、Python 和隔离能力。
 - `Diagnose(ctx) (SandboxDiagnosticsResult, error)`：返回诊断面板使用的结构化检查项和修复建议。
 - `Install(ctx) (RuntimeInstallResult, error)`：Linux 上显式安装 bubblewrap/Python 依赖。
-- `CreateSandbox(ctx, excludeIDs)`：创建 workspace/tmp/.venv 并按需初始化 Python 包。
+- `CreateSandbox(ctx, excludeIDs, onProgress)`：创建 workspace/tmp/.venv，按需初始化 Python 包，并上报分步进度。
 - `AttachSandbox(ctx, id, name, workspacePath)`：绑定已有 workspace。
 - `ExecInSandbox(ctx, command)`：通过 bwrap 或 sandbox-exec 执行命令。
 - `StartProcessInSandbox(ctx, command)`：通过 bwrap 或 sandbox-exec 启动常驻进程，返回 stdio process handle。
@@ -25,4 +25,6 @@
 - `network=false` 使用 bwrap `--unshare-net` 或 Seatbelt network deny。
 - 内存限制为 `ulimit` best-effort，不等价于 Docker/cgroup 硬配额。
 - 常驻进程不套用 `CommandTimeoutSec`，生命周期由调用方显式 Kill/Close 管理。
+- 创建期 setup 命令会按 `CommandTimeoutSec` 包装远端 `timeout` 并设置本地 context deadline；pip 失败会提示检查远端网络、pip 源或代理。
+- Python bootstrap 失败只会 best-effort 清理本次新建且尚未注册的 sandbox root，不得删除已有 sandbox。
 - AppArmor/user namespace 相关修复只生成命令供用户复制，不在运行时自动执行。

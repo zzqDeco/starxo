@@ -9,8 +9,10 @@
 - `CreateAndActivateContainer` 保留旧方法名，但实际创建并激活 sandbox workspace。
 - `ActivateContainer` 通过 runtime ID 和 workspacePath 激活已有 sandbox。
 - `DeactivateContainer` 只清除当前 operator/runtime 激活状态，不删除 workspace。
+- `RunTerminalCommand` 在当前 active sandbox workspace 中执行用户提交的非交互式 shell 命令。
 - `GetStatus` 同时返回新 `runtimeAvailable/sandboxActive/activeSandbox*` 字段和旧 Docker/Container 兼容字段。
 
 ## 维护要点
 - 旧 Docker 记录状态为 `unavailable` 时禁止激活。
 - 事件名暂时保留 `container:*` 以兼容前端监听。
+- `DisconnectAndDestroy` 会关闭 SSH 并发出断开/停用事件；直接销毁流程由 `ContainerService` 负责发出 `container:destroyed`。

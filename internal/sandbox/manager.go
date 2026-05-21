@@ -116,8 +116,8 @@ func (m *SandboxManager) CreateNewSandbox(ctx context.Context, excludeIDs []stri
 		onProgress = func(string, int) {}
 	}
 
-	onProgress("Creating sandbox workspace", 10)
-	inst, err := m.runtime.CreateSandbox(ctx, excludeIDs)
+	onProgress("Creating sandbox workspace", 5)
+	inst, err := m.runtime.CreateSandbox(ctx, excludeIDs, onProgress)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox setup failed: %w", err)
 	}

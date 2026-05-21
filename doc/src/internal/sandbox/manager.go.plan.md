@@ -12,7 +12,7 @@
 ## 关键行为
 - `ConnectSSH` 只建立 SSH 和 SFTP 能力。
 - `EnsureRuntime` 检测远端 bwrap/Seatbelt 可用性，不自动安装。
-- `CreateNewSandbox` 创建远端持久 workspace 并创建 operator。
+- `CreateNewSandbox` 创建远端持久 workspace、透传 runtime 分步进度，并创建 operator。
 - `AttachToSandbox` 激活已有 workspace。
 - `SSHHostPort` 暴露当前远端地址给 workspace 元信息面板。
 - `DestroySandbox` 删除指定 workspace 根目录；`Disconnect` 保留 workspace。
@@ -20,3 +20,4 @@
 ## 维护要点
 - 新代码优先使用 runtime/sandbox 命名；兼容 Docker 命名仅用于旧调用和 Wails 过渡。
 - 锁内只做状态切换，长耗时远端操作应避免扩大锁范围。
+- sandbox 创建失败时不创建 operator，错误应保留具体 runtime setup 步骤，方便前端显示可读失败原因。

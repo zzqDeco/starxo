@@ -11,6 +11,7 @@ import { CleanupSandboxTmp, DownloadFile, GetWorkspaceInfo, ListWorkspaceFiles, 
 import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { useWailsEvent } from '@/composables/useWailsEvent'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -31,7 +32,10 @@ const showTransfer = ref(false)
 const { t } = useI18n()
 const feedback = useUiFeedback()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
+const currentWorkspaceContainerID = ref('')
 const cleaningTmp = ref(false)
+let refreshRequestID = 0
+let previewRequestID = 0
 
 const selectedFile = computed(() => files.value.find(f => f.path === selectedPath.value) || null)
 const workspacePath = computed(() => workspaceInfo.value?.workspacePath || '')
@@ -116,16 +120,21 @@ function buildTree(fileList: FileInfo[]): WorkspaceTreeNode[] {
 const treeData = computed<WorkspaceTreeNode[]>(() => buildTree(filteredFiles.value))
 
 async function refreshFiles() {
+  const requestID = ++refreshRequestID
   loading.value = true
   try {
-    await refreshWorkspaceInfo()
-    if (!workspaceInfo.value?.active) {
-      files.value = []
-      selectedPath.value = ''
-      previewContent.value = ''
+    const info = await GetWorkspaceInfo() as WorkspaceInfo
+    if (requestID !== refreshRequestID) return
+    workspaceInfo.value = info
+    if (!info?.active) {
+      clearWorkspaceState(false)
       return
     }
+    if (info.activeContainerID) {
+      currentWorkspaceContainerID.value = info.activeContainerID
+    }
     const result = await ListWorkspaceFiles()
+    if (requestID !== refreshRequestID) return
     files.value = (result as unknown as FileInfo[]) || []
 
     if (selectedPath.value && !files.value.find(f => f.path === selectedPath.value)) {
@@ -134,18 +143,32 @@ async function refreshFiles() {
     }
   } catch (e) {
     console.warn('Failed to list files:', e)
+    if (requestID === refreshRequestID) {
+      workspaceInfo.value = null
+      files.value = []
+      selectedPath.value = ''
+      previewContent.value = ''
+    }
   } finally {
-    loading.value = false
+    if (requestID === refreshRequestID) {
+      loading.value = false
+    }
   }
 }
 
-async function refreshWorkspaceInfo() {
-  try {
-    workspaceInfo.value = await GetWorkspaceInfo() as WorkspaceInfo
-  } catch (e) {
-    console.warn('Failed to inspect workspace:', e)
-    workspaceInfo.value = null
+function clearWorkspaceState(invalidateRequests = true) {
+  if (invalidateRequests) {
+    refreshRequestID++
   }
+  previewRequestID++
+  workspaceInfo.value = null
+  currentWorkspaceContainerID.value = ''
+  files.value = []
+  selectedPath.value = ''
+  previewContent.value = ''
+  query.value = ''
+  loading.value = false
+  previewLoading.value = false
 }
 
 async function handleDownload() {
@@ -158,16 +181,21 @@ async function handleDownload() {
 }
 
 async function loadPreview(path: string) {
+  const requestID = ++previewRequestID
   previewLoading.value = true
   try {
     const content = await ReadFilePreview(path)
-    if (selectedPath.value === path) {
+    if (requestID === previewRequestID && selectedPath.value === path) {
       previewContent.value = content || ''
     }
   } catch {
-    previewContent.value = ''
+    if (requestID === previewRequestID) {
+      previewContent.value = ''
+    }
   } finally {
-    previewLoading.value = false
+    if (requestID === previewRequestID) {
+      previewLoading.value = false
+    }
   }
 }
 
@@ -230,6 +258,36 @@ async function openPath(path: string) {
 }
 
 let stopWorkspaceBridge: (() => void) | null = null
+
+useWailsEvent('container:ready', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
+  refreshFiles()
+})
+
+useWailsEvent('container:activated', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
+  refreshFiles()
+})
+
+useWailsEvent('session:switched', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
+  refreshFiles()
+})
+
+useWailsEvent('container:deactivated', () => {
+  clearWorkspaceState()
+})
+
+useWailsEvent('container:destroyed', (data: { containerID?: string }) => {
+  const destroyedID = data?.containerID
+  if (destroyedID && destroyedID === currentWorkspaceContainerID.value) {
+    clearWorkspaceState()
+  }
+})
+
+useWailsEvent('ssh:disconnected', () => {
+  clearWorkspaceState()
+})
 
 onMounted(async () => {
   await refreshFiles()

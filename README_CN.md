@@ -23,7 +23,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **多会话并行执行** — 多个会话可同时运行 Agent；切换会话不会取消后台运行的 Agent，切换时完整恢复状态快照
 - **会话持久化** — 完整的会话管理，统一存储消息历史、timeline 事件和流式状态
 - **文件传输** — 通过 SFTP 直接上传/下载到每个持久沙箱工作区，并提供工作区元信息、路径复制和 tmp 清理
-- **开发工作台 UI** — 高信息密度深色工作台，包含命令面板、会话栏、中央执行画布、工作区抽屉、右侧运行时 Dock 和 composer 内模式控制
+- **开发工作台 UI** — 高信息密度深色工作台，包含命令面板、会话栏、中央执行画布、随沙箱生命周期同步的工作区抽屉、右侧运行时 Dock、沙箱命令终端和 composer 内模式控制
 
 ## 技术栈
 
@@ -253,6 +253,8 @@ npm run dev
 沙箱设置页可以在保存设置前执行完整远端诊断。Linux 检查包括 `bwrap`、`python3`、Python venv 创建、user namespace sysctl、AppArmor unprivileged user namespace 限制，以及 bwrap smoke 命令。macOS 检查包括 `sandbox-exec`、`python3` 和最小 Seatbelt smoke 命令。
 
 普通 Linux 包依赖可以通过“安装运行时”按钮安装。`sysctl`、AppArmor 等主机安全策略变更不会自动执行；Starxo 只展示可复制命令，由操作者审阅后手动运行。
+
+创建沙箱时会展示 Python venv 创建、pip 升级、包安装等分步进度。Python bootstrap 命令遵守 `commandTimeoutSec`；pip 失败会提示检查远端网络、pip 源或代理，并 best-effort 清理未完成的新沙箱目录。运行时终端每次在当前 active sandbox workspace 中执行一条命令，没有 active sandbox 时输入会被禁用。
 
 ## 数据存储
 

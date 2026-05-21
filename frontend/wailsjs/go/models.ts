@@ -1618,6 +1618,24 @@ export namespace service {
 		    return a;
 		}
 	}
+	export class TerminalCommandResult {
+	    command: string;
+	    stdout: string;
+	    stderr: string;
+	    exitCode: number;
+
+	    static createFrom(source: any = {}) {
+	        return new TerminalCommandResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.command = source["command"];
+	        this.stdout = source["stdout"];
+	        this.stderr = source["stderr"];
+	        this.exitCode = source["exitCode"];
+	    }
+	}
 	export class WebSearchDiagnosticCheck {
 	    id: string;
 	    label: string;
@@ -1750,6 +1768,7 @@ export namespace service {
 	export class WorkspaceInfoDTO {
 	    sshConnected: boolean;
 	    active: boolean;
+	    activeContainerID?: string;
 	    sandboxID?: string;
 	    sandboxName?: string;
 	    runtime?: string;
@@ -1768,6 +1787,7 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sshConnected = source["sshConnected"];
 	        this.active = source["active"];
+	        this.activeContainerID = source["activeContainerID"];
 	        this.sandboxID = source["sandboxID"];
 	        this.sandboxName = source["sandboxName"];
 	        this.runtime = source["runtime"];
@@ -1952,4 +1972,3 @@ export namespace tools {
 	}
 
 }
-

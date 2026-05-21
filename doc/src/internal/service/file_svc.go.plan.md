@@ -8,7 +8,7 @@
 - 通过 `SandboxService.Manager()` 获取当前 sandbox manager。
 - 上传/下载使用 `FileTransfer` 直接 SFTP 到当前 sandbox workspace。
 - 文件列表和预览通过 `RemoteOperator` 在 sandbox runtime 内执行。
-- `GetWorkspaceInfo` 返回当前 SSH、sandbox、runtime、workspace 路径、文件数量和大小。
+- `GetWorkspaceInfo` 返回当前 SSH、sandbox、runtime、workspace 路径、active container registry ID、文件数量和大小。
 - `CleanupSandboxTmp` 只清理当前 active sandbox 的 `tmp` 目录。
 - 文件浏览和 workspace metadata 会通过 ChatService 的 runtime worktree state 解析当前 active session workspace；如果当前 session 进入 worktree，文件树会跟随 worktree。
 

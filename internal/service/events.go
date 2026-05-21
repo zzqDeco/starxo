@@ -40,6 +40,14 @@ type TerminalOutputEvent struct {
 	ExitCode int    `json:"exitCode"`
 }
 
+// TerminalCommandResult is returned for a user-submitted sandbox terminal command.
+type TerminalCommandResult struct {
+	Command  string `json:"command"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exitCode"`
+}
+
 // SandboxProgressEvent is sent during sandbox connection setup.
 type SandboxProgressEvent struct {
 	Step    string `json:"step"`
@@ -56,17 +64,18 @@ type FileInfoDTO struct {
 }
 
 type WorkspaceInfoDTO struct {
-	SSHConnected  bool   `json:"sshConnected"`
-	Active        bool   `json:"active"`
-	SandboxID     string `json:"sandboxID,omitempty"`
-	SandboxName   string `json:"sandboxName,omitempty"`
-	Runtime       string `json:"runtime,omitempty"`
-	WorkspacePath string `json:"workspacePath,omitempty"`
-	SSHHost       string `json:"sshHost,omitempty"`
-	SSHPort       int    `json:"sshPort,omitempty"`
-	FileCount     int    `json:"fileCount"`
-	TotalSize     int64  `json:"totalSize"`
-	RefreshedAt   int64  `json:"refreshedAt"`
+	SSHConnected      bool   `json:"sshConnected"`
+	Active            bool   `json:"active"`
+	ActiveContainerID string `json:"activeContainerID,omitempty"`
+	SandboxID         string `json:"sandboxID,omitempty"`
+	SandboxName       string `json:"sandboxName,omitempty"`
+	Runtime           string `json:"runtime,omitempty"`
+	WorkspacePath     string `json:"workspacePath,omitempty"`
+	SSHHost           string `json:"sshHost,omitempty"`
+	SSHPort           int    `json:"sshPort,omitempty"`
+	FileCount         int    `json:"fileCount"`
+	TotalSize         int64  `json:"totalSize"`
+	RefreshedAt       int64  `json:"refreshedAt"`
 }
 
 type WorkspaceCleanupResultDTO struct {
