@@ -32,7 +32,7 @@ func (s *PlatformService) GetPlatformUIInfo() PlatformUIInfo {
 	case "windows":
 		info.Platform = "windows"
 		info.SupportsTranslucency = true
-		info.SupportsMica = true
+		info.SupportsMica = supportsNativeMica()
 	case "linux":
 		info.Platform = "linux"
 	default:

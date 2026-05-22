@@ -21,6 +21,8 @@ const commandRunning = ref(false)
 
 let termInstance: any = null
 let fitAddon: any = null
+let terminalSchemeQuery: MediaQueryList | null = null
+let terminalSchemeListener: ((event: MediaQueryListEvent) => void) | null = null
 const xtermLoaded = ref(false)
 
 const sshConnected = computed(() => connectionStore.sshConnected)
@@ -37,6 +39,62 @@ function formatTime(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
 }
 
+function isDarkTerminalTheme(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
+}
+
+function terminalTheme(dark: boolean) {
+  return {
+    background: dark ? '#1c1c1e' : '#ffffff',
+    foreground: dark ? '#d1d1d6' : '#1d1d1f',
+    cursor: dark ? '#0a84ff' : '#007aff',
+    cursorAccent: dark ? '#1c1c1e' : '#ffffff',
+    selectionBackground: dark ? 'rgba(10, 132, 255, 0.28)' : 'rgba(0, 122, 255, 0.18)',
+    black: dark ? '#48484a' : '#1d1d1f',
+    red: dark ? '#ff453a' : '#ff3b30',
+    green: dark ? '#30d158' : '#34c759',
+    yellow: dark ? '#ffd60a' : '#ff9f0a',
+    blue: dark ? '#0a84ff' : '#007aff',
+    magenta: dark ? '#bf5af2' : '#af52de',
+    cyan: dark ? '#64d2ff' : '#32ade6',
+    white: dark ? '#d1d1d6' : '#3a3a3c',
+    brightBlack: dark ? '#8e8e93' : '#6e6e73',
+    brightRed: dark ? '#ff6961' : '#d70015',
+    brightGreen: dark ? '#63e6be' : '#248a3d',
+    brightYellow: dark ? '#ffe066' : '#c66a00',
+    brightBlue: dark ? '#409cff' : '#006bd6',
+    brightMagenta: dark ? '#da8fff' : '#8944ab',
+    brightCyan: dark ? '#86e1ff' : '#0071a4',
+    brightWhite: dark ? '#f5f5f7' : '#1d1d1f'
+  }
+}
+
+function applyTerminalTheme(dark = isDarkTerminalTheme()) {
+  if (termInstance && xtermLoaded.value) {
+    termInstance.options.theme = terminalTheme(dark)
+  }
+}
+
+function startTerminalThemeWatcher() {
+  if (typeof window === 'undefined' || !window.matchMedia || terminalSchemeQuery) return
+  terminalSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  terminalSchemeListener = (event: MediaQueryListEvent) => applyTerminalTheme(event.matches)
+  terminalSchemeQuery.addEventListener?.('change', terminalSchemeListener)
+  if (!terminalSchemeQuery.addEventListener) {
+    terminalSchemeQuery.addListener(terminalSchemeListener)
+  }
+}
+
+function stopTerminalThemeWatcher() {
+  if (!terminalSchemeQuery || !terminalSchemeListener) return
+  terminalSchemeQuery.removeEventListener?.('change', terminalSchemeListener)
+  if (!terminalSchemeQuery.removeEventListener) {
+    terminalSchemeQuery.removeListener(terminalSchemeListener)
+  }
+  terminalSchemeQuery = null
+  terminalSchemeListener = null
+}
+
 async function initXterm() {
   if (!terminalEl.value || xtermLoaded.value) return
   try {
@@ -45,31 +103,8 @@ async function initXterm() {
     await import('@xterm/xterm/css/xterm.css')
 
     fitAddon = new FitAddon()
-    const dark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
     termInstance = new Terminal({
-      theme: {
-        background: dark ? '#1c1c1e' : '#ffffff',
-        foreground: dark ? '#d1d1d6' : '#1d1d1f',
-        cursor: dark ? '#0a84ff' : '#007aff',
-        cursorAccent: dark ? '#1c1c1e' : '#ffffff',
-        selectionBackground: dark ? 'rgba(10, 132, 255, 0.28)' : 'rgba(0, 122, 255, 0.18)',
-        black: dark ? '#1c1c1e' : '#1d1d1f',
-        red: dark ? '#ff453a' : '#ff3b30',
-        green: dark ? '#30d158' : '#34c759',
-        yellow: dark ? '#ffd60a' : '#ff9f0a',
-        blue: dark ? '#0a84ff' : '#007aff',
-        magenta: dark ? '#bf5af2' : '#af52de',
-        cyan: dark ? '#64d2ff' : '#32ade6',
-        white: dark ? '#d1d1d6' : '#f2f2f7',
-        brightBlack: '#5a5c72',
-        brightRed: dark ? '#ff6961' : '#ff6961',
-        brightGreen: dark ? '#63e6be' : '#30d158',
-        brightYellow: dark ? '#ffe066' : '#ffd60a',
-        brightBlue: dark ? '#409cff' : '#0a84ff',
-        brightMagenta: dark ? '#da8fff' : '#bf5af2',
-        brightCyan: dark ? '#86e1ff' : '#64d2ff',
-        brightWhite: dark ? '#f5f5f7' : '#ffffff'
-      },
+      theme: terminalTheme(isDarkTerminalTheme()),
       fontFamily: '"SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace',
       fontSize: 12,
       lineHeight: 1.4,
@@ -186,6 +221,7 @@ useWailsEvent<{ step: string; percent: number }>('container:progress', (data) =>
 })
 
 onMounted(() => {
+  startTerminalThemeWatcher()
   nextTick(() => initXterm())
 })
 
@@ -195,6 +231,7 @@ onUnmounted(() => {
     termInstance = null
     xtermLoaded.value = false
   }
+  stopTerminalThemeWatcher()
 })
 
 // Handle resize
