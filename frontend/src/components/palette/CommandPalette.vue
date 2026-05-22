@@ -300,8 +300,8 @@ function indexOf(cmd: Command): number {
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(2, 6, 23, 0.68);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
   z-index: 2200;
   display: flex;
   align-items: flex-start;
@@ -310,13 +310,14 @@ function indexOf(cmd: Command): number {
 }
 
 .palette-dialog {
-  width: min(560px, 92vw);
+  width: min(620px, 92vw);
   max-height: min(520px, 72vh);
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--bg-surface) 94%, black);
+  background: var(--platform-bg-elevated);
+  backdrop-filter: blur(28px) saturate(1.25);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xl);
   box-shadow: var(--elev-3);
   overflow: hidden;
 }
@@ -327,7 +328,7 @@ function indexOf(cmd: Command): number {
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(2, 6, 23, 0.42);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
@@ -364,7 +365,7 @@ function indexOf(cmd: Command): number {
 }
 
 .palette-close:hover {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
@@ -377,8 +378,8 @@ function indexOf(cmd: Command): number {
 
 .group-label {
   font-size: var(--fs-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-faint);
   padding: 10px 12px 4px;
   font-weight: var(--fw-semibold);
@@ -401,7 +402,7 @@ function indexOf(cmd: Command): number {
 }
 
 .palette-item.active {
-  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-hover));
+  background: var(--platform-bg-active);
   color: var(--text-primary);
 }
 
@@ -430,7 +431,7 @@ function indexOf(cmd: Command): number {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--text-muted);
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 80%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
@@ -453,7 +454,7 @@ function indexOf(cmd: Command): number {
   gap: 16px;
   padding: 8px 14px;
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  background: var(--platform-bg-toolbar);
   font-size: var(--fs-2xs);
   color: var(--text-faint);
   flex-shrink: 0;
@@ -461,7 +462,7 @@ function indexOf(cmd: Command): number {
 
 .palette-footer kbd {
   font-family: var(--font-mono);
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 80%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 1px 5px;

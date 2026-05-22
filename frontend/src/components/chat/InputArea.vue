@@ -195,8 +195,8 @@ const attachedFileName = computed(() => {
   font-family: var(--font-brand);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
 }
 
@@ -216,7 +216,7 @@ const attachedFileName = computed(() => {
   gap: 6px;
   margin-bottom: 8px;
   padding: 4px 8px;
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   width: fit-content;
@@ -248,9 +248,9 @@ const attachedFileName = computed(() => {
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-surface) 88%, black);
-  box-shadow: var(--elev-2);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--platform-bg-raised) 84%, transparent);
+  box-shadow: var(--platform-shadow-1);
   position: relative;
   transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
 }
@@ -271,7 +271,8 @@ const attachedFileName = computed(() => {
 }
 
 .input-shell:focus-within {
-  border-color: var(--accent-cyan-dim);
+  border-color: color-mix(in srgb, var(--platform-accent) 38%, var(--border-subtle));
+  box-shadow: 0 0 0 3px var(--platform-accent-soft);
 }
 
 .input-shell:focus-within::after {
@@ -316,7 +317,7 @@ const attachedFileName = computed(() => {
 
 .send-btn {
   flex-shrink: 0;
-  box-shadow: var(--shadow-cyan);
+  box-shadow: none;
   transition: opacity var(--transition-ui), transform var(--transition-ui);
 }
 

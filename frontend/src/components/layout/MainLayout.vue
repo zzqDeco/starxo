@@ -268,7 +268,7 @@ onUnmounted(() => {
   height: 100vh;
   width: 100vw;
   max-width: 100vw;
-  background: var(--gradient-workbench);
+  background: var(--platform-bg-window);
   overflow: hidden;
   position: relative;
 }
@@ -292,7 +292,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: color-mix(in srgb, var(--bg-surface) 92%, black);
+  background: var(--platform-bg-sidebar);
+  backdrop-filter: blur(24px) saturate(1.45);
   border-right: 1px solid var(--border-subtle);
   flex-shrink: 0;
   overflow: hidden;
@@ -312,7 +313,7 @@ onUnmounted(() => {
   display: flex;
   min-height: 0;
   overflow: hidden;
-  padding: 10px 10px 10px 0;
+  padding: 8px 8px 8px 0;
   gap: 0;
 }
 
@@ -322,9 +323,10 @@ onUnmounted(() => {
   min-height: 0;
   position: relative;
   overflow: hidden;
-  background: color-mix(in srgb, var(--bg-base) 88%, black);
+  background: var(--platform-bg-content);
+  backdrop-filter: blur(18px) saturate(1.18);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--elev-1);
 }
 
@@ -335,9 +337,10 @@ onUnmounted(() => {
 
 .container-dock {
   height: 100%;
-  background: color-mix(in srgb, var(--bg-surface) 94%, black);
+  background: var(--platform-bg-elevated);
+  backdrop-filter: blur(18px) saturate(1.18);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--elev-1);
   flex-shrink: 0;
   min-width: 0;
@@ -357,7 +360,8 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   border: none;
-  background: rgba(5, 6, 16, 0.4);
+  background: rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(4px);
   opacity: 0;
   transition: opacity 180ms ease;
 }
@@ -374,8 +378,9 @@ onUnmounted(() => {
 .dock-panel {
   height: 100%;
   border-left: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  box-shadow: -20px 0 28px rgba(0, 0, 0, 0.25);
+  background: var(--platform-bg-elevated);
+  backdrop-filter: blur(22px) saturate(1.2);
+  box-shadow: -20px 0 36px rgba(0, 0, 0, 0.18);
 }
 
 .mobile-sidebar-panel {
@@ -385,10 +390,11 @@ onUnmounted(() => {
   bottom: 0;
   width: min(300px, 86vw);
   border-right: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  background: var(--platform-bg-sidebar);
+  backdrop-filter: blur(22px) saturate(1.2);
   transform: translateX(-100%);
   transition: transform 220ms ease;
-  box-shadow: 20px 0 28px rgba(0, 0, 0, 0.25);
+  box-shadow: 20px 0 36px rgba(0, 0, 0, 0.18);
 }
 
 .responsive-dock.open,

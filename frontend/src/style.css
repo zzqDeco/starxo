@@ -1,11 +1,3 @@
-@font-face {
-  font-family: "Nunito";
-  font-style: normal;
-  font-weight: 400;
-  src: local(""),
-    url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
-}
-
 *,
 *::before,
 *::after {
@@ -15,36 +7,72 @@
 }
 
 :root {
-  --bg-deepest: #020617;
-  --bg-base: #07111f;
-  --bg-surface: #0f172a;
-  --bg-elevated: #172033;
-  --bg-raised: #1e293b;
-  --bg-hover: #243044;
-  --border-subtle: #263348;
-  --border-strong: #38465f;
-  --text-primary: #f8fafc;
-  --text-secondary: #d9e2ef;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
-  --accent-cyan: #22d3ee;
-  --accent-cyan-hover: #67e8f9;
-  --accent-cyan-dim: #0891b2;
-  --accent-violet: #a78bfa;
-  --accent-violet-dim: #7c3aed;
-  --accent-amber: #f59e0b;
-  --accent-amber-dim: #b45309;
-  --accent-rose: #fb7185;
-  --accent-rose-dim: #be123c;
-  --accent-emerald: #22c55e;
-  --accent-emerald-dim: #15803d;
-  --accent-blue: #60a5fa;
-  --accent-sky: #38bdf8;
-  --accent-mint: #34d399;
+  color-scheme: light;
 
-  --font-sans: "Nunito", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
-  --font-brand: "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
+  /* Platform design tokens. Defaults are macOS-like; Windows/Linux override below. */
+  --platform-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --platform-font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+  --platform-bg-window: rgba(246, 246, 247, 0.82);
+  --platform-bg-content: rgba(255, 255, 255, 0.62);
+  --platform-bg-sidebar: rgba(242, 242, 247, 0.68);
+  --platform-bg-toolbar: rgba(248, 248, 250, 0.72);
+  --platform-bg-elevated: rgba(255, 255, 255, 0.84);
+  --platform-bg-raised: rgba(255, 255, 255, 0.96);
+  --platform-bg-hover: rgba(0, 122, 255, 0.08);
+  --platform-bg-active: rgba(0, 122, 255, 0.14);
+  --platform-separator: rgba(60, 60, 67, 0.16);
+  --platform-separator-strong: rgba(60, 60, 67, 0.26);
+  --platform-text-primary: #1d1d1f;
+  --platform-text-secondary: #3a3a3c;
+  --platform-text-muted: #6e6e73;
+  --platform-text-faint: #8e8e93;
+  --platform-accent: #007aff;
+  --platform-accent-hover: #0a84ff;
+  --platform-accent-soft: rgba(0, 122, 255, 0.12);
+  --platform-success: #34c759;
+  --platform-success-dim: #248a3d;
+  --platform-warning: #ff9f0a;
+  --platform-warning-dim: #c66a00;
+  --platform-danger: #ff3b30;
+  --platform-danger-dim: #d70015;
+  --platform-radius-control: 8px;
+  --platform-radius-panel: 12px;
+  --platform-radius-window: 14px;
+  --platform-shadow-1: 0 1px 1px rgba(0, 0, 0, 0.08);
+  --platform-shadow-2: 0 8px 26px rgba(0, 0, 0, 0.12);
+  --platform-shadow-3: 0 24px 70px rgba(0, 0, 0, 0.22);
+
+  /* Compatibility aliases used by existing components. */
+  --bg-deepest: var(--platform-bg-window);
+  --bg-base: var(--platform-bg-content);
+  --bg-surface: var(--platform-bg-elevated);
+  --bg-elevated: var(--platform-bg-toolbar);
+  --bg-raised: var(--platform-bg-raised);
+  --bg-hover: var(--platform-bg-hover);
+  --border-subtle: var(--platform-separator);
+  --border-strong: var(--platform-separator-strong);
+  --text-primary: var(--platform-text-primary);
+  --text-secondary: var(--platform-text-secondary);
+  --text-muted: var(--platform-text-muted);
+  --text-faint: var(--platform-text-faint);
+  --accent-cyan: var(--platform-accent);
+  --accent-cyan-hover: var(--platform-accent-hover);
+  --accent-cyan-dim: var(--platform-accent);
+  --accent-violet: #af52de;
+  --accent-violet-dim: #8944ab;
+  --accent-amber: var(--platform-warning);
+  --accent-amber-dim: var(--platform-warning-dim);
+  --accent-rose: var(--platform-danger);
+  --accent-rose-dim: var(--platform-danger-dim);
+  --accent-emerald: var(--platform-success);
+  --accent-emerald-dim: var(--platform-success-dim);
+  --accent-blue: var(--platform-accent);
+  --accent-sky: #5ac8fa;
+  --accent-mint: #30d158;
+
+  --font-sans: var(--platform-font-sans);
+  --font-mono: var(--platform-font-mono);
+  --font-brand: var(--platform-font-sans);
 
   /* Typography scale */
   --fs-2xs: 11px;
@@ -63,20 +91,20 @@
   --fw-semibold: 600;
   --fw-bold: 700;
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 7px;
+  --radius-md: var(--platform-radius-control);
+  --radius-lg: var(--platform-radius-panel);
+  --radius-xl: var(--platform-radius-window);
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.34);
-  --shadow-lg: 0 18px 42px rgba(0, 0, 0, 0.42);
+  --shadow-sm: var(--platform-shadow-1);
+  --shadow-md: var(--platform-shadow-2);
+  --shadow-lg: var(--platform-shadow-3);
 
   /* Elevation (hairline-layered shadows) */
-  --elev-1: 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 2px rgba(0, 0, 0, 0.36);
-  --elev-2: 0 8px 22px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(148, 163, 184, 0.05);
-  --elev-3: 0 22px 54px rgba(0, 0, 0, 0.46), 0 0 0 1px rgba(148, 163, 184, 0.08);
+  --elev-1: var(--platform-shadow-1);
+  --elev-2: var(--platform-shadow-2);
+  --elev-3: var(--platform-shadow-3);
 
   /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -103,16 +131,15 @@
   --space-2xl: 32px;
 
   /* Colored shadows */
-  --shadow-cyan: 0 8px 22px rgba(34, 211, 238, 0.14);
-  --shadow-violet: 0 8px 22px rgba(167, 139, 250, 0.14);
-  --shadow-glow: 0 0 0 1px rgba(34, 211, 238, 0.14), 0 10px 28px rgba(34, 211, 238, 0.1);
-  --shadow-glow-violet: 0 0 0 1px rgba(167, 139, 250, 0.12), 0 10px 28px rgba(167, 139, 250, 0.1);
+  --shadow-cyan: 0 8px 22px rgba(0, 122, 255, 0.08);
+  --shadow-violet: 0 8px 22px rgba(175, 82, 222, 0.08);
+  --shadow-glow: 0 0 0 1px var(--platform-accent-soft), var(--platform-shadow-1);
+  --shadow-glow-violet: 0 0 0 1px rgba(175, 82, 222, 0.12), var(--platform-shadow-1);
 
   /* Gradients */
-  --gradient-user-bubble: linear-gradient(135deg, rgba(8, 145, 178, 0.16) 0%, rgba(96, 165, 250, 0.12) 100%);
-  --gradient-accent: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-emerald) 100%);
-  --gradient-workbench: radial-gradient(circle at 18% 0%, rgba(34, 211, 238, 0.09), transparent 28%),
-    linear-gradient(180deg, #07111f 0%, #020617 100%);
+  --gradient-user-bubble: linear-gradient(180deg, rgba(0, 122, 255, 0.08), rgba(0, 122, 255, 0.04));
+  --gradient-accent: linear-gradient(180deg, var(--platform-accent-hover), var(--platform-accent));
+  --gradient-workbench: var(--platform-bg-window);
 
   /* Splitter */
   --splitter-width: 4px;
@@ -125,6 +152,61 @@
   --z-sticky: 20;
   --z-overlay: 30;
   --z-modal: 50;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --platform-bg-window: rgba(28, 28, 30, 0.86);
+  --platform-bg-content: rgba(30, 30, 32, 0.72);
+  --platform-bg-sidebar: rgba(36, 36, 38, 0.68);
+  --platform-bg-toolbar: rgba(44, 44, 46, 0.7);
+  --platform-bg-elevated: rgba(44, 44, 46, 0.78);
+  --platform-bg-raised: rgba(58, 58, 60, 0.88);
+  --platform-bg-hover: rgba(10, 132, 255, 0.16);
+  --platform-bg-active: rgba(10, 132, 255, 0.24);
+  --platform-separator: rgba(235, 235, 245, 0.13);
+  --platform-separator-strong: rgba(235, 235, 245, 0.22);
+  --platform-text-primary: #f5f5f7;
+  --platform-text-secondary: #d1d1d6;
+  --platform-text-muted: #98989d;
+  --platform-text-faint: #8e8e93;
+  --platform-accent: #0a84ff;
+  --platform-accent-hover: #409cff;
+  --platform-accent-soft: rgba(10, 132, 255, 0.18);
+  --platform-success: #30d158;
+  --platform-success-dim: #248a3d;
+  --platform-warning: #ffd60a;
+  --platform-warning-dim: #c9a000;
+  --platform-danger: #ff453a;
+  --platform-danger-dim: #d70015;
+  --platform-shadow-1: 0 1px 1px rgba(0, 0, 0, 0.34);
+  --platform-shadow-2: 0 12px 34px rgba(0, 0, 0, 0.28);
+  --platform-shadow-3: 0 28px 80px rgba(0, 0, 0, 0.44);
+}
+
+:root[data-platform="windows"] {
+  --platform-font-sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --platform-font-mono: "Cascadia Code", "Cascadia Mono", "SF Mono", ui-monospace, monospace;
+  --platform-radius-control: 6px;
+  --platform-radius-panel: 8px;
+  --platform-radius-window: 8px;
+}
+
+:root[data-platform="linux"] {
+  --platform-font-sans: "Inter", "Noto Sans", "Ubuntu", "Segoe UI", system-ui, sans-serif;
+  --platform-font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, monospace;
+  --platform-bg-window: #f6f6f7;
+  --platform-bg-sidebar: #eeeeef;
+  --platform-bg-toolbar: #f7f7f8;
+  --platform-radius-control: 6px;
+  --platform-radius-panel: 8px;
+  --platform-radius-window: 10px;
+}
+
+:root[data-platform="linux"][data-theme="dark"] {
+  --platform-bg-window: #242426;
+  --platform-bg-sidebar: #2c2c2e;
+  --platform-bg-toolbar: #303033;
 }
 
 html {
@@ -143,6 +225,7 @@ body {
   overflow: hidden;
   height: 100vh;
   width: 100vw;
+  background: var(--platform-bg-window);
 }
 
 #app {

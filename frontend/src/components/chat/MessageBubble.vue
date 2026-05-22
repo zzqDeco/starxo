@@ -450,9 +450,9 @@ function copyContent() {
 
 .user-content {
   background: transparent;
-  color: var(--text-primary);
-  border-right: 3px solid var(--accent-cyan);
-  padding: 2px 14px 2px 16px;
+  color: var(--text-secondary);
+  border-right: 2px solid var(--accent-cyan);
+  padding: 2px 12px 2px 16px;
   font-size: var(--fs-md);
   line-height: var(--lh-normal);
   white-space: pre-wrap;
@@ -477,8 +477,8 @@ function copyContent() {
 .assistant-avatar {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, var(--accent-cyan-dim), var(--accent-cyan));
+  border-radius: var(--radius-sm);
+  background: var(--platform-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -492,9 +492,9 @@ function copyContent() {
 }
 
 .assistant-bubble > .bubble-content {
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
   border: 1px solid var(--border-subtle);
-  border-radius: 4px var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  border-radius: var(--radius-lg);
   padding: 12px 16px;
 }
 
@@ -526,7 +526,7 @@ function copyContent() {
 
 .copy-btn:hover {
   color: var(--text-secondary);
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   opacity: 1;
 }
 
@@ -591,7 +591,7 @@ function copyContent() {
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--seg-color);
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
 }
 
 .segment-events {
@@ -605,7 +605,7 @@ function copyContent() {
 
 /* ==================== Sub-agent collapsible segment ==================== */
 .subagent-segment {
-  background: color-mix(in srgb, var(--agent-color) 4%, var(--bg-deepest));
+  background: color-mix(in srgb, var(--agent-color) 4%, var(--platform-bg-raised));
   border: 1px solid color-mix(in srgb, var(--agent-color) 15%, transparent);
   border-radius: var(--radius-md);
   margin: 6px 0;
@@ -648,7 +648,7 @@ function copyContent() {
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--agent-color);
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   flex-shrink: 0;
 }
 
@@ -664,14 +664,14 @@ function copyContent() {
 
 .subagent-state-pill.running {
   color: var(--accent-violet);
-  border-color: rgba(167, 139, 250, 0.35);
-  background: rgba(167, 139, 250, 0.1);
+  border-color: color-mix(in srgb, var(--accent-violet) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
 }
 
 .subagent-state-pill.done {
   color: var(--accent-emerald);
-  border-color: rgba(16, 185, 129, 0.35);
-  background: rgba(16, 185, 129, 0.1);
+  border-color: color-mix(in srgb, var(--accent-emerald) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-emerald) 10%, transparent);
 }
 
 .subagent-stats {

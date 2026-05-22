@@ -18,7 +18,7 @@
 
 ## 4. 关键实现细节
 - 结构体/接口定义:
-  - `App` — 主应用结构体，持有 `context.Context`、`config.Store`、`storage.SessionStore`、`storage.ContainerStore`、六个服务实例。**不再持有 `agentctx.Engine` 字段**
+  - `App` — 主应用结构体，持有 `context.Context`、`config.Store`、`storage.SessionStore`、`storage.ContainerStore`、核心业务服务，以及 `platformService`。**不再持有 `agentctx.Engine` 字段**
 - 导出函数/方法:
   - `NewApp() *App` — 创建并初始化所有服务和存储
 - 关键回调连接:
@@ -34,6 +34,7 @@
   - `chatService.SetDependencies(sbx, nil)` — ctxEngine 参数传 nil（per-session 管理）
   - `sessionService.EnsureDefaultSession()` — 加载或创建默认会话
   - `chatService.SetActiveSessionID(activeSession.ID)` — **新增**，同步 ChatService 活跃会话与加载的默认会话
+  - `platformService` 无启动依赖，用于前端读取当前平台 UI 能力。
 
 ## 5. 依赖关系
 - 内部依赖:
@@ -51,5 +52,6 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - 新增服务时需在 `App` 结构体中添加字段，在 `NewApp` 中初始化，在 `startup` 中设置上下文和依赖。
+- 无状态 Wails 服务也必须加入 `main.go` 的 `Bind` 列表，否则前端无法调用生成的 IPC 方法。
 - 会话切换回调中使用 `go sandboxService.ActivateContainer()` 异步执行，避免阻塞会话切换流程。
 - `EnsureDefaultSession` 必须在 `SetActiveSessionID` 之前调用，否则 ChatService 的活跃会话可能指向不存在的 session。

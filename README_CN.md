@@ -194,6 +194,8 @@ wails build
 
 产物输出至 `build/bin/` 目录。
 
+Starxo 会在构建时使用 Wails 的平台原生窗口壳配置。macOS 使用统一隐藏标题栏并跟随系统外观，Windows 跟随系统主题并在可用时使用 Mica，Linux 使用更保守的 GTK/WebKit fallback。Vue 内容区会跟随系统明暗模式，并应用平台化设计 token。
+
 ### Tag 发布
 
 当 `vX.Y.Z` tag 推送到可从 `master` 访问的 commit 时，GitHub Actions 会自动发布桌面安装包。
@@ -205,7 +207,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-发布工作流会构建未签名的 macOS、Windows、Linux 包，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
+发布工作流会构建未签名的 macOS、Windows、Linux 包，检查基础平台 bundle 资源，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
 
 工作流结束后需要检查：
 

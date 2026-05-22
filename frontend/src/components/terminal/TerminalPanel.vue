@@ -45,31 +45,32 @@ async function initXterm() {
     await import('@xterm/xterm/css/xterm.css')
 
     fitAddon = new FitAddon()
+    const dark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
     termInstance = new Terminal({
       theme: {
-        background: '#080a14',
-        foreground: '#c8c9d6',
-        cursor: '#22d3ee',
-        cursorAccent: '#080a14',
-        selectionBackground: 'rgba(34, 211, 238, 0.2)',
-        black: '#0c0e1a',
-        red: '#f43f5e',
-        green: '#10b981',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#c792ea',
-        cyan: '#22d3ee',
-        white: '#c8c9d6',
+        background: dark ? '#1c1c1e' : '#ffffff',
+        foreground: dark ? '#d1d1d6' : '#1d1d1f',
+        cursor: dark ? '#0a84ff' : '#007aff',
+        cursorAccent: dark ? '#1c1c1e' : '#ffffff',
+        selectionBackground: dark ? 'rgba(10, 132, 255, 0.28)' : 'rgba(0, 122, 255, 0.18)',
+        black: dark ? '#1c1c1e' : '#1d1d1f',
+        red: dark ? '#ff453a' : '#ff3b30',
+        green: dark ? '#30d158' : '#34c759',
+        yellow: dark ? '#ffd60a' : '#ff9f0a',
+        blue: dark ? '#0a84ff' : '#007aff',
+        magenta: dark ? '#bf5af2' : '#af52de',
+        cyan: dark ? '#64d2ff' : '#32ade6',
+        white: dark ? '#d1d1d6' : '#f2f2f7',
         brightBlack: '#5a5c72',
-        brightRed: '#fb7185',
-        brightGreen: '#34d399',
-        brightYellow: '#fbbf24',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#ddb6f2',
-        brightCyan: '#67e8f9',
-        brightWhite: '#f0f0f5'
+        brightRed: dark ? '#ff6961' : '#ff6961',
+        brightGreen: dark ? '#63e6be' : '#30d158',
+        brightYellow: dark ? '#ffe066' : '#ffd60a',
+        brightBlue: dark ? '#409cff' : '#0a84ff',
+        brightMagenta: dark ? '#da8fff' : '#bf5af2',
+        brightCyan: dark ? '#86e1ff' : '#64d2ff',
+        brightWhite: dark ? '#f5f5f7' : '#ffffff'
       },
-      fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace',
+      fontFamily: '"SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace',
       fontSize: 12,
       lineHeight: 1.4,
       cursorBlink: true,
@@ -315,10 +316,10 @@ onUnmounted(() => {
 
 .terminal-title {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .clear-btn {
@@ -332,7 +333,7 @@ onUnmounted(() => {
 .terminal-container {
   flex: 1;
   overflow-y: auto;
-  background: #080a14;
+  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
   padding: 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -345,7 +346,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 8px;
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
 }
 
 .terminal-prompt {
@@ -394,7 +395,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 4px 12px;
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
   border-top: 1px solid var(--border-subtle);
   font-size: var(--fs-2xs);
   font-family: var(--font-mono);
@@ -430,7 +431,6 @@ onUnmounted(() => {
 
 .status-dot.connected {
   background: var(--accent-emerald);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
 }
 
 .status-dot.disconnected {

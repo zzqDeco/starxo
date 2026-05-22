@@ -434,7 +434,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--bg-surface);
+  background: var(--platform-bg-elevated);
 }
 
 .workspace-header {
@@ -450,9 +450,9 @@ onUnmounted(() => {
 
 .workspace-title {
   font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-faint);
 }
 
@@ -467,7 +467,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-deepest);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
@@ -481,8 +481,8 @@ onUnmounted(() => {
 .meta-item span {
   color: var(--text-faint);
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .meta-item strong {
@@ -512,7 +512,7 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   border-right: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-sidebar);
 }
 
 .tree-toolbar {
@@ -539,25 +539,18 @@ onUnmounted(() => {
 }
 
 .workspace-tree :deep(.n-tree-node-content:hover) {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content) {
   position: relative;
-  background: var(--bg-elevated);
+  background: var(--platform-bg-active);
   color: var(--accent-cyan);
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content::before) {
-  content: "";
-  position: absolute;
-  left: -2px;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  background: var(--accent-cyan);
-  border-radius: 1px;
+  display: none;
 }
 
 .tree-empty {

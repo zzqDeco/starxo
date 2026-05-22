@@ -92,7 +92,7 @@ const activeContainerName = computed(() => {
   gap: var(--space-sm);
   padding: 12px 12px 10px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(2, 6, 23, 0.32);
+  background: var(--platform-bg-toolbar);
 }
 
 .runtime-title-block {
@@ -106,9 +106,9 @@ const activeContainerName = computed(() => {
   color: var(--text-faint);
   font-family: var(--font-brand);
   font-size: var(--fs-2xs);
-  font-weight: var(--fw-bold);
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .runtime-active {
@@ -139,7 +139,7 @@ const activeContainerName = computed(() => {
   height: 30px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-raised) 54%, transparent);
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
@@ -151,14 +151,14 @@ const activeContainerName = computed(() => {
 }
 
 .runtime-tab:hover {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
 .runtime-tab.active {
   color: var(--accent-cyan);
-  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-elevated));
-  border-color: rgba(34, 211, 238, 0.3);
+  background: var(--platform-bg-active);
+  border-color: color-mix(in srgb, var(--platform-accent) 26%, transparent);
 }
 
 .runtime-body {
