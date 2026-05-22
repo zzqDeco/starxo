@@ -139,12 +139,16 @@ function toggleLocale() {
   justify-content: space-between;
   height: 56px;
   padding: 0 var(--space-lg);
-  background: rgba(2, 6, 23, 0.72);
-  backdrop-filter: blur(14px);
+  background: var(--platform-bg-toolbar);
+  backdrop-filter: blur(24px) saturate(1.35);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   z-index: var(--z-sticky, 20);
   position: relative;
+}
+
+:global(:root[data-platform="macos"]) .app-header {
+  padding-left: 76px;
 }
 
 .header-left {
@@ -163,16 +167,14 @@ function toggleLocale() {
 .title-icon {
   color: var(--accent-cyan);
   display: flex;
-  filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.32));
 }
 
 .title-text {
   font-family: var(--font-brand);
   font-size: var(--fs-sm);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .header-center {
@@ -188,7 +190,7 @@ function toggleLocale() {
   height: 38px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-surface) 86%, black);
+  background: color-mix(in srgb, var(--platform-bg-raised) 72%, transparent);
   color: var(--text-secondary);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -201,9 +203,9 @@ function toggleLocale() {
 
 .command-trigger:hover,
 .command-trigger:focus-visible {
-  background: var(--bg-elevated);
-  border-color: var(--accent-cyan-dim);
-  box-shadow: var(--shadow-glow);
+  background: var(--platform-bg-raised);
+  border-color: color-mix(in srgb, var(--platform-accent) 36%, var(--border-subtle));
+  box-shadow: var(--platform-shadow-1);
 }
 
 .command-icon {
@@ -238,10 +240,10 @@ function toggleLocale() {
 }
 
 .command-kbd {
-  font-family: var(--font-brand);
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--text-muted);
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 78%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
@@ -265,10 +267,10 @@ function toggleLocale() {
 }
 
 .lang-btn {
-  font-family: var(--font-brand);
+  font-family: var(--font-sans);
   font-size: var(--fs-xs) !important;
   font-weight: var(--fw-bold) !important;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   min-width: 32px;
 }
 

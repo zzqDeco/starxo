@@ -263,13 +263,13 @@ onUnmounted(() => {
   padding: 5px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
-  background: rgba(2, 6, 23, 0.55);
+  background: color-mix(in srgb, var(--platform-bg-raised) 74%, transparent);
   color: var(--text-muted);
   font-family: var(--font-brand);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .empty-status-dot {
@@ -281,20 +281,18 @@ onUnmounted(() => {
 
 .empty-status-dot.ready {
   background: var(--accent-emerald);
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.42);
 }
 
 .empty-status-dot.offline {
   background: var(--accent-amber);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.35);
 }
 
 .empty-title {
   font-family: var(--font-brand);
   font-size: var(--fs-2xl);
-  font-weight: var(--fw-bold);
+  font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   margin: 0 0 var(--space-sm) 0;
 }
 
@@ -322,7 +320,7 @@ onUnmounted(() => {
   padding: 0 var(--space-md);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: rgba(15, 23, 42, 0.72);
+  background: color-mix(in srgb, var(--platform-bg-raised) 72%, transparent);
   color: var(--text-secondary);
   font-size: var(--fs-xs);
 }
@@ -337,7 +335,7 @@ onUnmounted(() => {
 
 .hint-card {
   padding: var(--space-md) var(--space-lg);
-  background: rgba(15, 23, 42, 0.84);
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
@@ -352,8 +350,8 @@ onUnmounted(() => {
 .hint-card:hover {
   border-color: var(--accent-cyan-dim);
   color: var(--text-primary);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-cyan);
+  background: var(--platform-bg-hover);
+  box-shadow: none;
 }
 
 .scroll-to-bottom {
@@ -378,7 +376,7 @@ onUnmounted(() => {
   background: var(--bg-hover);
   color: var(--accent-cyan);
   border-color: var(--accent-cyan-dim);
-  box-shadow: 0 4px 16px rgba(34, 211, 238, 0.15);
+  box-shadow: var(--platform-shadow-1);
 }
 
 .scroll-to-bottom.flash {
@@ -387,7 +385,7 @@ onUnmounted(() => {
 
 @keyframes scrollBtnFlash {
   0%, 100% { border-color: var(--border-subtle); }
-  50% { border-color: var(--accent-cyan); box-shadow: 0 0 12px rgba(34, 211, 238, 0.3); }
+  50% { border-color: var(--accent-cyan); box-shadow: 0 0 0 3px var(--platform-accent-soft); }
 }
 
 .scroll-btn-enter-active,
@@ -404,8 +402,8 @@ onUnmounted(() => {
 .bottom-area {
   flex-shrink: 0;
   border-top: 1px solid var(--border-subtle);
-  background: linear-gradient(180deg, rgba(7, 17, 31, 0.76) 0%, rgba(2, 6, 23, 0.96) 100%);
-  backdrop-filter: blur(14px);
+  background: var(--platform-bg-toolbar);
+  backdrop-filter: blur(24px) saturate(1.25);
 }
 
 .bottom-stack {

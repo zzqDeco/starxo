@@ -166,17 +166,18 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
   padding: var(--space-lg);
 }
 
 .settings-dialog {
   position: relative;
   z-index: 2001;
-  width: min(720px, 92vw);
-  height: min(620px, 85vh);
-  background: var(--bg-surface);
+  width: min(860px, 92vw);
+  height: min(680px, 85vh);
+  background: var(--platform-bg-elevated);
+  backdrop-filter: blur(28px) saturate(1.25);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-3);
@@ -191,6 +192,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: var(--space-md) var(--space-xl);
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
@@ -200,8 +202,7 @@ onBeforeUnmount(() => {
   font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .settings-body {
@@ -214,7 +215,7 @@ onBeforeUnmount(() => {
   width: 180px;
   flex-shrink: 0;
   padding: var(--space-md) var(--space-sm);
-  background: var(--bg-deepest);
+  background: var(--platform-bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
@@ -241,7 +242,7 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav-item:hover {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
@@ -251,9 +252,9 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav-item.active {
-  background: var(--bg-elevated);
+  background: var(--platform-bg-active);
   color: var(--accent-cyan);
-  border-left-color: var(--accent-cyan);
+  border-left-color: transparent;
 }
 
 .nav-label {
@@ -273,7 +274,7 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: var(--space-md) var(--space-xl);
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
@@ -311,7 +312,7 @@ onBeforeUnmount(() => {
 
 .settings-modal-enter-from .settings-dialog,
 .settings-modal-leave-to .settings-dialog {
-  transform: scale(0.96);
+  transform: translateY(10px);
   opacity: 0;
 }
 

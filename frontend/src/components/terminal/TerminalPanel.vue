@@ -21,6 +21,8 @@ const commandRunning = ref(false)
 
 let termInstance: any = null
 let fitAddon: any = null
+let terminalSchemeQuery: MediaQueryList | null = null
+let terminalSchemeListener: ((event: MediaQueryListEvent) => void) | null = null
 const xtermLoaded = ref(false)
 
 const sshConnected = computed(() => connectionStore.sshConnected)
@@ -37,6 +39,62 @@ function formatTime(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
 }
 
+function isDarkTerminalTheme(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
+}
+
+function terminalTheme(dark: boolean) {
+  return {
+    background: dark ? '#1c1c1e' : '#ffffff',
+    foreground: dark ? '#d1d1d6' : '#1d1d1f',
+    cursor: dark ? '#0a84ff' : '#007aff',
+    cursorAccent: dark ? '#1c1c1e' : '#ffffff',
+    selectionBackground: dark ? 'rgba(10, 132, 255, 0.28)' : 'rgba(0, 122, 255, 0.18)',
+    black: dark ? '#48484a' : '#1d1d1f',
+    red: dark ? '#ff453a' : '#ff3b30',
+    green: dark ? '#30d158' : '#34c759',
+    yellow: dark ? '#ffd60a' : '#ff9f0a',
+    blue: dark ? '#0a84ff' : '#007aff',
+    magenta: dark ? '#bf5af2' : '#af52de',
+    cyan: dark ? '#64d2ff' : '#32ade6',
+    white: dark ? '#d1d1d6' : '#3a3a3c',
+    brightBlack: dark ? '#8e8e93' : '#6e6e73',
+    brightRed: dark ? '#ff6961' : '#d70015',
+    brightGreen: dark ? '#63e6be' : '#248a3d',
+    brightYellow: dark ? '#ffe066' : '#c66a00',
+    brightBlue: dark ? '#409cff' : '#006bd6',
+    brightMagenta: dark ? '#da8fff' : '#8944ab',
+    brightCyan: dark ? '#86e1ff' : '#0071a4',
+    brightWhite: dark ? '#f5f5f7' : '#1d1d1f'
+  }
+}
+
+function applyTerminalTheme(dark = isDarkTerminalTheme()) {
+  if (termInstance && xtermLoaded.value) {
+    termInstance.options.theme = terminalTheme(dark)
+  }
+}
+
+function startTerminalThemeWatcher() {
+  if (typeof window === 'undefined' || !window.matchMedia || terminalSchemeQuery) return
+  terminalSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  terminalSchemeListener = (event: MediaQueryListEvent) => applyTerminalTheme(event.matches)
+  terminalSchemeQuery.addEventListener?.('change', terminalSchemeListener)
+  if (!terminalSchemeQuery.addEventListener) {
+    terminalSchemeQuery.addListener(terminalSchemeListener)
+  }
+}
+
+function stopTerminalThemeWatcher() {
+  if (!terminalSchemeQuery || !terminalSchemeListener) return
+  terminalSchemeQuery.removeEventListener?.('change', terminalSchemeListener)
+  if (!terminalSchemeQuery.removeEventListener) {
+    terminalSchemeQuery.removeListener(terminalSchemeListener)
+  }
+  terminalSchemeQuery = null
+  terminalSchemeListener = null
+}
+
 async function initXterm() {
   if (!terminalEl.value || xtermLoaded.value) return
   try {
@@ -46,30 +104,8 @@ async function initXterm() {
 
     fitAddon = new FitAddon()
     termInstance = new Terminal({
-      theme: {
-        background: '#080a14',
-        foreground: '#c8c9d6',
-        cursor: '#22d3ee',
-        cursorAccent: '#080a14',
-        selectionBackground: 'rgba(34, 211, 238, 0.2)',
-        black: '#0c0e1a',
-        red: '#f43f5e',
-        green: '#10b981',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#c792ea',
-        cyan: '#22d3ee',
-        white: '#c8c9d6',
-        brightBlack: '#5a5c72',
-        brightRed: '#fb7185',
-        brightGreen: '#34d399',
-        brightYellow: '#fbbf24',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#ddb6f2',
-        brightCyan: '#67e8f9',
-        brightWhite: '#f0f0f5'
-      },
-      fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace',
+      theme: terminalTheme(isDarkTerminalTheme()),
+      fontFamily: '"SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace',
       fontSize: 12,
       lineHeight: 1.4,
       cursorBlink: true,
@@ -185,6 +221,7 @@ useWailsEvent<{ step: string; percent: number }>('container:progress', (data) =>
 })
 
 onMounted(() => {
+  startTerminalThemeWatcher()
   nextTick(() => initXterm())
 })
 
@@ -194,6 +231,7 @@ onUnmounted(() => {
     termInstance = null
     xtermLoaded.value = false
   }
+  stopTerminalThemeWatcher()
 })
 
 // Handle resize
@@ -315,10 +353,10 @@ onUnmounted(() => {
 
 .terminal-title {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .clear-btn {
@@ -332,7 +370,7 @@ onUnmounted(() => {
 .terminal-container {
   flex: 1;
   overflow-y: auto;
-  background: #080a14;
+  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
   padding: 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -345,7 +383,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 8px;
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
 }
 
 .terminal-prompt {
@@ -394,7 +432,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 4px 12px;
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
   border-top: 1px solid var(--border-subtle);
   font-size: var(--fs-2xs);
   font-family: var(--font-mono);
@@ -430,7 +468,6 @@ onUnmounted(() => {
 
 .status-dot.connected {
   background: var(--accent-emerald);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
 }
 
 .status-dot.disconnected {

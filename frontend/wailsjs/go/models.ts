@@ -1414,6 +1414,27 @@ export namespace service {
 		}
 	}
 
+	export class PlatformUIInfo {
+	    platform: string;
+	    goos: string;
+	    appearance: string;
+	    supportsTranslucency: boolean;
+	    supportsMica: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new PlatformUIInfo(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.goos = source["goos"];
+	        this.appearance = source["appearance"];
+	        this.supportsTranslucency = source["supportsTranslucency"];
+	        this.supportsMica = source["supportsMica"];
+	    }
+	}
+
 	export class RuntimeLSPConfigured {
 	    language: string;
 	    executable: string;

@@ -9,6 +9,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useContainerStore } from '@/stores/containerStore'
 import { ApproveToolPermission, DenyToolPermission, GetMode, ListToolPermissionRequests } from '../wailsjs/go/service/ChatService'
+import { GetPlatformUIInfo } from '../wailsjs/go/service/PlatformService'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import type { Session } from '@/types/session'
 import type { Message, TurnEvent, InterruptEvent, ModeChangedEvent, SessionRunState } from '@/types/message'
@@ -37,6 +38,15 @@ const permissionQueue = ref<RuntimePermissionRequest[]>([])
 const permissionBusy = ref(false)
 const permissionSwitching = ref(false)
 const eventCleanups: Array<() => void> = []
+const platformInfo = ref({
+  platform: 'linux',
+  goos: 'linux',
+  appearance: 'system',
+  supportsTranslucency: false,
+  supportsMica: false,
+})
+const prefersDark = ref(false)
+let colorSchemeQuery: MediaQueryList | null = null
 const pendingPermission = computed(() => permissionQueue.value[0] || null)
 const permissionVisible = computed(() => pendingPermission.value !== null)
 const permissionQueuePosition = computed(() => {
@@ -61,54 +71,53 @@ const permissionIsInactiveSession = computed(() => {
   return !!sessionId && sessionId !== sessionStore.activeSessionId
 })
 
-// Keep palette / radius values in sync with `:root` in src/style.css.
-// Naive UI resolves theme values at component setup, so CSS custom properties
-// cannot be used here — the source of truth stays in style.css and we mirror.
-const themeOverrides: GlobalThemeOverrides = {
+const activeNaiveTheme = computed(() => prefersDark.value ? darkTheme : null)
+
+const lightThemeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#22d3ee',
-    primaryColorHover: '#67e8f9',
-    primaryColorPressed: '#0891b2',
-    primaryColorSuppl: '#22d3ee',
-    bodyColor: '#07111f',
-    cardColor: '#0f172a',
-    modalColor: '#0f172a',
-    popoverColor: '#172033',
-    tableColor: '#0f172a',
-    inputColor: '#020617',
-    actionColor: '#172033',
-    tagColor: '#172033',
-    borderColor: '#263348',
-    dividerColor: '#263348',
-    hoverColor: '#243044',
-    textColor1: '#f8fafc',
-    textColor2: '#d9e2ef',
-    textColor3: '#94a3b8',
-    placeholderColor: '#64748b',
-    fontFamily: '"Nunito", "Segoe UI", system-ui, sans-serif',
-    fontFamilyMono: '"JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace'
+    primaryColor: '#007aff',
+    primaryColorHover: '#0a84ff',
+    primaryColorPressed: '#006bd6',
+    primaryColorSuppl: '#007aff',
+    bodyColor: 'rgba(246, 246, 247, 0.82)',
+    cardColor: 'rgba(255, 255, 255, 0.78)',
+    modalColor: 'rgba(255, 255, 255, 0.9)',
+    popoverColor: 'rgba(255, 255, 255, 0.94)',
+    tableColor: 'rgba(255, 255, 255, 0.72)',
+    inputColor: 'rgba(255, 255, 255, 0.76)',
+    actionColor: 'rgba(242, 242, 247, 0.78)',
+    tagColor: 'rgba(242, 242, 247, 0.82)',
+    borderColor: 'rgba(60, 60, 67, 0.18)',
+    dividerColor: 'rgba(60, 60, 67, 0.14)',
+    hoverColor: 'rgba(0, 122, 255, 0.08)',
+    textColor1: '#1d1d1f',
+    textColor2: '#3a3a3c',
+    textColor3: '#6e6e73',
+    placeholderColor: '#8e8e93',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif',
+    fontFamilyMono: '"SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace'
   },
   Button: {
     borderRadiusMedium: '8px',
-    borderRadiusSmall: '6px',
+    borderRadiusSmall: '7px',
     fontWeight: '500'
   },
   Input: {
     borderRadius: '8px'
   },
   Card: {
-    borderRadius: '8px'
-  },
-  Modal: {
     borderRadius: '10px'
   },
+  Modal: {
+    borderRadius: '14px'
+  },
   Tag: {
-    borderRadius: '6px'
+    borderRadius: '7px'
   },
   Dropdown: {
-    borderRadius: '8px',
-    optionColorHover: '#1e2140',
-    color: '#1a1d33'
+    borderRadius: '10px',
+    optionColorHover: 'rgba(0, 122, 255, 0.08)',
+    color: 'rgba(255, 255, 255, 0.96)'
   },
   Collapse: {
     titleFontSize: '13px'
@@ -117,6 +126,109 @@ const themeOverrides: GlobalThemeOverrides = {
     tabFontWeight: '500',
     tabFontWeightActive: '600'
   }
+}
+
+const darkThemeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#0a84ff',
+    primaryColorHover: '#409cff',
+    primaryColorPressed: '#006bd6',
+    primaryColorSuppl: '#0a84ff',
+    bodyColor: 'rgba(28, 28, 30, 0.82)',
+    cardColor: 'rgba(44, 44, 46, 0.72)',
+    modalColor: 'rgba(36, 36, 38, 0.92)',
+    popoverColor: 'rgba(44, 44, 46, 0.94)',
+    tableColor: 'rgba(44, 44, 46, 0.72)',
+    inputColor: 'rgba(28, 28, 30, 0.72)',
+    actionColor: 'rgba(58, 58, 60, 0.62)',
+    tagColor: 'rgba(58, 58, 60, 0.72)',
+    borderColor: 'rgba(235, 235, 245, 0.14)',
+    dividerColor: 'rgba(235, 235, 245, 0.12)',
+    hoverColor: 'rgba(10, 132, 255, 0.16)',
+    textColor1: '#f5f5f7',
+    textColor2: '#d1d1d6',
+    textColor3: '#98989d',
+    placeholderColor: '#8e8e93',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif',
+    fontFamilyMono: '"SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace'
+  },
+  Button: {
+    borderRadiusMedium: '8px',
+    borderRadiusSmall: '7px',
+    fontWeight: '500'
+  },
+  Input: {
+    borderRadius: '8px'
+  },
+  Card: {
+    borderRadius: '10px'
+  },
+  Modal: {
+    borderRadius: '14px'
+  },
+  Tag: {
+    borderRadius: '7px'
+  },
+  Dropdown: {
+    borderRadius: '10px',
+    optionColorHover: 'rgba(10, 132, 255, 0.16)',
+    color: 'rgba(44, 44, 46, 0.96)'
+  },
+  Collapse: {
+    titleFontSize: '13px'
+  },
+  Tabs: {
+    tabFontWeight: '500',
+    tabFontWeightActive: '600'
+  }
+}
+
+const themeOverrides = computed<GlobalThemeOverrides>(() => prefersDark.value ? darkThemeOverrides : lightThemeOverrides)
+
+function applyPlatformAttributes() {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  root.dataset.platform = platformInfo.value.platform || 'linux'
+  root.dataset.theme = prefersDark.value ? 'dark' : 'light'
+  root.dataset.translucent = platformInfo.value.supportsTranslucency ? 'true' : 'false'
+}
+
+function updatePreferredTheme(matches: boolean) {
+  prefersDark.value = matches
+  applyPlatformAttributes()
+}
+
+async function initPlatformTheme() {
+  try {
+    const info = await GetPlatformUIInfo()
+    platformInfo.value = {
+      platform: info?.platform || 'linux',
+      goos: info?.goos || 'linux',
+      appearance: info?.appearance || 'system',
+      supportsTranslucency: !!info?.supportsTranslucency,
+      supportsMica: !!info?.supportsMica,
+    }
+  } catch (e) {
+    console.warn('Failed to load platform UI info:', e)
+  }
+
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    prefersDark.value = colorSchemeQuery.matches
+    const listener = (event: MediaQueryListEvent) => updatePreferredTheme(event.matches)
+    colorSchemeQuery.addEventListener?.('change', listener)
+    if (!colorSchemeQuery.addEventListener) {
+      colorSchemeQuery.addListener(listener)
+    }
+    eventCleanups.push(() => {
+      colorSchemeQuery?.removeEventListener?.('change', listener)
+      if (colorSchemeQuery && !colorSchemeQuery.removeEventListener) {
+        colorSchemeQuery.removeListener(listener)
+      }
+    })
+  }
+
+  applyPlatformAttributes()
 }
 
 /** Check if an event belongs to the currently active session */
@@ -269,6 +381,7 @@ async function restoreActiveMessages() {
 }
 
 onMounted(async () => {
+  await initPlatformTheme()
   settingsStore.loadSettings()
 
   // Load sessions (enriched with container info)
@@ -470,7 +583,7 @@ watch(() => sessionStore.activeSessionId, () => {
 </script>
 
 <template>
-  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides">
+  <NConfigProvider :theme="activeNaiveTheme" :theme-overrides="themeOverrides">
     <NMessageProvider>
       <NDialogProvider>
         <MainLayout />
@@ -561,7 +674,7 @@ watch(() => sessionStore.activeSessionId, () => {
   justify-content: space-between;
   gap: 12px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .permission-title-actions {
@@ -572,14 +685,14 @@ watch(() => sessionStore.activeSessionId, () => {
 }
 
 .permission-queue-position {
-  color: #94a3b8;
-  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
 }
 
 .permission-card {
-  background: #0b1220;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
 }
 
 .permission-session-context {
@@ -599,14 +712,14 @@ watch(() => sessionStore.activeSessionId, () => {
 }
 
 .permission-session-copy strong {
-  color: #f8fafc;
+  color: var(--text-primary);
   font-size: 13px;
 }
 
 .permission-session-label,
 .permission-session-id {
-  color: #94a3b8;
-  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -614,14 +727,14 @@ watch(() => sessionStore.activeSessionId, () => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  color: #94a3b8;
-  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
 .permission-description {
   margin: 12px 0;
-  color: #d9e2ef;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 

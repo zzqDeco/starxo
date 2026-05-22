@@ -194,6 +194,8 @@ wails build
 
 Output goes to `build/bin/`.
 
+Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens.
+
 ### Tagged Release
 
 GitHub Actions publishes desktop packages when a `vX.Y.Z` tag is pushed to a commit reachable from `master`.
@@ -205,7 +207,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow builds unsigned macOS, Windows, and Linux packages, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
+The release workflow builds unsigned macOS, Windows, and Linux packages, checks basic platform bundle resources, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
 
 After the workflow finishes, verify:
 

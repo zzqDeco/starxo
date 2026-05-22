@@ -96,7 +96,8 @@ onUnmounted(() => {
 .workspace-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(5, 6, 16, 0.46);
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(4px);
   opacity: 0;
   transition: opacity 180ms ease;
   border: none;
@@ -118,9 +119,10 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
+  background: var(--platform-bg-elevated);
+  backdrop-filter: blur(26px) saturate(1.2);
   border-left: 1px solid var(--border-subtle);
-  box-shadow: -24px 0 42px rgba(0, 0, 0, 0.35);
+  box-shadow: -24px 0 48px rgba(0, 0, 0, 0.2);
 }
 
 .workspace-panel-head {
@@ -131,14 +133,14 @@ onUnmounted(() => {
   gap: 10px;
   padding: 0 10px 0 12px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
 }
 
 .workspace-panel-title {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
 }
 

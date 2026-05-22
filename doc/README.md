@@ -10,6 +10,7 @@
 
 - Any feature, fix, refactor, or docs-only change should update the matching `doc/src/<source-file>.plan.md` files when behavior or structure changes.
 - Project-level workflow or architecture changes should also update the relevant entry docs such as `README.md`, `README_CN.md`, `AGENTS.md`, and `CLAUDE.md`.
+- Platform shell or release packaging changes should also update `doc/src/main.go.plan.md`, `doc/src/wails.json.plan.md`, and the release workflow notes.
 - Test-plan docs should describe what behavior a test file protects, not restate each assertion line-by-line.
 
 ## Branch Workflow

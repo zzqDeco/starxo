@@ -416,10 +416,10 @@ function sessionTitle(sessionID: string): string {
 
 .panel-title {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .creation-progress {
@@ -450,8 +450,8 @@ function sessionTitle(sessionID: string): string {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 0 4px;
   margin-bottom: 8px;
 }
@@ -466,24 +466,16 @@ function sessionTitle(sessionID: string): string {
 
 .container-card {
   position: relative;
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-raised) 70%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 10px 12px 10px 15px;
   margin-bottom: 8px;
-  transition: border-color var(--transition-ui), transform var(--transition-ui);
+  transition: background var(--transition-ui), border-color var(--transition-ui);
 }
 
 .container-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--text-faint);
-  transition: background var(--transition-ui);
+  display: none;
 }
 
 .container-card.status-running::before { background: var(--accent-emerald); }
@@ -493,13 +485,13 @@ function sessionTitle(sessionID: string): string {
 .container-card.status-unavailable::before { background: var(--text-faint); }
 
 .container-card:hover {
-  border-color: var(--accent-cyan-dim);
-  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--platform-accent) 24%, var(--border-subtle));
+  background: var(--platform-bg-hover);
 }
 
 .container-card.active {
-  border-color: var(--accent-cyan);
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.06) 0%, var(--bg-deepest) 100%);
+  border-color: color-mix(in srgb, var(--platform-accent) 30%, var(--border-subtle));
+  background: var(--platform-bg-active);
 }
 
 .card-header {

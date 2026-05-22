@@ -306,9 +306,9 @@ function runStateClass(sessionId: string) {
 
 .new-chat-btn {
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   border-radius: var(--radius-md) !important;
-  box-shadow: var(--shadow-cyan);
+  box-shadow: none;
 }
 
 .new-chat-btn :deep(.n-button__content) {
@@ -326,14 +326,14 @@ function runStateClass(sessionId: string) {
 }
 
 .new-chat-kbd {
-  font-family: var(--font-brand);
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.25);
-  color: rgba(255, 255, 255, 0.7);
-  letter-spacing: 0.5px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 70%, transparent);
+  color: var(--text-muted);
+  letter-spacing: 0;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -349,8 +349,8 @@ function runStateClass(sessionId: string) {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 0 8px;
   margin-bottom: 8px;
 }
@@ -405,7 +405,7 @@ function runStateClass(sessionId: string) {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 8px 10px 8px 14px;
+  padding: 8px 10px;
   min-height: 56px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -417,7 +417,7 @@ function runStateClass(sessionId: string) {
 }
 
 .session-item:hover {
-  background: color-mix(in srgb, var(--bg-hover) 82%, black);
+  background: var(--platform-bg-hover);
 }
 
 .session-item.disabled {
@@ -426,26 +426,19 @@ function runStateClass(sessionId: string) {
 }
 
 .session-item.active {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%);
-  border-color: rgba(34, 211, 238, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.04);
+  background: var(--platform-bg-active);
+  border-color: color-mix(in srgb, var(--platform-accent) 24%, transparent);
+  box-shadow: none;
 }
 
 .session-item:focus-visible {
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.25);
+  box-shadow: 0 0 0 2px var(--platform-accent-soft);
 }
 
 /* Active cyan bar */
 .active-bar {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
+  display: none;
 }
 
 .session-icon {
@@ -505,8 +498,8 @@ function runStateClass(sessionId: string) {
   font-family: var(--font-mono);
   color: var(--text-faint);
   padding: 1px 6px;
-  background: rgba(2, 6, 23, 0.72);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
+  border-radius: var(--radius-sm);
   margin-top: 2px;
   width: fit-content;
 }
@@ -541,7 +534,7 @@ function runStateClass(sessionId: string) {
   padding: 2px 6px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
-  background: rgba(2, 6, 23, 0.58);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
   color: var(--text-faint);
   font-size: 10px;
   font-family: var(--font-mono);
@@ -550,17 +543,17 @@ function runStateClass(sessionId: string) {
 
 .session-run-badge.running {
   color: var(--accent-cyan);
-  border-color: rgba(34, 211, 238, 0.28);
+  border-color: color-mix(in srgb, var(--platform-accent) 24%, transparent);
 }
 
 .session-run-badge.waiting {
   color: var(--accent-amber);
-  border-color: rgba(245, 158, 11, 0.32);
+  border-color: color-mix(in srgb, var(--accent-amber) 28%, transparent);
 }
 
 .session-run-badge.plan {
   color: var(--accent-violet);
-  border-color: rgba(167, 139, 250, 0.28);
+  border-color: color-mix(in srgb, var(--accent-violet) 24%, transparent);
 }
 
 .run-pulse {
@@ -591,17 +584,14 @@ function runStateClass(sessionId: string) {
 
 .dot-green {
   background: var(--accent-emerald);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
 }
 
 .dot-red {
   background: var(--accent-rose);
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.3);
 }
 
 .dot-yellow {
   background: var(--accent-amber);
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 .dot-grey {
@@ -611,7 +601,6 @@ function runStateClass(sessionId: string) {
 .dot-pulse {
   animation: pulse 1.5s ease-in-out infinite;
   background: var(--accent-amber);
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 /* Bottom section */
@@ -620,7 +609,7 @@ function runStateClass(sessionId: string) {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
   margin-top: 8px;
-  background: linear-gradient(180deg, transparent 0%, rgba(2, 6, 23, 0.26) 100%);
+  background: transparent;
 }
 
 .conn-strip {
@@ -665,8 +654,8 @@ function runStateClass(sessionId: string) {
 
 .conn-error {
   padding: 6px 8px;
-  background: rgba(244, 63, 94, 0.1);
-  border: 1px solid rgba(244, 63, 94, 0.25);
+  background: color-mix(in srgb, var(--accent-rose) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-rose) 24%, transparent);
   border-radius: var(--radius-md);
   margin-bottom: 8px;
 }
