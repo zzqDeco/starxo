@@ -29,12 +29,12 @@ func TestUpdateSandboxNilCancelsRunningAgentRuns(t *testing.T) {
 	defer chat.mu.Unlock()
 	require.True(t, cancelled)
 	assert.Nil(t, chat.sandbox)
-	assert.False(t, run.running)
+	assert.True(t, run.running)
 	assert.False(t, run.starting)
-	assert.Empty(t, run.currentAgent)
+	assert.Equal(t, "coding_agent", run.currentAgent)
 	assert.Nil(t, run.cancelFn)
-	assert.Zero(t, run.activeBundleGeneration)
-	assert.Empty(t, run.activeRunnerKind)
+	assert.Equal(t, uint64(7), run.activeBundleGeneration)
+	assert.Equal(t, RunnerKindDefault, run.activeRunnerKind)
 }
 
 func TestUpdateSandboxNilCancelsStartingAgentRuns(t *testing.T) {
@@ -55,17 +55,17 @@ func TestUpdateSandboxNilCancelsStartingAgentRuns(t *testing.T) {
 
 	select {
 	case <-startDone:
+		t.Fatal("startup wait channel should stay open until startup path unwinds")
 	default:
-		t.Fatal("expected starting run to be released")
 	}
 	chat.mu.Lock()
 	defer chat.mu.Unlock()
 	require.True(t, cancelled)
 	assert.False(t, run.running)
-	assert.False(t, run.starting)
-	assert.Nil(t, run.startDone)
+	assert.True(t, run.starting)
+	assert.Equal(t, startDone, run.startDone)
 	assert.Nil(t, run.cancelFn)
-	assert.Zero(t, run.pendingStartBundleGeneration)
+	assert.Equal(t, uint64(11), run.pendingStartBundleGeneration)
 }
 
 func TestUpdateSandboxNonNilKeepsRunningAgentRuns(t *testing.T) {

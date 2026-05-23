@@ -726,9 +726,9 @@ func (s *SandboxService) markActiveSandboxUnavailableIfCurrent(generation uint64
 	appCtx := s.ctx
 	s.activeContainerRegID = ""
 	s.healthSSHFailures = 0
+	mgr.DetachContainer()
 	s.mu.Unlock()
 
-	mgr.DetachContainer()
 	if deactivatedCb != nil {
 		deactivatedCb()
 	}

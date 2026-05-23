@@ -23,3 +23,4 @@
 - `DisconnectAndDestroy` 会关闭 SSH 并发出断开/停用事件；直接销毁流程由 `ContainerService` 负责发出 `container:destroyed`。
 - 手动断开、重连、销毁和 health failure 必须走统一 helper，确保 health monitor、active sandbox、Wails 事件和 `onContainerDeactivated` callback 不分叉。
 - Health monitor 使用 generation guard；旧 goroutine 返回时不得清理新 manager。
+- 停用 active sandbox 时必须在 `SandboxService` 状态锁内调用 `mgr.DetachContainer()`，避免解锁后并发激活新 sandbox 被旧停用流程误拆。

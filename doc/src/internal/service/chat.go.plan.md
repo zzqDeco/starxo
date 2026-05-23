@@ -172,8 +172,9 @@
   - 支持 Go/TypeScript/JavaScript/Python/Rust 的 server command 映射
 - Sandbox loss 收敛：
   - `UpdateSandbox(nil)` 代表 active sandbox 或 SSH connection 已不可用。
-  - 该路径会取消所有 `running` / `starting` 的 agent run，清理可见运行态并发出 `agent:error`。
-  - 运行态错误文案固定为 `Sandbox connection was lost; the agent run was stopped.`，前端依靠 `agent:run_state` 解除 composer working 状态。
+  - 该路径会向所有 `running` / `starting` 的 agent run 发出 cancel，并发出 `agent:error`。
+  - `running` / `starting`、bundle generation 和 startup channel 必须保留到原 run goroutine/startup path 自己 unwind，避免旧 goroutine 清掉新 run 或提前关闭 still-referenced bundle。
+  - 运行态错误文案固定为 `Sandbox connection was lost; the agent run was stopped.`，前端依靠后续 `agent:run_state` 解除 composer working 状态。
   - `UpdateSandbox(mgr)` 只替换 manager、invalidate runner、关闭 LSP，不取消已有 run。
 - Runtime V2 permission queue：
   - `WrapMCPToolWithPermissionCheck` 覆盖 runtime 与 MCP catalog entries
