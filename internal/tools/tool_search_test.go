@@ -120,6 +120,19 @@ func TestExecuteToolSearch_KeywordSearchUsesCanonicalMatches(t *testing.T) {
 	}
 }
 
+func TestExecuteToolSearch_HonorsEinoMaxResultsAlias(t *testing.T) {
+	state := ToolSearchState{
+		SearchablePool: []CatalogEntry{
+			{CanonicalName: "ReadOne", SearchHint: "read file", ShouldDefer: true},
+			{CanonicalName: "ReadTwo", SearchHint: "read file", ShouldDefer: true},
+		},
+	}
+	output, records := ExecuteToolSearch(ToolSearchInput{Query: "read", MaxResults: 1}, state, time.UnixMilli(103))
+	if len(output.Matches) != 1 || len(records) != 1 {
+		t.Fatalf("expected max_results alias to cap matches, output=%#v records=%#v", output, records)
+	}
+}
+
 func TestExecuteToolSearch_HiddenNonMCPSampleUsesToolNameEverywhere(t *testing.T) {
 	entry := stubDeferredBuiltinSample("hidden_builtin_sample")
 	entry.Title = "Hidden Builtin Sample"
