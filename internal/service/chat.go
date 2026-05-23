@@ -684,7 +684,7 @@ func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvi
 	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
 		return nil, nil
 	}
-	dynamicTools := einoV09ToolSearchCandidates(provider.bundle.MCPCatalog, provider.permissionContext("", mode))
+	dynamicTools := einoV09ToolSearchCandidates(provider.bundle.MCPCatalog, mode)
 	if len(dynamicTools) == 0 {
 		return nil, nil
 	}
@@ -697,7 +697,7 @@ func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvi
 	})
 }
 
-func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, permCtx tools.ToolPermissionContext) []einotool.BaseTool {
+func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, mode string) []einotool.BaseTool {
 	if catalog == nil {
 		return nil
 	}
@@ -707,7 +707,7 @@ func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, permCtx tools.ToolP
 		if !entry.ShouldDefer || entry.AlwaysLoad || entry.Tool == nil {
 			continue
 		}
-		if !einoV09PotentiallySearchable(entry, permCtx) {
+		if !einoV09PotentiallySearchable(entry, mode) {
 			continue
 		}
 		dynamicTools = append(dynamicTools, entry.Tool)
@@ -715,8 +715,14 @@ func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, permCtx tools.ToolP
 	return dynamicTools
 }
 
-func einoV09PotentiallySearchable(entry tools.CatalogEntry, permCtx tools.ToolPermissionContext) bool {
-	return tools.CanSearchCatalogEntry(entry, permCtx).Allowed
+func einoV09PotentiallySearchable(entry tools.CatalogEntry, mode string) bool {
+	if !entry.PermissionSpec.AllowSearch {
+		return false
+	}
+	if mode == "plan" && !entry.ReadOnlyEligible() {
+		return false
+	}
+	return true
 }
 
 func useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol string) bool {

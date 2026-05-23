@@ -609,11 +609,14 @@ func TestDeferredUnknownToolHandlerAllowsToolSearchEvenWithoutDeferredMatches(t 
 	}
 }
 
-func TestEinoV09ToolSearchCandidatesTrackRuntimeSearchAvailability(t *testing.T) {
+func TestEinoV09ToolSearchCandidatesKeepPolicySuperset(t *testing.T) {
 	entry := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	readOnly := stubDeferredResourceEntry("mcp__alpha__read_resource")
 	catalog := tools.NewToolCatalog()
-	if err := catalog.Register(entry); err != nil {
-		t.Fatalf("register entry: %v", err)
+	for _, entry := range []tools.CatalogEntry{entry, readOnly} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register entry: %v", err)
+		}
 	}
 	permCtx := tools.ToolPermissionContext{
 		Mode: "default",
@@ -625,19 +628,28 @@ func TestEinoV09ToolSearchCandidatesTrackRuntimeSearchAvailability(t *testing.T)
 	if len(state.SearchablePoolForMode) != 1 {
 		t.Fatalf("expected cached pending metadata to be searchable, got %#v", state.SearchablePoolForMode)
 	}
-	candidates := einoV09ToolSearchCandidates(catalog, permCtx)
-	if len(candidates) != 1 {
-		t.Fatalf("expected pending cached catalog entry to be an Eino tool_search candidate, got %d", len(candidates))
+	candidates := einoV09ToolSearchCandidates(catalog, "default")
+	if len(candidates) != 2 {
+		t.Fatalf("expected Eino tool_search candidates to include deferred policy superset, got %d", len(candidates))
 	}
 
 	permCtx.Servers["alpha"] = tools.MCPServerPermissionState{State: tools.MCPServerStatePending}
-	if candidates := einoV09ToolSearchCandidates(catalog, permCtx); len(candidates) != 0 {
-		t.Fatalf("expected pending server without cached metadata to be filtered, got %d", len(candidates))
+	if state := tools.ComputeDeferredMCPState(catalog, nil, permCtx); len(state.SearchablePoolForMode) != 0 {
+		t.Fatalf("expected runtime searchable state to filter pending server without cached metadata, got %#v", state.SearchablePoolForMode)
+	}
+	if candidates := einoV09ToolSearchCandidates(catalog, "default"); len(candidates) != 2 {
+		t.Fatalf("expected Eino schema candidates not to freeze on pending metadata state, got %d", len(candidates))
 	}
 
 	permCtx.Servers["alpha"] = tools.MCPServerPermissionState{State: tools.MCPServerStateDisabled}
-	if candidates := einoV09ToolSearchCandidates(catalog, permCtx); len(candidates) != 0 {
-		t.Fatalf("expected disabled server to be filtered, got %d", len(candidates))
+	if state := tools.ComputeDeferredMCPState(catalog, nil, permCtx); len(state.SearchablePoolForMode) != 0 {
+		t.Fatalf("expected runtime searchable state to filter disabled server, got %#v", state.SearchablePoolForMode)
+	}
+	if candidates := einoV09ToolSearchCandidates(catalog, "default"); len(candidates) != 2 {
+		t.Fatalf("expected Eino schema candidates not to freeze on disabled server state, got %d", len(candidates))
+	}
+	if candidates := einoV09ToolSearchCandidates(catalog, "plan"); len(candidates) != 1 {
+		t.Fatalf("expected plan-mode Eino schema candidates to keep only read-only trusted tools, got %d", len(candidates))
 	}
 }
 

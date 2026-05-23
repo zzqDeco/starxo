@@ -16,7 +16,7 @@ Starxo's default agent runtime is migrated to `github.com/cloudwego/eino v0.9.0-
 
 - `dynamictool/toolsearch` owns model-visible deferred tool discovery.
 - Starxo remains the authority for catalog metadata, plan-mode filtering, permission, discovered-tool persistence, and workspace guard.
-- Starxo filters Eino ToolSearch candidates through the same runtime availability rules used by the permission surface, and persists both JSON and structured search results.
+- Starxo gives Eino ToolSearch a policy-level deferred tool superset so MCP state changes do not freeze at bundle build time; runtime availability is still enforced by Starxo ToolSearchState, dynamic surface filtering, permissions, and workspace guards.
 - `toolSearchMode=model_native` currently falls back to client-side search because Eino native deferred retrieval can expose tools before Starxo records per-session discovery.
 - `summarization` and `reduction` middleware handle token-aware compact and large tool result storage.
 - `skill` loads workspace-local `.starxo/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`.
