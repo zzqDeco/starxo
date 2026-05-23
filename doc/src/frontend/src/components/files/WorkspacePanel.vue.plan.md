@@ -11,7 +11,7 @@
 - 工作区主面板，提供文件树浏览、搜索、上传/下载、预览联动、sandbox 元信息、Runtime worktree 审阅和 tmp 清理。
 
 ## 3. 输入与输出
-- 输入来源: FileService (`GetWorkspaceInfo`, `ListWorkspaceFiles`, `ReadFilePreview`, `DownloadFile`, `CleanupSandboxTmp`)、`useWorkspaceBridge` 路径打开事件、sandbox 生命周期 Wails 事件
+- 输入来源: FileService (`GetWorkspaceInfo`, `ListWorkspaceFiles`, `ReadFilePreview`, `DownloadFile`, `CleanupSandboxTmp`)、`useWorkspaceBridge` 路径打开事件、sandbox 生命周期 Wails 事件、`workspace:changed` 文件变化事件
 - 输出结果: 渲染文件树与代码预览，触发上传下载行为
 
 ## 4. 关键实现细节
@@ -27,9 +27,11 @@
   - 收到工具时间线发来的 workspace path 后，自动选择路径并加载预览
   - 收到 `container:ready` / `container:activated` / `session:switched` 后自动刷新 workspace 信息与文件树
   - 收到 `container:deactivated` / `ssh:disconnected` 后清空文件树、选中路径、预览和搜索；`container:destroyed` 只在销毁当前 tracked registry container ID 时清空
+  - 收到 `workspace:changed` 后按 session/container 过滤并 debounce 刷新；如果当前预览文件被更新则自动重载预览
 - 分栏:
   - 左侧树 + 右侧 `CodePreview`
   - 中间 `SplitHandle` 拖拽宽度（`starxo-workspace-tree-width`）
+  - 在窄 inspector 下通过 container query 自动改为树和预览上下布局，避免按钮和预览 offscreen
 - 上传:
   - 通过 `FileTransfer` 上传弹窗
 - 工作区桥接:

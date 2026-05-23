@@ -13,6 +13,7 @@ const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
 const feedback = useUiFeedback()
+const props = defineProps<{ compact?: boolean }>()
 const newChatDisabled = computed(() => sessionStore.isBusy)
 
 // Renaming state
@@ -135,7 +136,7 @@ function runStateClass(sessionId: string) {
 </script>
 
 <template>
-  <nav class="sidebar" :aria-label="t('sidebar.sessions')">
+  <nav class="sidebar" :class="{ compact: props.compact }" :aria-label="t('sidebar.sessions')">
     <!-- New Chat Button -->
     <div class="sidebar-top">
       <NButton
@@ -177,6 +178,7 @@ function runStateClass(sessionId: string) {
         :key="sess.id"
         :class="['session-item', { active: sess.id === sessionStore.activeSessionId, disabled: sessionStore.switching }]"
         :tabindex="sessionStore.switching ? -1 : 0"
+        :title="sess.title || t('sidebar.untitled')"
         role="button"
         @click="handleSessionClick(sess.id)"
         @keydown.enter="handleSessionClick(sess.id)"
@@ -669,5 +671,87 @@ function runStateClass(sessionId: string) {
 
 .conn-btn {
   margin-top: 2px;
+}
+
+.sidebar.compact {
+  align-items: center;
+  padding: 8px 6px;
+}
+
+.sidebar.compact .sidebar-top {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.sidebar.compact .new-chat-btn {
+  width: 44px;
+  min-width: 44px;
+  height: 34px;
+  padding: 0 !important;
+  margin: 0 auto;
+}
+
+.sidebar.compact .new-chat-btn :deep(.n-button__content) {
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.compact .new-chat-label,
+.sidebar.compact .new-chat-kbd,
+.sidebar.compact .section-label,
+.sidebar.compact .empty-hint,
+.sidebar.compact .session-info,
+.sidebar.compact .session-menu-btn,
+.sidebar.compact .conn-label,
+.sidebar.compact .conn-progress,
+.sidebar.compact .conn-error,
+.sidebar.compact .conn-btn {
+  display: none;
+}
+
+.sidebar.compact .sessions-list {
+  width: 100%;
+}
+
+.sidebar.compact .session-item {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0 auto 6px;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.compact .session-icon {
+  margin: 0;
+  font-size: 18px;
+}
+
+.sidebar.compact .session-item.active::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--platform-accent);
+  box-shadow: 0 0 0 2px var(--platform-bg-sidebar);
+}
+
+.sidebar.compact .sidebar-bottom {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.sidebar.compact .conn-strip {
+  margin: 0;
+  padding: 0;
+  justify-content: center;
 }
 </style>

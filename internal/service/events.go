@@ -84,6 +84,14 @@ type WorkspaceCleanupResultDTO struct {
 	ReclaimedBytes int64  `json:"reclaimedBytes"`
 }
 
+type WorkspaceChangedEvent struct {
+	SessionID   string `json:"sessionId,omitempty"`
+	ContainerID string `json:"containerID,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Action      string `json:"action,omitempty"`
+}
+
 // SandboxStatusDTO represents the current sandbox connection status.
 type SandboxStatusDTO struct {
 	SSHConnected        bool   `json:"sshConnected"`

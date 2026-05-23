@@ -56,6 +56,42 @@ func TestTimelineToolResultLimitKeepsWorktreeDiffReview(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolWorkspaceChangePath(t *testing.T) {
+	writeRaw, err := json.Marshal(tools.WriteOutput{FilePath: "/workspace/a.txt"})
+	if err != nil {
+		t.Fatalf("marshal write: %v", err)
+	}
+	path, ok := runtimeToolWorkspaceChangePath(tools.RuntimeToolWrite, string(writeRaw))
+	if !ok || path != "/workspace/a.txt" {
+		t.Fatalf("expected write workspace change path, got path=%q ok=%v", path, ok)
+	}
+
+	bashRaw, err := json.Marshal(tools.BashOutput{ExitCode: 0})
+	if err != nil {
+		t.Fatalf("marshal bash: %v", err)
+	}
+	path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolBash, string(bashRaw))
+	if !ok || path != "" {
+		t.Fatalf("expected successful bash to refresh workspace without path, got path=%q ok=%v", path, ok)
+	}
+
+	failedBashRaw, err := json.Marshal(tools.BashOutput{ExitCode: 1})
+	if err != nil {
+		t.Fatalf("marshal failed bash: %v", err)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolBash, string(failedBashRaw)); ok || path != "" {
+		t.Fatalf("expected failed bash not to emit workspace change, got path=%q ok=%v", path, ok)
+	}
+
+	notebookRaw, err := json.Marshal(tools.NotebookEditOutput{FilePath: "/workspace/a.ipynb", Command: "view"})
+	if err != nil {
+		t.Fatalf("marshal notebook: %v", err)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolNotebookEdit, string(notebookRaw)); ok || path != "/workspace/a.ipynb" {
+		t.Fatalf("expected notebook view not to refresh, got path=%q ok=%v", path, ok)
+	}
+}
+
 func TestTimelineToolResultContentKeepsLargeWorktreeDiffJSONParseable(t *testing.T) {
 	result := tools.WorktreeDiffOutput{
 		WorkspacePath:      "/workspace",

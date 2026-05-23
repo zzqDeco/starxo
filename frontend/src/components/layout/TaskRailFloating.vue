@@ -35,7 +35,7 @@ function statusClass(status: UnifiedTaskStatus) {
 </script>
 
 <template>
-  <section class="task-float" :class="{ expanded }">
+  <section v-if="taskStats.total > 0" class="task-float" :class="{ expanded }">
     <button type="button" class="task-head" @click="toggleExpanded">
       <span class="task-title">{{ t('taskRail.title') }}</span>
       <span class="task-summary">{{ taskStats.done }}/{{ taskStats.total }}</span>
@@ -89,10 +89,11 @@ function statusClass(status: UnifiedTaskStatus) {
   --task-status-done: var(--accent-emerald);
   --task-status-blocked: var(--accent-rose);
 
+  position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(23, 26, 45, 0.9) 0%, rgba(18, 21, 35, 0.95) 100%);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  border-radius: var(--radius-lg);
+  background: var(--platform-bg-toolbar);
+  box-shadow: none;
 }
 
 .task-head {
@@ -112,8 +113,8 @@ function statusClass(status: UnifiedTaskStatus) {
 .task-title {
   font-size: var(--task-font-xs);
   font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
 }
 
@@ -170,11 +171,11 @@ function statusClass(status: UnifiedTaskStatus) {
 }
 
 .task-progress {
-  height: 3px;
+  height: 2px;
   margin: 0 var(--task-space-3) var(--task-space-2);
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
 }
 
 .task-progress-fill {
@@ -184,12 +185,21 @@ function statusClass(status: UnifiedTaskStatus) {
 }
 
 .task-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
   max-height: 180px;
   overflow: auto;
-  padding: 0 var(--task-space-2) var(--task-space-2);
+  padding: var(--task-space-2);
   display: flex;
   flex-direction: column;
   gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--platform-bg-elevated);
+  box-shadow: var(--elev-2);
 }
 
 .task-empty {
@@ -205,7 +215,7 @@ function statusClass(status: UnifiedTaskStatus) {
   gap: var(--task-space-1);
   padding: var(--task-space-1) var(--task-space-2);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--platform-bg-toolbar);
   border: 1px solid transparent;
 }
 

@@ -2166,8 +2166,61 @@ func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, result s
 	switch toolName {
 	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
 		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sessionID, "action": toolName})
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{SessionID: sessionID, Source: "agent", Action: toolName})
 	case tools.RuntimeToolWorktreeDiff:
 		wailsEmit(s.ctx, "runtime:worktree_reviewed", map[string]string{"sessionId": sessionID})
+	}
+	if path, ok := runtimeToolWorkspaceChangePath(toolName, result); ok {
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+			SessionID: sessionID,
+			Path:      path,
+			Source:    "agent",
+			Action:    toolName,
+		})
+	}
+}
+
+func runtimeToolWorkspaceChangePath(toolName, result string) (string, bool) {
+	switch toolName {
+	case tools.RuntimeToolWrite, "write_file":
+		var out tools.WriteOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return out.FilePath, true
+		}
+		return "", true
+	case tools.RuntimeToolEdit, "str_replace_editor":
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return out.FilePath, true
+		}
+		return "", true
+	case tools.RuntimeToolLSPEdit:
+		var out tools.LSPEditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			if len(out.ChangedFiles) > 0 {
+				return out.ChangedFiles[0], out.EditCount > 0
+			}
+			return out.FilePath, out.EditCount > 0
+		}
+		return "", true
+	case tools.RuntimeToolNotebookEdit:
+		var out tools.NotebookEditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return out.FilePath, out.Command != "view"
+		}
+		return "", true
+	case tools.RuntimeToolBash, "shell_execute":
+		var out tools.BashOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return "", out.BackgroundTaskID == "" && out.ExitCode == 0
+		}
+		var shellOut tools.ShellOutput
+		if err := json.Unmarshal([]byte(result), &shellOut); err == nil {
+			return "", shellOut.ExitCode == 0
+		}
+		return "", true
+	default:
+		return "", false
 	}
 }
 

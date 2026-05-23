@@ -8,8 +8,8 @@
 - 所属模块: frontend/src/components/layout
 
 ## 2. 核心职责
-- 应用主布局容器，组织为“左侧会话栏 + 中央执行画布 + 右侧运行时入口”。
-- 负责工作区抽屉、运行任务面板、命令面板、面板宽度拖拽持久化和设置面板显隐。
+- 应用主布局容器，组织为“左侧会话栏 + 中央执行画布 + 右侧 inspector”。
+- 负责 workspace/runtime inspector 互斥、工作区抽屉、运行任务面板、命令面板、面板宽度拖拽持久化和设置面板显隐。
 - 监听工作区路径桥接事件，确保时间线里的文件路径能打开工作区抽屉。
 
 ## 3. 输入与输出
@@ -23,20 +23,24 @@
   - `showRuntimeTasks` — Runtime Tasks 面板开关
   - `showPalette` — 命令面板开关
   - `leftWidth` — 左侧栏宽度（默认 240）
-  - `containerDockWidth` — 右侧容器区宽度（默认 360）
+  - `runtimeDockWidth` — runtime inspector 宽度（默认 360）
+  - `workspaceInspectorWidth` — workspace inspector 宽度（默认 620）
+  - `inspectorMode` — 桌面端右侧 inspector 模式，`runtime` / `workspace` / `null`
 - 响应式计算:
   - `effectiveLeftWidth`: 窗口小于 900 时限制左侧宽度
-  - `effectiveDockWidth`: 窗口小于 1280 时限制容器区宽度
+  - `effectiveDockWidth`: 按当前 inspector 模式和窗口宽度约束右侧宽度
+  - `isSidebarCompact`: workspace inspector 打开或宽度不足时把左侧栏压缩为 compact rail
 - 布局结构:
   - `Sidebar` + 左分割条
   - 中央 `Header + ChatPanel`
-  - `WorkspaceDrawer` 以覆盖层方式挂在聊天区内
-  - 右侧 `ContainerDock` 常驻
+  - 桌面端右侧 inspector 在 `WorkspacePanel` 与 `ContainerDock` 间互斥切换
+  - 窄屏下 `WorkspaceDrawer` 与 responsive `ContainerDock` overlay 互斥
   - SettingsPanel / CommandPalette / WorkspaceDrawer / ContainerDock / RuntimeTasksPanel 使用 async component 降低首包
   - `onWorkspaceOpenPath()` 打开 WorkspaceDrawer；路径选择由 WorkspacePanel 消费 pending path
 - 拖拽持久化 key:
   - `starxo-left-panel-width`
-  - `starxo-container-dock-width`
+  - `starxo-runtime-inspector-width`
+  - `starxo-workspace-inspector-width`
 
 ## 5. 依赖关系
 - 内部依赖:
@@ -47,7 +51,7 @@
 
 ## 6. 变更影响面
 - 右侧旧 Tab 面板（Terminal/Files/Containers）已移除。
-- 工作区从常驻区域改为按需抽屉，容器控制改为常驻 Dock。
+- 工作区从桌面覆盖抽屉改为 inspector，容器控制和 workspace 不再同时挤占右侧区域。
 - Header 新增 `toggle-runtime-tasks` 事件；CommandPalette 新增 `open-runtime-tasks` 事件。
 
 ## 7. 维护建议

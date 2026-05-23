@@ -10,6 +10,7 @@
 - `ActivateContainer` 通过 runtime ID 和 workspacePath 激活已有 sandbox。
 - `DeactivateContainer` 只清除当前 operator/runtime 激活状态，不删除 workspace。
 - `RunTerminalCommand` 在当前 active sandbox workspace 中执行用户提交的非交互式 shell 命令。
+  - 命令成功退出后发出 `workspace:changed`，让 workspace inspector 自动刷新 terminal 产物。
 - `GetStatus` 同时返回新 `runtimeAvailable/sandboxActive/activeSandbox*` 字段和旧 Docker/Container 兼容字段。
 
 ## 维护要点

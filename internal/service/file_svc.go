@@ -115,6 +115,12 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 	if err := transfer.UploadToContainer(s.ctx, localPath, containerPath, runtime); err != nil {
 		return FileInfoDTO{}, fmt.Errorf("upload failed: %w", err)
 	}
+	wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+		ContainerID: s.sandbox.ActiveContainerRegID(),
+		Path:        containerPath,
+		Source:      "file",
+		Action:      "upload",
+	})
 
 	return FileInfoDTO{
 		Name:     baseName,

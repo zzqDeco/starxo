@@ -17,10 +17,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { width: windowWidth } = useWindowSize()
-const drawerWidth = ref(980)
+const drawerWidth = ref(760)
 
-const minDrawerWidth = computed(() => Math.floor(Math.min(560, windowWidth.value * 0.9)))
-const maxDrawerWidth = computed(() => Math.max(900, Math.floor(windowWidth.value * 0.82)))
+const minDrawerWidth = computed(() => Math.max(320, Math.min(420, windowWidth.value - 24)))
+const maxDrawerWidth = computed(() => Math.max(320, windowWidth.value - 24))
 const effectiveDrawerWidth = computed(() => {
   const clamped = Math.min(drawerWidth.value, maxDrawerWidth.value)
   return Math.max(minDrawerWidth.value, clamped)
@@ -59,7 +59,7 @@ onUnmounted(() => {
     <div class="workspace-group">
       <SplitHandle
         direction="horizontal"
-        :default-size="980"
+        :default-size="760"
         :min-size="minDrawerWidth"
         :max-size="maxDrawerWidth"
         :reverse="true"

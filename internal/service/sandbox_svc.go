@@ -507,6 +507,8 @@ func (s *SandboxService) RunTerminalCommand(command string) (TerminalCommandResu
 	s.mu.RLock()
 	mgr := s.manager
 	appCtx := s.ctx
+	eventCtx := s.ctx
+	activeContainerID := s.activeContainerRegID
 	s.mu.RUnlock()
 	if appCtx == nil {
 		appCtx = context.Background()
@@ -527,6 +529,13 @@ func (s *SandboxService) RunTerminalCommand(command string) (TerminalCommandResu
 	if err != nil {
 		result := TerminalCommandResult{Command: command, Stderr: err.Error(), ExitCode: -1}
 		return result, err
+	}
+	if output.ExitCode == 0 {
+		wailsEmit(eventCtx, "workspace:changed", WorkspaceChangedEvent{
+			ContainerID: activeContainerID,
+			Source:      "terminal",
+			Action:      "command",
+		})
 	}
 	return TerminalCommandResult{
 		Command:  command,
