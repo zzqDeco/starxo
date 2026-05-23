@@ -312,7 +312,7 @@ function handleTitlebarDoubleClick() {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--space-md);
+  padding: 12px 8px 10px;
   background: transparent;
   position: relative;
 }
@@ -323,24 +323,24 @@ function handleTitlebarDoubleClick() {
 
 .sidebar-top {
   flex-shrink: 0;
-  margin-bottom: var(--space-lg);
+  margin-bottom: 12px;
 }
 
 .new-chat-btn {
-  --n-color: color-mix(in srgb, var(--platform-bg-raised) 90%, transparent) !important;
-  --n-color-hover: color-mix(in srgb, var(--platform-accent) 10%, var(--platform-bg-raised)) !important;
-  --n-color-pressed: color-mix(in srgb, var(--platform-accent) 16%, var(--platform-bg-raised)) !important;
-  --n-color-focus: color-mix(in srgb, var(--platform-accent) 10%, var(--platform-bg-raised)) !important;
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
   --n-border: 1px solid var(--border-subtle) !important;
-  --n-border-hover: 1px solid color-mix(in srgb, var(--platform-accent) 30%, var(--border-subtle)) !important;
-  --n-border-pressed: 1px solid color-mix(in srgb, var(--platform-accent) 34%, var(--border-subtle)) !important;
-  --n-border-focus: 1px solid color-mix(in srgb, var(--platform-accent) 34%, var(--border-subtle)) !important;
+  --n-border-hover: 1px solid var(--border-strong) !important;
+  --n-border-pressed: 1px solid var(--border-strong) !important;
+  --n-border-focus: 1px solid var(--border-strong) !important;
   --n-text-color: var(--text-primary) !important;
   --n-text-color-hover: var(--text-primary) !important;
   --n-text-color-pressed: var(--text-primary) !important;
   --n-text-color-focus: var(--text-primary) !important;
   --n-ripple-color: transparent !important;
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
   letter-spacing: 0;
   border-radius: var(--radius-md) !important;
   box-shadow: none;
@@ -382,7 +382,7 @@ function handleTitlebarDoubleClick() {
 
 .section-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-faint);
   text-transform: none;
   letter-spacing: 0;
@@ -439,10 +439,10 @@ function handleTitlebarDoubleClick() {
 .session-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
-  min-height: 50px;
-  border-radius: var(--radius-md);
+  gap: 8px;
+  padding: 7px 8px;
+  min-height: 46px;
+  border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
   transition: background var(--transition-ui), border-color var(--transition-ui), box-shadow var(--transition-ui);
@@ -452,7 +452,7 @@ function handleTitlebarDoubleClick() {
 }
 
 .session-item:hover {
-  background: color-mix(in srgb, var(--platform-bg-raised) 70%, transparent);
+  background: var(--platform-bg-hover);
 }
 
 .session-item.disabled {
@@ -461,7 +461,7 @@ function handleTitlebarDoubleClick() {
 }
 
 .session-item.active {
-  background: color-mix(in srgb, var(--platform-bg-raised) 94%, var(--platform-bg-sidebar));
+  background: var(--platform-bg-active);
   border-color: transparent;
   box-shadow: none;
 }
@@ -473,8 +473,8 @@ function handleTitlebarDoubleClick() {
 }
 
 :global(:root[data-platform="macos"] .session-item.active){
-  background: color-mix(in srgb, var(--platform-bg-raised) 94%, var(--platform-bg-sidebar));
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 52%, transparent);
+  background: var(--platform-bg-active);
+  box-shadow: none;
 }
 
 :global(:root[data-platform="macos"] .session-title){
@@ -482,7 +482,7 @@ function handleTitlebarDoubleClick() {
 }
 
 .session-item:focus-visible {
-  border-color: var(--accent-cyan);
+  border-color: var(--border-strong);
   box-shadow: 0 0 0 2px var(--platform-accent-soft);
 }
 
@@ -511,7 +511,7 @@ function handleTitlebarDoubleClick() {
 
 .session-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -549,11 +549,11 @@ function handleTitlebarDoubleClick() {
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--text-faint);
-  padding: 1px 6px;
-  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
-  border-radius: var(--radius-sm);
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
   margin-top: 2px;
   width: fit-content;
 }
@@ -571,7 +571,7 @@ function handleTitlebarDoubleClick() {
 }
 
 :global(:root[data-platform="macos"] .sidebar){
-  padding: 46px 8px 10px;
+  padding: 44px 8px 10px;
 }
 
 :global(:root[data-platform="macos"] .sidebar-window-hit-area){
@@ -630,13 +630,13 @@ function handleTitlebarDoubleClick() {
   width: fit-content;
   max-width: 100%;
   margin-top: 3px;
-  padding: 2px 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-faint);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   line-height: 1.2;
 }
 
@@ -706,7 +706,7 @@ function handleTitlebarDoubleClick() {
 .sidebar-bottom {
   flex-shrink: 0;
   border-top: 1px solid var(--border-subtle);
-  padding-top: 12px;
+  padding-top: 10px;
   margin-top: 8px;
   background: transparent;
 }
@@ -767,14 +767,14 @@ function handleTitlebarDoubleClick() {
 }
 
 .conn-btn {
-  --n-color: color-mix(in srgb, var(--platform-bg-raised) 88%, transparent) !important;
-  --n-color-hover: color-mix(in srgb, var(--platform-accent) 10%, var(--platform-bg-raised)) !important;
-  --n-color-pressed: color-mix(in srgb, var(--platform-accent) 16%, var(--platform-bg-raised)) !important;
-  --n-color-focus: color-mix(in srgb, var(--platform-accent) 10%, var(--platform-bg-raised)) !important;
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
   --n-border: 1px solid var(--border-subtle) !important;
-  --n-border-hover: 1px solid color-mix(in srgb, var(--platform-accent) 30%, var(--border-subtle)) !important;
-  --n-border-pressed: 1px solid color-mix(in srgb, var(--platform-accent) 34%, var(--border-subtle)) !important;
-  --n-border-focus: 1px solid color-mix(in srgb, var(--platform-accent) 34%, var(--border-subtle)) !important;
+  --n-border-hover: 1px solid var(--border-strong) !important;
+  --n-border-pressed: 1px solid var(--border-strong) !important;
+  --n-border-focus: 1px solid var(--border-strong) !important;
   --n-text-color: var(--text-primary) !important;
   --n-text-color-hover: var(--text-primary) !important;
   --n-text-color-pressed: var(--text-primary) !important;
@@ -797,7 +797,11 @@ function handleTitlebarDoubleClick() {
 
 .sidebar.compact {
   align-items: center;
-  padding: 8px 6px;
+  padding: 10px 6px;
+}
+
+:global(:root[data-platform="macos"] .sidebar.compact){
+  padding-top: 44px;
 }
 
 .sidebar.compact .sidebar-top {
@@ -876,7 +880,7 @@ function handleTitlebarDoubleClick() {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--platform-accent);
+  background: var(--text-muted);
   box-shadow: 0 0 0 2px var(--platform-bg-sidebar);
 }
 

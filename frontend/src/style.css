@@ -12,35 +12,35 @@
   /* Platform design tokens. Defaults are macOS-like; Windows/Linux override below. */
   --platform-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --platform-font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
-  --platform-bg-window: rgba(246, 246, 247, 0.82);
-  --platform-bg-content: rgba(255, 255, 255, 0.62);
-  --platform-bg-sidebar: rgba(242, 242, 247, 0.68);
-  --platform-bg-toolbar: rgba(248, 248, 250, 0.72);
-  --platform-bg-elevated: rgba(255, 255, 255, 0.84);
-  --platform-bg-raised: rgba(255, 255, 255, 0.96);
-  --platform-bg-hover: rgba(0, 122, 255, 0.08);
-  --platform-bg-active: rgba(0, 122, 255, 0.14);
-  --platform-separator: rgba(60, 60, 67, 0.16);
-  --platform-separator-strong: rgba(60, 60, 67, 0.26);
+  --platform-bg-window: #f5f5f7;
+  --platform-bg-content: #ffffff;
+  --platform-bg-sidebar: rgba(244, 244, 246, 0.84);
+  --platform-bg-toolbar: rgba(248, 248, 249, 0.88);
+  --platform-bg-elevated: #ffffff;
+  --platform-bg-raised: #f7f7f8;
+  --platform-bg-hover: rgba(60, 60, 67, 0.07);
+  --platform-bg-active: rgba(60, 60, 67, 0.12);
+  --platform-separator: rgba(60, 60, 67, 0.14);
+  --platform-separator-strong: rgba(60, 60, 67, 0.22);
   --platform-text-primary: #1d1d1f;
   --platform-text-secondary: #3a3a3c;
   --platform-text-muted: #6e6e73;
   --platform-text-faint: #8e8e93;
-  --platform-accent: #007aff;
-  --platform-accent-hover: #0a84ff;
-  --platform-accent-soft: rgba(0, 122, 255, 0.12);
+  --platform-accent: #0a66c2;
+  --platform-accent-hover: #0958a8;
+  --platform-accent-soft: rgba(10, 102, 194, 0.1);
   --platform-success: #34c759;
   --platform-success-dim: #248a3d;
   --platform-warning: #ff9f0a;
   --platform-warning-dim: #c66a00;
   --platform-danger: #ff3b30;
   --platform-danger-dim: #d70015;
-  --platform-radius-control: 8px;
-  --platform-radius-panel: 12px;
-  --platform-radius-window: 14px;
-  --platform-shadow-1: 0 1px 1px rgba(0, 0, 0, 0.08);
-  --platform-shadow-2: 0 8px 26px rgba(0, 0, 0, 0.12);
-  --platform-shadow-3: 0 24px 70px rgba(0, 0, 0, 0.22);
+  --platform-radius-control: 7px;
+  --platform-radius-panel: 9px;
+  --platform-radius-window: 12px;
+  --platform-shadow-1: 0 1px 1px rgba(0, 0, 0, 0.04);
+  --platform-shadow-2: 0 10px 34px rgba(0, 0, 0, 0.1);
+  --platform-shadow-3: 0 26px 80px rgba(0, 0, 0, 0.2);
 
   /* Compatibility aliases used by existing components. */
   --bg-deepest: var(--platform-bg-window);
@@ -58,8 +58,8 @@
   --accent-cyan: var(--platform-accent);
   --accent-cyan-hover: var(--platform-accent-hover);
   --accent-cyan-dim: var(--platform-accent);
-  --accent-violet: #af52de;
-  --accent-violet-dim: #8944ab;
+  --accent-violet: #8e8e93;
+  --accent-violet-dim: #6e6e73;
   --accent-amber: var(--platform-warning);
   --accent-amber-dim: var(--platform-warning-dim);
   --accent-rose: var(--platform-danger);
@@ -67,8 +67,8 @@
   --accent-emerald: var(--platform-success);
   --accent-emerald-dim: var(--platform-success-dim);
   --accent-blue: var(--platform-accent);
-  --accent-sky: #5ac8fa;
-  --accent-mint: #30d158;
+  --accent-sky: #6e6e73;
+  --accent-mint: #6e6e73;
 
   --font-sans: var(--platform-font-sans);
   --font-mono: var(--platform-font-mono);
@@ -131,14 +131,14 @@
   --space-2xl: 32px;
 
   /* Colored shadows */
-  --shadow-cyan: 0 8px 22px rgba(0, 122, 255, 0.08);
-  --shadow-violet: 0 8px 22px rgba(175, 82, 222, 0.08);
+  --shadow-cyan: 0 1px 1px rgba(0, 0, 0, 0.04);
+  --shadow-violet: 0 1px 1px rgba(0, 0, 0, 0.04);
   --shadow-glow: 0 0 0 1px var(--platform-accent-soft), var(--platform-shadow-1);
   --shadow-glow-violet: 0 0 0 1px rgba(175, 82, 222, 0.12), var(--platform-shadow-1);
 
   /* Gradients */
-  --gradient-user-bubble: linear-gradient(180deg, rgba(0, 122, 255, 0.08), rgba(0, 122, 255, 0.04));
-  --gradient-accent: linear-gradient(180deg, var(--platform-accent-hover), var(--platform-accent));
+  --gradient-user-bubble: linear-gradient(180deg, rgba(60, 60, 67, 0.08), rgba(60, 60, 67, 0.04));
+  --gradient-accent: linear-gradient(180deg, #1472ca, var(--platform-accent));
   --gradient-workbench: var(--platform-bg-window);
 
   /* Splitter */
@@ -156,23 +156,23 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --platform-bg-window: rgba(28, 28, 30, 0.86);
-  --platform-bg-content: rgba(30, 30, 32, 0.72);
-  --platform-bg-sidebar: rgba(36, 36, 38, 0.68);
-  --platform-bg-toolbar: rgba(44, 44, 46, 0.7);
-  --platform-bg-elevated: rgba(44, 44, 46, 0.78);
-  --platform-bg-raised: rgba(58, 58, 60, 0.88);
-  --platform-bg-hover: rgba(10, 132, 255, 0.16);
-  --platform-bg-active: rgba(10, 132, 255, 0.24);
+  --platform-bg-window: #1e1e20;
+  --platform-bg-content: #242426;
+  --platform-bg-sidebar: rgba(40, 40, 42, 0.84);
+  --platform-bg-toolbar: rgba(46, 46, 48, 0.88);
+  --platform-bg-elevated: #2c2c2e;
+  --platform-bg-raised: #3a3a3c;
+  --platform-bg-hover: rgba(235, 235, 245, 0.08);
+  --platform-bg-active: rgba(235, 235, 245, 0.12);
   --platform-separator: rgba(235, 235, 245, 0.13);
   --platform-separator-strong: rgba(235, 235, 245, 0.22);
   --platform-text-primary: #f5f5f7;
   --platform-text-secondary: #d1d1d6;
   --platform-text-muted: #98989d;
   --platform-text-faint: #8e8e93;
-  --platform-accent: #0a84ff;
-  --platform-accent-hover: #409cff;
-  --platform-accent-soft: rgba(10, 132, 255, 0.18);
+  --platform-accent: #4da3ff;
+  --platform-accent-hover: #76b9ff;
+  --platform-accent-soft: rgba(77, 163, 255, 0.16);
   --platform-success: #30d158;
   --platform-success-dim: #248a3d;
   --platform-warning: #ffd60a;
@@ -255,8 +255,34 @@ body {
 
 /* Selection */
 ::selection {
-  background: rgba(34, 211, 238, 0.25);
+  background: var(--platform-accent-soft);
   color: var(--text-primary);
+}
+
+:root[data-platform="macos"] .n-button,
+:root[data-platform="macos"] .n-input,
+:root[data-platform="macos"] .n-tag,
+:root[data-platform="macos"] .n-base-selection {
+  letter-spacing: 0;
+}
+
+:root[data-platform="macos"] .n-button {
+  --n-ripple-color: transparent !important;
+  font-weight: 500 !important;
+}
+
+:root[data-platform="macos"] .n-button--primary-type {
+  box-shadow: none !important;
+}
+
+:root[data-platform="macos"] .n-input {
+  --n-border-radius: 7px !important;
+}
+
+:root[data-platform="macos"] .n-card,
+:root[data-platform="macos"] .n-collapse,
+:root[data-platform="macos"] .n-modal {
+  box-shadow: none;
 }
 
 :focus-visible {

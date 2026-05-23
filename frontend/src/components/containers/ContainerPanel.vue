@@ -410,7 +410,7 @@ function sessionTitle(sessionID: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
@@ -422,14 +422,14 @@ function sessionTitle(sessionID: string): string {
 }
 
 .create-sandbox-btn {
-  --n-color: color-mix(in srgb, var(--platform-bg-raised) 88%, transparent) !important;
-  --n-color-hover: color-mix(in srgb, var(--platform-bg-hover) 48%, var(--platform-bg-raised)) !important;
-  --n-color-pressed: color-mix(in srgb, var(--platform-bg-active) 52%, var(--platform-bg-raised)) !important;
-  --n-color-focus: color-mix(in srgb, var(--platform-bg-hover) 48%, var(--platform-bg-raised)) !important;
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
   --n-border: 1px solid var(--border-subtle) !important;
-  --n-border-hover: 1px solid color-mix(in srgb, var(--platform-accent) 24%, var(--border-subtle)) !important;
-  --n-border-pressed: 1px solid color-mix(in srgb, var(--platform-accent) 28%, var(--border-subtle)) !important;
-  --n-border-focus: 1px solid color-mix(in srgb, var(--platform-accent) 28%, var(--border-subtle)) !important;
+  --n-border-hover: 1px solid var(--border-strong) !important;
+  --n-border-pressed: 1px solid var(--border-strong) !important;
+  --n-border-focus: 1px solid var(--border-strong) !important;
   --n-text-color: var(--text-primary) !important;
   --n-text-color-hover: var(--text-primary) !important;
   --n-text-color-pressed: var(--text-primary) !important;
@@ -439,9 +439,9 @@ function sessionTitle(sessionID: string): string {
 }
 
 .panel-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text-faint);
   text-transform: none;
   letter-spacing: 0;
 }
@@ -462,16 +462,16 @@ function sessionTitle(sessionID: string): string {
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 8px;
 }
 
 .section {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .section-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-faint);
   text-transform: none;
   letter-spacing: 0;
@@ -491,9 +491,9 @@ function sessionTitle(sessionID: string): string {
   position: relative;
   background: transparent;
   border: 1px solid transparent;
-  border-bottom-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  border-bottom-color: var(--border-subtle);
   border-radius: 0;
-  padding: 9px 8px;
+  padding: 8px 6px;
   margin-bottom: 0;
   transition: background var(--transition-ui), border-color var(--transition-ui);
 }
@@ -511,14 +511,14 @@ function sessionTitle(sessionID: string): string {
 .container-card:hover {
   border-color: transparent;
   border-bottom-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
-  background: color-mix(in srgb, var(--platform-bg-raised) 64%, transparent);
+  background: var(--platform-bg-hover);
 }
 
 .container-card.active {
   border-color: transparent;
   border-bottom-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
-  background: color-mix(in srgb, var(--platform-bg-raised) 82%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 58%, transparent);
+  background: var(--platform-bg-active);
+  box-shadow: none;
 }
 
 .card-header {
@@ -535,7 +535,7 @@ function sessionTitle(sessionID: string): string {
 
 .card-name {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
   flex: 1;
   overflow: hidden;
@@ -553,7 +553,7 @@ function sessionTitle(sessionID: string): string {
 .detail-item {
   font-size: 11px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 
 .detail-session {
@@ -577,8 +577,8 @@ function sessionTitle(sessionID: string): string {
   flex-shrink: 0;
   padding: 1px 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--platform-bg-toolbar) 78%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
+  background: transparent;
+  border: 0;
   color: var(--text-muted);
   font-size: 10.5px;
   font-weight: var(--fw-medium);
@@ -607,7 +607,7 @@ function sessionTitle(sessionID: string): string {
 
 .status-badge.is-active {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
+  background: transparent;
 }
 
 .status-badge.is-running .status-dot {

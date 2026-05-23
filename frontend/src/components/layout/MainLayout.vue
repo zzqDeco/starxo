@@ -54,7 +54,7 @@ useKeybinds([
 ])
 
 // Resizable panel widths
-const leftWidth = ref(240)
+const leftWidth = ref(220)
 const runtimeDockWidth = ref(360)
 const workspaceInspectorWidth = ref(620)
 
@@ -74,12 +74,12 @@ const isSidebarCompact = computed(() => !isBelow768.value && (workspaceInspector
 const leftMinSize = computed(() => {
   if (isBelow768.value) return 0
   if (isBelow992.value) return 160
-  return 200
+  return 188
 })
 
 const leftMaxSize = computed(() => {
   if (isBelow992.value) return 280
-  return 360
+  return 320
 })
 
 const dockMinSize = computed(() => {
@@ -99,7 +99,7 @@ const effectiveLeftWidth = computed(() => {
   if (isBelow992.value) {
     return Math.min(leftWidth.value, 220)
   }
-  return leftWidth.value
+  return Math.min(leftWidth.value, 260)
 })
 
 const effectiveDockWidth = computed(() => {
@@ -386,7 +386,7 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   background: var(--platform-bg-sidebar);
-  backdrop-filter: blur(24px) saturate(1.45);
+  backdrop-filter: blur(22px) saturate(1.18);
   border-right: 1px solid var(--border-subtle);
   flex-shrink: 0;
   overflow: hidden;
@@ -410,7 +410,7 @@ onUnmounted(() => {
   display: flex;
   min-height: 0;
   overflow: hidden;
-  padding: 8px;
+  padding: 0;
   gap: 0;
 }
 
@@ -421,10 +421,9 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   background: var(--platform-bg-content);
-  backdrop-filter: blur(18px) saturate(1.18);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--elev-1);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .chat-area {
@@ -444,17 +443,18 @@ onUnmounted(() => {
 .inspector-panel {
   height: 100%;
   background: var(--platform-bg-elevated);
-  backdrop-filter: blur(18px) saturate(1.18);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--elev-1);
+  backdrop-filter: blur(18px) saturate(1.08);
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0;
+  box-shadow: none;
   flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
 }
 
 .inspector-panel.mode-workspace {
-  background: var(--platform-bg-content);
+  background: var(--platform-bg-elevated);
 }
 
 :global(:root[data-platform="macos"] .content-area){

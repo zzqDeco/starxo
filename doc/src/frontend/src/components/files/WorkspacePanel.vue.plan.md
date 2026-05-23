@@ -20,7 +20,7 @@
   - 目录优先排序，名称字典序排序
 - 交互:
   - 顶部按钮：上传、下载、刷新、复制 workspace 路径、清理 tmp
-  - 元信息栏展示 active sandbox、runtime、SSH host、workspace path、文件数量和大小
+  - 元信息栏以 inspector 密度展示 active sandbox、runtime、SSH host、workspace path；文件数量和大小仍由后端提供但不在窄右栏里抢占首屏视觉。
   - `WorktreeReviewPanel` 展示当前 session active worktree，并支持 review/merge/exit keep
   - 搜索过滤：按 `path/name` 匹配
   - 选择文件后加载预览内容
@@ -53,6 +53,7 @@
 ## 6. 变更影响面
 - 替代旧 FileExplorer 组合，提升工作区浏览与预览一体化体验。
 - 工作区抽屉现在能展示 Runtime V2 worktree 状态，不再只显示原 sandbox workspace。
+- macOS native pass 后，WorkspacePanel 更接近 Xcode/VS Code inspector：顶部工具栏低高度、元信息分组行、文件树选中态使用系统灰底，不使用强调色边条。
 
 ## 7. 维护建议
 - 若加入大目录懒加载，优先在 `buildTree` 层做虚拟化或按需展开。

@@ -134,10 +134,7 @@ onUnmounted(() => {
       @scroll="onScroll"
     >
       <div v-if="!hasMessages" class="empty-state">
-        <div class="empty-kicker">
-          <span :class="['empty-status-dot', connectionStore.isReady ? 'ready' : 'offline']"></span>
-          {{ connectionStore.isReady ? t('chat.sandboxReady') : t('chat.sandboxRequired') }}
-        </div>
+        <span :class="['empty-status-dot', connectionStore.isReady ? 'ready' : 'offline']" aria-hidden="true"></span>
         <h2 class="empty-title">{{ t('chat.workbenchTitle') }}</h2>
         <p class="empty-subtitle">
           {{ connectionStore.isReady
@@ -232,7 +229,7 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--space-lg) 0;
+  padding: 18px 0;
 }
 
 :global(:root[data-platform="macos"] .messages-area){
@@ -255,36 +252,22 @@ onUnmounted(() => {
 .empty-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   height: 100%;
-  padding: 48px 24px;
-  text-align: center;
-  animation: fadeIn 600ms ease both;
-}
-
-.empty-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
-  padding: 5px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--platform-bg-raised) 74%, transparent);
-  color: var(--text-muted);
-  font-family: var(--font-brand);
-  font-size: var(--fs-2xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0;
-  text-transform: none;
+  width: min(580px, 100%);
+  margin: 0 auto;
+  padding: 48px 32px;
+  text-align: left;
+  animation: fadeIn 220ms ease both;
 }
 
 .empty-status-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--text-faint);
+  margin-bottom: 14px;
 }
 
 .empty-status-dot.ready {
@@ -297,40 +280,49 @@ onUnmounted(() => {
 
 .empty-title {
   font-family: var(--font-brand);
-  font-size: var(--fs-2xl);
+  font-size: 20px;
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
   letter-spacing: 0;
-  margin: 0 0 var(--space-sm) 0;
+  margin: 0 0 6px 0;
 }
 
 .empty-subtitle {
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   color: var(--text-muted);
-  margin: 0 0 var(--space-xl) 0;
-  max-width: 520px;
+  margin: 0 0 18px 0;
+  max-width: 440px;
 }
 
 .empty-capabilities {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-sm);
-  width: min(620px, 100%);
-  margin-bottom: var(--space-xl);
+  grid-template-columns: 1fr;
+  gap: 0;
+  width: min(360px, 100%);
+  margin-bottom: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--platform-bg-raised);
 }
 
 .capability-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  min-height: 40px;
-  padding: 0 var(--space-md);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--platform-bg-raised) 72%, transparent);
-  color: var(--text-secondary);
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
   font-size: var(--fs-xs);
+}
+
+.capability-item:last-child {
+  border-bottom: 0;
 }
 
 :global(:root[data-platform="macos"] .capability-item),
@@ -341,29 +333,28 @@ onUnmounted(() => {
 }
 
 .empty-hints {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-  justify-content: center;
-  max-width: 620px;
+  display: grid;
+  gap: 6px;
+  width: min(420px, 100%);
 }
 
 .hint-card {
-  padding: var(--space-md) var(--space-lg);
-  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
+  padding: 7px 10px;
+  background: transparent;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: 7px;
   color: var(--text-secondary);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   font-family: var(--font-sans);
   cursor: pointer;
+  text-align: left;
   transition: border-color var(--transition-ui), color var(--transition-ui),
     background var(--transition-ui),
     box-shadow var(--transition-ui);
 }
 
 .hint-card:hover {
-  border-color: var(--accent-cyan-dim);
+  border-color: var(--border-strong);
   color: var(--text-primary);
   background: var(--platform-bg-hover);
   box-shadow: none;
@@ -418,7 +409,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   border-top: 1px solid var(--border-subtle);
   background: var(--platform-bg-toolbar);
-  backdrop-filter: blur(24px) saturate(1.25);
+  backdrop-filter: blur(20px) saturate(1.12);
 }
 
 :global(:root[data-platform="macos"] .bottom-area){
@@ -426,8 +417,8 @@ onUnmounted(() => {
 }
 
 :global(:root[data-platform="macos"] .bottom-stack){
-  padding-top: 8px;
-  padding-bottom: 12px;
+  padding-top: 7px;
+  padding-bottom: 10px;
 }
 
 .bottom-stack {

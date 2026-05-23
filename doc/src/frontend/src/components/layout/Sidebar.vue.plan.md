@@ -22,7 +22,7 @@
   - Connect 按钮调用 `connectionStore.connect()`（仅 SSH 连接）
   - Disconnect 按钮调用 `connectionStore.disconnect()`（仅 SSH 断开）
   - 按钮切换条件改为 `connectionStore.sshConnected`（不再依赖 `isReady`）
-- **会话项渲染**: 图标 + 标题 + 消息数和时间 + 容器状态徽标 + 运行态徽标 + 操作菜单
+- **会话项渲染**: 图标 + 标题 + 消息数和时间 + 沙箱状态文本 + 运行态摘要 + 操作菜单
 - **Compact rail**: 仅保留新建、会话图标和 SSH 状态点，隐藏标题、元信息、运行态和连接按钮，避免左侧留下大面积空白。
 - **运行态徽标**:
   - `running`: 显示当前 agent 名称
@@ -45,6 +45,6 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - Sidebar 仅负责 SSH 连接控制，容器相关操作不应添加到此组件。
-- macOS native 样式应保持 source list 语义：主操作与连接按钮使用中性/细描边控件，不使用大面积蓝色网页 CTA；compact rail 仍要保留新建、会话菜单和连接/断开入口。
+- macOS native 样式应保持 Finder/Notes source list 语义：主操作与连接按钮使用中性/细描边控件，不使用大面积蓝色网页 CTA；选中行使用系统灰底，不使用左侧彩条；compact rail 仍要保留新建、会话菜单和连接/断开入口。
 - macOS 使用系统标题栏后，sidebar 不再需要为 hidden-inset traffic-light 手动预留顶部空间；compact rail 仍需保持 source-list 风格。
 - scoped CSS 的 macOS 分支必须使用 `:global(:root[data-platform="macos"] .selector)`，避免把组件规则编译到 `:root`。

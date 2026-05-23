@@ -90,9 +90,9 @@ const activeContainerName = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  padding: 12px 12px 10px;
+  padding: 10px 12px 9px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--platform-bg-toolbar);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
 }
 
 .runtime-title-block {
@@ -106,7 +106,7 @@ const activeContainerName = computed(() => {
   color: var(--text-faint);
   font-family: var(--font-brand);
   font-size: var(--fs-2xs);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -117,7 +117,7 @@ const activeContainerName = computed(() => {
   gap: 6px;
   min-width: 0;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -125,7 +125,7 @@ const activeContainerName = computed(() => {
 }
 
 .runtime-active .n-icon {
-  color: var(--accent-emerald);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -139,7 +139,7 @@ const activeContainerName = computed(() => {
   height: 30px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--platform-bg-raised) 54%, transparent);
+  background: transparent;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
@@ -157,7 +157,7 @@ const activeContainerName = computed(() => {
 
 .runtime-tab.active {
   color: var(--text-primary);
-  background: var(--platform-bg-raised);
+  background: var(--platform-bg-content);
   border-color: var(--border-subtle);
   box-shadow: var(--elev-1);
 }

@@ -14,4 +14,5 @@
 - 新增 `terminal` command runner 文案，用于 active sandbox 命令输入、禁用状态和失败提示。
 - 新增 file/edit diff review 文案，用于 Runtime V2 `Write` / `Edit` timeline 结构化结果。
 - 新增 `message.agent.*` 文案，用于 assistant timeline 中的 agent 名称，避免中文 UI 暴露内部英文变量名。
+- macOS native 设计语言调整后，核心入口文案收敛为更短、更自然的产品语言，例如“新建”“准备开始”“执行命令”“浏览文件”，减少工作台里暴露实现名或变量式描述。
 - `containers.unavailable` 用于旧 Docker 记录。
