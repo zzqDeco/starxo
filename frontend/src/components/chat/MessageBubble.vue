@@ -59,15 +59,26 @@ function truncStr(s: string, max: number): string {
   return s.length <= max ? s : s.substring(0, max) + '...'
 }
 
+function compactPath(path?: string): string {
+  if (!path) return '-'
+  const normalized = path.replace(/\\/g, '/')
+  const workspaceIndex = normalized.indexOf('/workspace/')
+  const display = workspaceIndex >= 0 ? normalized.slice(workspaceIndex + '/workspace/'.length) : normalized
+  if (display.length <= 64) return display
+  const parts = display.split('/').filter(Boolean)
+  if (parts.length <= 2) return truncStr(display, 64)
+  return `.../${parts.slice(-2).join('/')}`
+}
+
 function summarizeToolCall(evt: TurnEvent): string {
   const name = evt.toolName || 'tool'
   const args = tryParseArgs(evt.toolArgs)
 
-  if (name === 'Read' || name === 'read_file') return `${t('message.tool.read')} ${args?.file_path || args?.path || '-'}`
-  if (name === 'Write' || name === 'write_file') return `${t('message.tool.write')} ${args?.file_path || args?.path || '-'}`
+  if (name === 'Read' || name === 'read_file') return `${t('message.tool.read')} ${compactPath(args?.file_path || args?.path)}`
+  if (name === 'Write' || name === 'write_file') return `${t('message.tool.write')} ${compactPath(args?.file_path || args?.path)}`
   if (name === 'Glob' || name === 'list_files') return `${name === 'Glob' ? t('message.tool.glob') : t('message.tool.list')} ${args?.path || args?.pattern || '/workspace'}`
   if (name === 'Grep') return `${t('message.tool.grep')} ${args?.pattern || args?.query || '-'}`
-  if (name === 'Edit' || name === 'str_replace_editor') return `${t('message.tool.edit')} ${args?.file_path || args?.path || '-'}`
+  if (name === 'Edit' || name === 'str_replace_editor') return `${t('message.tool.edit')} ${compactPath(args?.file_path || args?.path)}`
   if (name === 'Bash' || name === 'shell_execute') return `${t('message.tool.shell')} ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
   if (name === 'python_execute') return `${t('message.tool.python')} ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
   if (name === 'Agent' || name === 'task') return `${t('message.tool.delegate')} ${args?.subagent_type || args?.subagentType || t('message.agent.subagent')}`
@@ -77,7 +88,7 @@ function summarizeToolCall(evt: TurnEvent): string {
   if (name === 'TaskOutput') return `${t('message.tool.taskOutput')} ${args?.task_id || args?.taskID || '-'}`
   if (name === 'TaskStop') return `${t('message.tool.taskStop')} ${args?.task_id || args?.taskID || '-'}`
   if (name === 'write_todos') return t('message.tool.todos')
-  if (name === 'update_todo') return `${t('message.tool.todoUpdate')} ${args?.id || '-'} -> ${todoStatusLabel(args?.status)}`
+  if (name === 'update_todo') return `${t('message.tool.todoUpdate')} -> ${todoStatusLabel(args?.status)}`
   if (name === 'notify_user') return `${t('message.tool.notify')} ${truncStr(args?.message || '-', 50)}`
 
   return truncStr(name, 70)
@@ -457,24 +468,24 @@ function copyContent() {
   font-size: 12px;
 }
 
-/* User — de-bubbled: flat text with a 3px cyan bar on the right */
 .user-bubble {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  max-width: 92%;
+  max-width: min(680px, 92%);
 }
 
 .user-content {
-  background: transparent;
-  color: var(--text-secondary);
-  border-right: 2px solid color-mix(in srgb, var(--platform-accent) 46%, var(--border-strong));
-  padding: 2px 12px 2px 16px;
-  font-size: var(--fs-md);
-  line-height: var(--lh-normal);
+  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 13px;
+  padding: 8px 11px;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-  text-align: right;
+  text-align: left;
 }
 
 /* Assistant */
@@ -488,18 +499,18 @@ function copyContent() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .assistant-avatar {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--radius-sm);
-  background: var(--platform-accent);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -509,10 +520,10 @@ function copyContent() {
 }
 
 :global(:root[data-platform="macos"] .assistant-avatar){
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   background: transparent;
-  color: var(--platform-accent);
+  color: var(--text-faint);
   border-radius: 5px;
 }
 
@@ -522,10 +533,10 @@ function copyContent() {
 }
 
 .assistant-bubble > .bubble-content {
-  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .msg-time {
@@ -617,7 +628,7 @@ function copyContent() {
   width: 2px;
   height: 14px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  background: transparent;
   flex-shrink: 0;
 }
 
@@ -637,9 +648,9 @@ function copyContent() {
 }
 
 .segment-events {
-  padding-left: 11px;
-  border-left: 1px solid var(--border-subtle);
-  margin-left: 1px;
+  padding-left: 0;
+  border-left: 0;
+  margin-left: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -647,9 +658,9 @@ function copyContent() {
 
 /* ==================== Sub-agent collapsible segment ==================== */
 .subagent-segment {
-  background: color-mix(in srgb, var(--agent-color) 4%, var(--platform-bg-raised));
-  border: 1px solid color-mix(in srgb, var(--agent-color) 15%, transparent);
-  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--platform-bg-raised) 74%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
   margin: 6px 0;
   overflow: hidden;
   transition: border-color 200ms ease;
@@ -669,7 +680,7 @@ function copyContent() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   cursor: pointer;
   user-select: none;
   transition: background 150ms ease;
@@ -680,10 +691,10 @@ function copyContent() {
 }
 
 .subagent-icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -693,7 +704,7 @@ function copyContent() {
 
 .subagent-name {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   font-family: var(--font-sans);
   color: var(--text-secondary);
   letter-spacing: 0;
@@ -702,7 +713,7 @@ function copyContent() {
 
 .subagent-state-pill {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 500;
   font-family: var(--font-mono);
   padding: 1px 6px;
   border-radius: 999px;
@@ -717,9 +728,9 @@ function copyContent() {
 }
 
 .subagent-state-pill.running {
-  color: color-mix(in srgb, var(--platform-accent) 62%, var(--text-muted));
-  border-color: color-mix(in srgb, var(--platform-accent) 18%, transparent);
-  background: color-mix(in srgb, var(--platform-accent) 8%, transparent);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+  background: transparent;
 }
 
 .subagent-state-pill.done {

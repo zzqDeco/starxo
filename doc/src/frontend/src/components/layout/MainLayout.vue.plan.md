@@ -22,7 +22,7 @@
   - `showWorkspaceDrawer` — 工作区抽屉开关
   - `showRuntimeTasks` — Runtime Tasks 面板开关
   - `showPalette` — 命令面板开关
-  - `leftWidth` — 左侧栏宽度（默认 240）
+  - `leftWidth` — 左侧栏宽度（默认 220）
   - `runtimeDockWidth` — runtime inspector 宽度（默认 360）
   - `workspaceInspectorWidth` — workspace inspector 宽度（默认 620）
   - `inspectorMode` — 桌面端右侧 inspector 模式，`runtime` / `workspace` / `null`
@@ -39,7 +39,8 @@
   - `onWorkspaceOpenPath()` 打开 WorkspaceDrawer；路径选择由 WorkspacePanel 消费 pending path
 - macOS 样式:
   - 使用 root platform attribute 做平台分支时，scoped CSS 必须写成 `:global(:root[data-platform="macos"] .selector)`，不能写成 `:global(:root[data-platform="macos"]) .selector`，后者会被编译成只作用于 `:root` 并污染全局根节点。
-  - macOS 下主内容和 inspector 去掉网页卡片圆角/阴影，按原生三栏窗口处理。
+  - macOS 下主内容和 inspector 去掉网页卡片圆角/阴影，按原生三栏窗口处理；右侧 inspector 只用 hairline 分隔，不再像 dashboard 卡片。
+  - 主聊天平面直接贴合内容区，视觉参考 Finder/Notes/Xcode split-view；Chrome 式 toolbar 只保留一个低噪声顶栏。
   - macOS 原生标题栏在 WebView 外层，`window-top-edge-hit-area` 不参与 macOS 命中，避免抢占系统标题栏行为；非 macOS/自定义区域仍可调用 `useNativeWindow.toggleWindowZoom()` 作为 fallback。
 - 拖拽持久化 key:
   - `starxo-left-panel-width`

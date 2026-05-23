@@ -120,11 +120,10 @@ async function initXterm() {
     fitAddon.fit()
     xtermLoaded.value = true
 
-    termInstance.writeln('\x1b[36m\x1b[1m  Starxo Terminal  \x1b[0m')
-    termInstance.writeln('\x1b[90m  AI Coding Agent v0.1.0\x1b[0m')
-    termInstance.writeln('\x1b[90m  Waiting for connection...\x1b[0m')
+    termInstance.writeln('\x1b[90mStarxo terminal\x1b[0m')
+    termInstance.writeln('\x1b[90mRun commands in the active sandbox workspace.\x1b[0m')
     termInstance.writeln('')
-    lineCount.value = 4
+    lineCount.value = 3
   } catch (e) {
     console.warn('xterm not available, falling back to simple terminal:', e)
     xtermLoaded.value = false
@@ -346,14 +345,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 6px 10px 6px 12px;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
 
 .terminal-title {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-muted);
   text-transform: none;
   letter-spacing: 0;
@@ -370,7 +369,7 @@ onUnmounted(() => {
 .terminal-container {
   flex: 1;
   overflow-y: auto;
-  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
+  background: var(--platform-bg-content);
   padding: 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -381,14 +380,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px;
+  padding: 7px 8px;
   border-top: 1px solid var(--border-subtle);
-  background: var(--platform-bg-toolbar);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
 }
 
 .terminal-prompt {
   flex: 0 0 auto;
-  color: var(--accent-cyan);
+  color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
@@ -432,10 +431,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 4px 12px;
-  background: var(--platform-bg-toolbar);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
   border-top: 1px solid var(--border-subtle);
   font-size: var(--fs-2xs);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--text-faint);
   flex-shrink: 0;
   gap: 8px;

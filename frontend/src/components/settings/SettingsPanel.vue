@@ -166,21 +166,21 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(10px);
   padding: var(--space-lg);
 }
 
 .settings-dialog {
   position: relative;
   z-index: 2001;
-  width: min(860px, 92vw);
+  width: min(900px, 92vw);
   height: min(680px, 85vh);
-  background: var(--platform-bg-elevated);
-  backdrop-filter: blur(28px) saturate(1.25);
+  background: var(--platform-bg-content);
+  backdrop-filter: blur(26px) saturate(1.12);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
-  box-shadow: var(--elev-3);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md) var(--space-xl);
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--platform-bg-toolbar);
   flex-shrink: 0;
@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
 .settings-heading {
   margin: 0;
   font-family: var(--font-brand);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
   letter-spacing: 0;
@@ -212,9 +212,9 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav {
-  width: 180px;
+  width: 190px;
   flex-shrink: 0;
-  padding: var(--space-md) var(--space-sm);
+  padding: 12px 8px;
   background: var(--platform-bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
@@ -227,11 +227,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
+  padding: 7px 9px;
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: var(--radius-sm);
+  border-left: 0;
+  border-radius: 7px;
   color: var(--text-muted);
   font-family: var(--font-sans);
   font-size: var(--fs-sm);
@@ -252,10 +252,10 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav-item.active {
-  background: color-mix(in srgb, var(--platform-bg-raised) 78%, transparent);
+  background: var(--platform-bg-active);
   color: var(--text-primary);
   border-left-color: transparent;
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 50%, transparent);
+  box-shadow: none;
 }
 
 .nav-label {
@@ -265,7 +265,7 @@ onBeforeUnmount(() => {
 .settings-pane {
   flex: 1;
   min-width: 0;
-  padding: var(--space-xl);
+  padding: 20px 24px;
   overflow-y: auto;
 }
 
@@ -273,7 +273,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-md) var(--space-xl);
+  padding: 12px 16px;
   border-top: 1px solid var(--border-subtle);
   background: var(--platform-bg-toolbar);
   flex-shrink: 0;

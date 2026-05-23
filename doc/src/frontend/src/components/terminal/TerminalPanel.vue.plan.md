@@ -24,6 +24,7 @@
   - `container:ready` — 显示带时间戳的容器连接成功消息
   - `container:progress` — 显示带时间戳的容器创建进度 `[HH:MM:SS] [%] step`
 - **xterm.js 初始化**: 动态导入、深色主题配置、FitAddon 自适应
+- 初始 banner 使用短句 “Starxo terminal / Run commands in the active sandbox workspace.”，避免把终端面板表现成营销式或版本号式启动页。
 - **ResizeObserver**: 自动适配容器尺寸
 - **回退模式**: xterm 不可用时使用 div 列表渲染；stderr 样式增加红色左边框 + 浅红背景
 - **状态栏** (.terminal-status-bar):
@@ -48,3 +49,4 @@
 - xterm.js 使用动态导入，加载失败时自动回退。
 - 状态栏依赖 connectionStore/containerStore，store 接口变更时需同步更新。
 - 当前命令输入是一次性 shell command runner；如果后续做完整 PTY，需要新增专门的 process/session 生命周期和 resize/stdin/stdout 通道。
+- 终端面板在 native UI pass 中按 inspector 工具面板处理：白色/中性输出面、轻 toolbar、底部状态栏使用系统字体，减少彩色终端装饰。

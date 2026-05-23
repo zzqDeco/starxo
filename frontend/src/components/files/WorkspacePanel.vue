@@ -504,13 +504,13 @@ onUnmounted(() => {
 }
 
 .workspace-header {
-  height: 42px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid var(--border-subtle);
-  padding: 0 12px;
+  padding: 0 10px 0 12px;
   flex-shrink: 0;
 }
 
@@ -524,16 +524,16 @@ onUnmounted(() => {
 
 .workspace-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .workspace-meta {
   display: grid;
-  grid-template-columns: minmax(120px, 1.3fr) repeat(2, minmax(70px, 0.8fr)) minmax(160px, 2fr) repeat(2, minmax(60px, 0.6fr));
-  gap: 8px;
-  padding: 8px 12px;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(70px, 0.6fr) minmax(90px, 0.8fr) minmax(180px, 1.8fr);
+  gap: 0;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--platform-bg-toolbar);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
   flex-shrink: 0;
 }
 
@@ -542,6 +542,17 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 0 8px;
+  border-left: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
+}
+
+.meta-item:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.meta-item:nth-last-child(-n + 2) {
+  display: none;
 }
 
 .meta-item span {
@@ -555,7 +566,7 @@ onUnmounted(() => {
   min-width: 0;
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -578,11 +589,11 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   border-right: 1px solid var(--border-subtle);
-  background: var(--platform-bg-sidebar);
+  background: color-mix(in srgb, var(--platform-bg-sidebar) 86%, transparent);
 }
 
 .tree-toolbar {
-  padding: 8px;
+  padding: 7px 8px;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
@@ -591,7 +602,7 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 4px;
+  padding: 4px 5px;
 }
 
 .workspace-tree {
@@ -611,9 +622,9 @@ onUnmounted(() => {
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content) {
   position: relative;
-  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
+  background: var(--platform-bg-active);
   color: var(--text-primary);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 50%, transparent);
+  box-shadow: none;
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content::before) {

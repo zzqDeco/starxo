@@ -258,6 +258,10 @@ const attachedFileName = computed(() => {
   white-space: nowrap;
 }
 
+:global(:root[data-platform="macos"] .composer-hint){
+  display: none;
+}
+
 .attached-file {
   display: flex;
   align-items: center;
@@ -294,48 +298,28 @@ const attachedFileName = computed(() => {
   display: flex;
   align-items: flex-end;
   gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
+  padding: 6px 9px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--platform-bg-raised) 84%, transparent);
-  box-shadow: var(--platform-shadow-1);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
+  box-shadow: none;
   position: relative;
   transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
 }
 
 :global(:root[data-platform="macos"] .input-shell){
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--platform-bg-raised) 88%, transparent);
-  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--border-subtle) 86%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 82%, transparent);
+  box-shadow: none;
 }
 
 :global(:root[data-platform="macos"] .chat-input .n-input-wrapper){
   padding-left: 2px;
 }
 
-.input-shell::after {
-  content: "";
-  position: absolute;
-  left: var(--space-md);
-  right: var(--space-md);
-  bottom: 0;
-  height: 1px;
-  background: var(--accent-cyan);
-  transform: scaleX(0);
-  transform-origin: left center;
-  opacity: 0;
-  transition: transform var(--transition-ui), opacity var(--transition-ui);
-  pointer-events: none;
-}
-
 .input-shell:focus-within {
-  border-color: color-mix(in srgb, var(--platform-accent) 38%, var(--border-subtle));
+  border-color: var(--border-strong);
   box-shadow: 0 0 0 3px var(--platform-accent-soft);
-}
-
-.input-shell:focus-within::after {
-  transform: scaleX(1);
-  opacity: 0.7;
 }
 
 .chat-input {
@@ -353,7 +337,7 @@ const attachedFileName = computed(() => {
   font-family: var(--font-sans) !important;
   font-size: var(--fs-sm) !important;
   line-height: var(--lh-normal) !important;
-  padding: var(--space-sm) 0 !important;
+  padding: 6px 0 !important;
   background: transparent !important;
   border: none !important;
   resize: none !important;
@@ -377,6 +361,21 @@ const attachedFileName = computed(() => {
   flex-shrink: 0;
   box-shadow: none;
   transition: opacity var(--transition-ui), transform var(--transition-ui);
+}
+
+:global(:root[data-platform="macos"] .send-btn){
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
+  --n-text-color: var(--platform-accent) !important;
+  --n-text-color-hover: var(--platform-accent-hover) !important;
+  --n-text-color-pressed: var(--platform-accent-hover) !important;
+  --n-text-color-focus: var(--platform-accent) !important;
+  --n-border: 1px solid transparent !important;
+  --n-border-hover: 1px solid transparent !important;
+  --n-border-pressed: 1px solid transparent !important;
+  --n-border-focus: 1px solid transparent !important;
 }
 
 .send-btn:disabled {

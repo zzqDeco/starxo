@@ -49,6 +49,7 @@ interface ToolDisplayInfo {
   action: string
   primary: string
   secondary?: string
+  rawPath?: string
 }
 
 function tryParseArgs(args?: string): any {
@@ -62,6 +63,17 @@ function truncStr(s: string, max: number): string {
 
 function firstLine(s: string): string {
   return s.split('\n')[0] || ''
+}
+
+function compactPath(path?: string): string {
+  if (!path) return '-'
+  const normalized = path.replace(/\\/g, '/')
+  const workspaceIndex = normalized.indexOf('/workspace/')
+  const display = workspaceIndex >= 0 ? normalized.slice(workspaceIndex + '/workspace/'.length) : normalized
+  if (display.length <= 68) return display
+  const parts = display.split('/').filter(Boolean)
+  if (parts.length <= 2) return truncStr(display, 68)
+  return `.../${parts.slice(-2).join('/')}`
 }
 
 function parseExitCode(result: string): number | null {
@@ -172,22 +184,26 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   const parsed = parsedToolResult.value
 
   if (name === 'Read' || name === 'read_file') {
+    const rawPath = args?.file_path || args?.path || '-'
     return {
       category: 'file',
       color: 'var(--agent-file-manager)',
       action: t('message.tool.read'),
-      primary: args?.file_path || args?.path || '-',
+      primary: compactPath(rawPath),
       secondary: result ? `${result.length} ${t('message.tool.chars')}` : undefined,
+      rawPath,
     }
   }
 
   if (name === 'Write' || name === 'write_file') {
+    const rawPath = parsed?.filePath || args?.file_path || args?.path || '-'
     return {
       category: 'file',
       color: 'var(--agent-file-manager)',
       action: t('message.tool.write'),
-      primary: parsed?.filePath || args?.file_path || args?.path || '-',
+      primary: compactPath(rawPath),
       secondary: parsed ? `${parsed.created ? t('message.tool.created') : t('message.tool.updated')} ${diffLinesSummary.value || ''}`.trim() : result ? t('message.tool.saved') : undefined,
+      rawPath,
     }
   }
 
@@ -213,12 +229,14 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
 
   if (name === 'Edit' || name === 'str_replace_editor') {
     const cmd = args?.command || 'edit'
+    const rawPath = parsed?.filePath || args?.file_path || args?.path || '-'
     return {
       category: 'edit',
       color: 'var(--agent-code-writer)',
       action: t('message.tool.edit'),
-      primary: parsed?.filePath || args?.file_path || args?.path || '-',
+      primary: compactPath(rawPath),
       secondary: parsed ? `${parsed.replacements || 0} ${t('message.tool.replacements')} ${diffLinesSummary.value || ''}`.trim() : cmd,
+      rawPath,
     }
   }
 
@@ -282,7 +300,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   }
 
   if (name === 'update_todo') {
-    const detail = args ? `${args.id} -> ${todoStatusLabel(args.status)}` : '-'
+    const detail = args ? todoStatusLabel(args.status) : '-'
     return {
       category: 'todo',
       color: 'var(--agent-default)',
@@ -389,9 +407,11 @@ const statusLabel = computed(() => {
 
 const canOpenWorkspacePath = computed(() => {
   const category = toolInfo.value.category
-  const path = toolInfo.value.primary || ''
+  const path = toolInfo.value.rawPath || ''
   return (category === 'file' || category === 'edit') && path.startsWith('/')
 })
+
+const openWorkspaceTarget = computed(() => toolInfo.value.rawPath || toolInfo.value.primary)
 </script>
 
 <template>
@@ -440,7 +460,7 @@ const canOpenWorkspacePath = computed(() => {
             type="button"
             class="tool-open-path"
             :aria-label="t('workspace.openFile')"
-            @click.stop="openWorkspacePath(toolInfo.primary)"
+            @click.stop="openWorkspacePath(openWorkspaceTarget)"
           >
             <NIcon size="12"><FolderOpen /></NIcon>
           </button>
@@ -618,19 +638,19 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .event-message-content {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px 12px 12px 12px;
-  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0 6px;
   font-size: 13.5px;
-  line-height: 1.7;
+  line-height: 1.65;
 }
 
 :global(:root[data-platform="macos"] .event-message-content){
-  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
-  border-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
-  border-radius: 9px;
-  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0 6px;
   line-height: 1.6;
 }
 
@@ -666,10 +686,10 @@ const canOpenWorkspacePath = computed(() => {
   align-items: center;
   gap: 6px;
   min-height: 28px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   appearance: none;
   text-align: left;
@@ -677,10 +697,10 @@ const canOpenWorkspacePath = computed(() => {
 
 :global(:root[data-platform="macos"] .tool-strip){
   min-height: 26px;
-  padding: 3px 7px;
+  padding: 3px 6px;
   border-radius: 7px;
-  background: color-mix(in srgb, var(--platform-bg-raised) 54%, transparent);
-  border-color: color-mix(in srgb, var(--border-subtle) 68%, transparent);
+  background: transparent;
+  border-color: transparent;
 }
 
 .tool-strip.expandable {
@@ -688,40 +708,40 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-strip.expandable:hover {
-  border-color: color-mix(in srgb, var(--border-strong) 66%, transparent);
-  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
+  border-color: transparent;
+  background: var(--platform-bg-hover);
 }
 
 .tool-strip-file {
-  border-left: 3px solid var(--agent-file-manager);
+  border-left: 0;
 }
 
 .tool-strip-edit {
-  border-left: 3px solid var(--agent-code-writer);
+  border-left: 0;
 }
 
 .tool-strip-shell {
-  border-left: 3px solid var(--agent-code-executor);
+  border-left: 0;
 }
 
 .tool-strip-agent {
-  border-left: 3px solid var(--agent-orchestrator);
+  border-left: 0;
 }
 
 .tool-strip-todo {
-  border-left: 3px solid var(--agent-default);
+  border-left: 0;
 }
 
 .tool-strip-notify {
-  border-left: 3px solid var(--agent-orchestrator);
+  border-left: 0;
 }
 
 .tool-strip-worktree {
-  border-left: 3px solid var(--accent-cyan);
+  border-left: 0;
 }
 
 .tool-strip-other {
-  border-left: 3px solid var(--text-muted);
+  border-left: 0;
 }
 
 :global(:root[data-platform="macos"] .tool-strip-file),
@@ -742,8 +762,8 @@ const canOpenWorkspacePath = computed(() => {
 
 .tool-strip-action {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  font-weight: 500;
+  font-family: var(--font-sans);
   flex-shrink: 0;
   color: var(--text-muted);
 }
@@ -810,7 +830,7 @@ const canOpenWorkspacePath = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 1px 6px;
   margin-left: auto;
   flex-shrink: 0;
   border-radius: 999px;
@@ -818,7 +838,7 @@ const canOpenWorkspacePath = computed(() => {
   font-family: var(--font-mono);
   font-weight: var(--fw-semibold);
   letter-spacing: 0.3px;
-  border: 1px solid transparent;
+  border: 0;
   line-height: 1.2;
 }
 
@@ -841,19 +861,23 @@ const canOpenWorkspacePath = computed(() => {
 .tool-status-pill.status-done {
   color: var(--text-faint);
   background: transparent;
-  border-color: color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  border-color: transparent;
+}
+
+.tool-status-pill.status-done .status-pill-label {
+  display: none;
 }
 
 .tool-status-pill.status-error {
   color: var(--accent-rose, #f43f5e);
-  background: color-mix(in srgb, var(--accent-rose, #f43f5e) 10%, transparent);
-  border-color: color-mix(in srgb, var(--accent-rose, #f43f5e) 22%, transparent);
+  background: transparent;
+  border-color: transparent;
 }
 
 .tool-status-pill.status-running {
-  color: color-mix(in srgb, var(--platform-accent) 60%, var(--text-muted));
-  background: color-mix(in srgb, var(--platform-accent) 8%, transparent);
-  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
 }
 
 .tool-status-pill.status-running .status-pill-icon {
@@ -888,7 +912,7 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-code {
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px 12px;

@@ -59,8 +59,9 @@
   - 后备逻辑: 若 `loadSessionData` 返回空，则尝试旧版 `loadChatDisplay` + `loadActiveMessages`
 - **前端不再保存 display 数据**: `agent:done` 处理器中移除了 `saveChatDisplay` 调用，前端变为纯读取消费者
 - **主题覆盖**:
-  - primary/cyan、背景层级、边框、文本层级与 `style.css` 深色工作台 token 同步
-  - Naive UI 卡片/弹窗圆角收敛到 8-10px，匹配工具型界面密度
+  - primary、背景层级、边框、文本层级与 `style.css` platform token 同步
+  - Naive UI 卡片/弹窗圆角收敛到 7-12px，按钮去除水波纹和重阴影，匹配 macOS 工具型界面密度
+  - 主题视觉参考 Finder/System Settings/Notes/Xcode/VS Code/Chrome：中性面板、低饱和蓝、轻分割线和单 toolbar 平面
 
 ## 5. 依赖关系
 - 内部依赖: MainLayout.vue、settingsStore、connectionStore、chatStore、sessionStore、containerStore、types (Session, Message, TurnEvent, InterruptEvent, ModeChangedEvent)

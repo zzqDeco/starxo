@@ -18,17 +18,18 @@
 
 ## 4. 关键实现细节
 - **CSS 变量体系**:
-  - 背景层级: `--bg-deepest` (#020617) → `--bg-base` (#07111f) → `--bg-surface` (#0f172a) → `--bg-elevated` (#172033) → `--bg-raised` (#1e293b) → `--bg-hover` (#243044)
+  - 平台背景层级: `--platform-bg-window` → `--platform-bg-sidebar` → `--platform-bg-toolbar` → `--platform-bg-content` → `--platform-bg-raised`
   - 文本层级: `--text-primary` → `--text-secondary` → `--text-muted` → `--text-faint`
-  - 强调色: cyan (#22d3ee)、emerald (#22c55e)、amber (#f59e0b)、rose (#fb7185)、violet (#a78bfa)、blue (#60a5fa)
-  - Agent 颜色系统: orchestrator (cyan)、code-writer (blue)、code-executor (purple)、file-manager (green)、default (amber)
+  - 强调色: 以低饱和系统蓝为主；success/warning/danger 仅用于状态点、错误和破坏性动作。
+  - Agent 颜色系统: 默认映射到中性/低饱和令牌，避免 timeline 像彩色日志面板。
   - 间距系统: xs (4px) → sm (8px) → md (16px) → lg (24px) → xl (32px)
   - 圆角系统: sm (6px) → md (8px) → lg (12px) → xl (16px)
   - 字体: sans (Nunito)、mono (JetBrains Mono)
 - **代码块样式**: `.hljs-code-block` 包含代码头部（语言标签 + 复制按钮）和 highlight.js 语法高亮色覆盖
 - **Markdown 样式**: `.markdown-body` 类定义了段落、链接、列表、行内代码、引用、标题、表格、分割线的样式
 - **动画**: fadeIn、pulse、blink、slideInLeft、slideInRight、shimmer（骨架屏）
-- **工作台视觉**: `--gradient-workbench` 提供低干扰深色工作区背景，组件以边框、层级阴影和状态色承载信息密度。
+- **工作台视觉**: 默认按 macOS split-view 处理，采用 source-list 侧栏、单内容平面、hairline 分割线和轻 toolbar；避免 dashboard 卡片堆叠。
+- **平台原生收敛**: macOS 下全局覆盖 Naive UI 按钮、输入框、卡片/弹层的圆角、涟漪和阴影，使其接近 Finder/System Settings/Chrome/Xcode 的低噪声控件语言。
 - **无障碍**: 全局 `:focus-visible` 焦点环、按钮 cursor 规则、禁用态 cursor、`prefers-reduced-motion` 减少动画支持。
 - **Wails 特性**: `.wails-drag` 类启用窗口拖拽区域
 
