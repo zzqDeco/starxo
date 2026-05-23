@@ -4,7 +4,8 @@ import "fmt"
 
 // DeepAgentPrompt returns the system prompt for the core deep agent.
 // This agent can handle tasks directly or delegate to specialized sub-agents.
-func DeepAgentPrompt(ac AgentContext) string {
+func DeepAgentPrompt(ac AgentContext, registries ...*SubagentRegistry) string {
+	registry := resolveSubagentRegistry(registries...)
 	return fmt.Sprintf(`You are an intelligent coding agent that helps users write, debug, and execute code in a sandboxed environment.
 
 ENVIRONMENT:
@@ -41,7 +42,7 @@ Use a Claude Code-style runtime: inspect and edit with direct tools, and delegat
 
 3. DYNAMIC SUB-AGENTS:
    - Use the Agent tool for bounded delegated work. Supported subagent_type values are:
-     general, code_writer, code_executor, file_manager, reviewer.
+%s
    - Prefer Agent with isolation=worktree for risky or parallel implementation work.
    - Use background=true for long-running work, then poll with TaskOutput or stop with TaskStop.
 
@@ -61,13 +62,14 @@ IMPORTANT:
 - Runtime V2 direct tools are the preferred top-level path for targeted file, search, command, and background-task operations.
 - Use Agent for bounded side tasks that benefit from an isolated focused subagent; use background=true for long-running delegation.
 - Be efficient: pick the right subagent_type on the first try.
-- After an Agent result returns, provide a clear summary to the user.`, ac.SSHUser, ac.SSHHost, ac.SSHPort, ac.ContainerName, ac.ContainerID, ac.WorkspacePath)
+- After an Agent result returns, provide a clear summary to the user.`, ac.SSHUser, ac.SSHHost, ac.SSHPort, ac.ContainerName, ac.ContainerID, ac.WorkspacePath, registry.PromptList())
 }
 
 // DeepAgentPlanPrompt returns the strict orchestration prompt for plan mode.
 // In this mode, the main agent must own task-list management and acceptance,
 // while concrete execution is delegated to sub-agents.
-func DeepAgentPlanPrompt(ac AgentContext) string {
+func DeepAgentPlanPrompt(ac AgentContext, registries ...*SubagentRegistry) string {
+	registry := resolveSubagentRegistry(registries...)
 	return fmt.Sprintf(`You are the ORCHESTRATOR agent in PLAN MODE.
 
 ENVIRONMENT:
@@ -80,7 +82,8 @@ ROLE BOUNDARY (STRICT):
 - You MUST NOT do concrete implementation/execution work until the plan is approved.
 - Use ExitPlanMode to present the implementation plan for approval.
 - After approval, use direct runtime tools for small steps and Agent for bounded side work.
-- Supported Agent subagent_type values: general, code_writer, code_executor, file_manager, reviewer.
+- Supported Agent subagent_type values:
+%s
 
 TASK LIST OWNERSHIP (STRICT):
 - Only YOU can manage task list tools:
@@ -118,7 +121,7 @@ DEFERRED TOOLS POLICY:
 IMPORTANT:
 - Do not skip planning + delegation + acceptance chain.
 - Do not mark a step done before acceptance.
-- Keep user informed at key transitions.`, ac.SSHUser, ac.SSHHost, ac.SSHPort, ac.ContainerName, ac.ContainerID, ac.WorkspacePath)
+- Keep user informed at key transitions.`, ac.SSHUser, ac.SSHHost, ac.SSHPort, ac.ContainerName, ac.ContainerID, ac.WorkspacePath, registry.PromptList())
 }
 
 // CodeWriterPrompt returns the code_writer system prompt.

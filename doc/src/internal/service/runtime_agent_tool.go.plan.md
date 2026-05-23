@@ -18,7 +18,8 @@
 
 ## 4. 关键实现细节
 - `runtimeAgentInput` 支持 `description`、`prompt`、`subagent_type`、`background`、`isolation`，`model` 和 `mode` 作为后续扩展保留字段。
-- `subagent_type` 会通过 `agent.runtime.subagents` 对应的动态 registry 规范化；默认内置 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`。
+- `subagent_type` 会通过 `agent.runtime.subagents` 对应的动态 registry 规范化；省略时使用 registry default。
+- `Agent` tool schema 会根据当前 registry 生成 `subagent_type` enum 和说明，避免自定义 registry 时继续提示内置名称。
 - `isolation` 会规范化为 `none` 或 `worktree`；缺省值来自 subagent definition 的 `defaultIsolation`。
 - subagent definition 可限制 `allowedTools`，也可通过 `backgroundAllowed=false` 禁止后台执行。
 - `Agent` 是 always-load runtime tool，但执行仍会经过 permission wrapper。

@@ -11,6 +11,7 @@ import (
 	einotool "github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
 
 	"starxo/internal/agent"
 	"starxo/internal/tools"
@@ -19,7 +20,7 @@ import (
 type runtimeAgentInput struct {
 	Description  string `json:"description,omitempty" jsonschema:"description=short description of the delegated task"`
 	Prompt       string `json:"prompt" jsonschema:"description=full task prompt for the subagent"`
-	SubagentType string `json:"subagent_type,omitempty" jsonschema:"description=general, code_writer, code_executor, file_manager, or reviewer"`
+	SubagentType string `json:"subagent_type,omitempty" jsonschema:"description=configured subagent type; omit to use the registry default"`
 	Model        string `json:"model,omitempty" jsonschema:"description=reserved for future model override"`
 	Mode         string `json:"mode,omitempty" jsonschema:"description=reserved for future mode override"`
 	Background   bool   `json:"background,omitempty" jsonschema:"description=run in background and return a task id"`
@@ -42,8 +43,10 @@ type runtimeAgentRunResult struct {
 }
 
 func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, registry *agent.SubagentRegistry) (tools.CatalogEntry, error) {
-	t, err := toolutils.InferTool(tools.RuntimeToolAgent,
-		"Spawn a focused runtime subagent for a well-scoped task. Supports synchronous or background execution and optional worktree isolation.",
+	if registry == nil {
+		registry = agent.DefaultSubagentRegistry()
+	}
+	t := toolutils.NewTool(runtimeAgentToolInfo(registry),
 		func(ctx context.Context, input runtimeAgentInput) (runtimeAgentOutput, error) {
 			if strings.TrimSpace(input.Prompt) == "" {
 				return runtimeAgentOutput{}, fmt.Errorf("prompt is required")
@@ -91,9 +94,6 @@ func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einom
 				WorktreeBranch: result.worktree.WorktreeBranch,
 			}, nil
 		})
-	if err != nil {
-		return tools.CatalogEntry{}, err
-	}
 	return tools.CatalogEntry{
 		CanonicalName: tools.RuntimeToolAgent,
 		Source:        tools.ToolSourceRuntime,
@@ -110,6 +110,52 @@ func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einom
 		},
 		Tool: t,
 	}, nil
+}
+
+func runtimeAgentToolInfo(registry *agent.SubagentRegistry) *schema.ToolInfo {
+	if registry == nil {
+		registry = agent.DefaultSubagentRegistry()
+	}
+	subagentNames := registry.Names()
+	subagentDesc := fmt.Sprintf("Configured subagent type. Omit to use the registry default (%s). Supported values: %s.",
+		registry.DefaultName(), registry.NamesCSV())
+	return &schema.ToolInfo{
+		Name: tools.RuntimeToolAgent,
+		Desc: "Spawn a focused runtime subagent for a well-scoped task. Supports synchronous or background execution and optional worktree isolation.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"description": {
+				Type: schema.String,
+				Desc: "Short description of the delegated task.",
+			},
+			"prompt": {
+				Type:     schema.String,
+				Desc:     "Full task prompt for the subagent.",
+				Required: true,
+			},
+			"subagent_type": {
+				Type: schema.String,
+				Desc: subagentDesc,
+				Enum: subagentNames,
+			},
+			"model": {
+				Type: schema.String,
+				Desc: "Reserved for future model override.",
+			},
+			"mode": {
+				Type: schema.String,
+				Desc: "Reserved for future mode override.",
+			},
+			"background": {
+				Type: schema.Boolean,
+				Desc: "Run in background and return a task id.",
+			},
+			"isolation": {
+				Type: schema.String,
+				Desc: "Execution isolation. Omit to use the selected subagent's default isolation.",
+				Enum: []string{"none", "worktree"},
+			},
+		}),
+	}
 }
 
 func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, agentID string, input runtimeAgentInput, registry *agent.SubagentRegistry) (runtimeAgentRunResult, error) {

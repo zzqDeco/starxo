@@ -55,6 +55,15 @@ func DefaultSubagentRegistry() *SubagentRegistry {
 	return NewSubagentRegistry(defs)
 }
 
+func resolveSubagentRegistry(registries ...*SubagentRegistry) *SubagentRegistry {
+	for _, registry := range registries {
+		if registry != nil {
+			return registry
+		}
+	}
+	return DefaultSubagentRegistry()
+}
+
 func NewSubagentRegistry(defs []SubagentDefinition) *SubagentRegistry {
 	r := &SubagentRegistry{defs: make(map[string]SubagentDefinition, len(defs))}
 	for _, def := range defs {
@@ -133,13 +142,57 @@ func (r *SubagentRegistry) Names() []string {
 	return names
 }
 
+func (r *SubagentRegistry) DefaultName() string {
+	if r == nil {
+		r = DefaultSubagentRegistry()
+	}
+	if r.defaultName != "" {
+		return r.defaultName
+	}
+	return "general"
+}
+
+func (r *SubagentRegistry) NamesCSV() string {
+	return strings.Join(r.Names(), ", ")
+}
+
+func (r *SubagentRegistry) PromptList() string {
+	if r == nil {
+		r = DefaultSubagentRegistry()
+	}
+	defaultName := r.DefaultName()
+	lines := make([]string, 0, len(r.defs))
+	for _, name := range r.Names() {
+		def, _ := r.Get(name)
+		label := name
+		if name == defaultName {
+			label += " (default when omitted)"
+		}
+		description := strings.TrimSpace(def.Description)
+		if description == "" {
+			description = name
+		}
+		background := "background allowed"
+		if !def.BackgroundAllowed {
+			background = "background disabled"
+		}
+		allowedTools := "all permitted runtime tools"
+		if len(def.AllowedTools) > 0 {
+			allowedTools = strings.Join(def.AllowedTools, ", ")
+		}
+		lines = append(lines, fmt.Sprintf("     - %s: %s; default isolation=%s; %s; allowed tools=%s",
+			label, description, def.DefaultIsolation, background, allowedTools))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (r *SubagentRegistry) Normalize(name string) (string, error) {
 	name = normalizeSubagentName(name)
 	if name == "" {
 		if r == nil {
 			r = DefaultSubagentRegistry()
 		}
-		return r.defaultName, nil
+		return r.DefaultName(), nil
 	}
 	if _, ok := r.Get(name); ok {
 		return name, nil

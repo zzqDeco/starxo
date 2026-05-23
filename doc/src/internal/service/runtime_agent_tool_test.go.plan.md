@@ -9,7 +9,8 @@
 - 覆盖 Runtime V2 `Agent` tool 的输入规范化、worktree 输出格式和子 agent instruction 元数据。
 
 ## 3. 关键测试覆盖
-- `normalizeRuntimeAgentInput` 会填充默认 `general` / `none`，并拒绝未知 `subagent_type` 或 `isolation`。
+- `normalizeRuntimeAgentInput` 会填充 registry default / 默认 isolation，并拒绝未知 `subagent_type` 或 `isolation`。
+- `Agent` tool schema 会使用配置 registry 的 subagent enum，不泄漏被替换掉的内置名称。
 - `formatRuntimeAgentRunResult` 会把 isolated worktree path/branch 写入结果文本，后台 task output 也可复用同一格式。
 - `runtimeSubagentInstruction` 会明确实际 workspace 和 worktree isolation 语义。
 

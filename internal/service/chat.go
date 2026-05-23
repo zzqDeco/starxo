@@ -3521,6 +3521,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		defaultHandlers,
 		unknownToolsHandler,
 		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
+		subagentRegistry,
 	)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
@@ -3533,6 +3534,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		planHandlers,
 		unknownToolsHandler,
 		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
+		subagentRegistry,
 	)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)

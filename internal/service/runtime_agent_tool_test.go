@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -94,6 +95,38 @@ func TestRuntimeSubagentRegistryFromConfigPreservesPolicy(t *testing.T) {
 	}
 	if _, ok := registry.Get("general"); ok {
 		t.Fatalf("custom registry without general must not inject an unrestricted general")
+	}
+}
+
+func TestRuntimeAgentToolSchemaUsesConfiguredRegistry(t *testing.T) {
+	registry := agent.NewSubagentRegistry([]agent.SubagentDefinition{{
+		Name:             "triage",
+		Description:      "Triage work",
+		DefaultIsolation: "worktree",
+		AllowedTools:     []string{"Read", "Grep"},
+	}})
+	entry, err := NewChatService(nil).newRuntimeAgentCatalogEntry(nil, nil, nil, nil, agent.DefaultAgentContext(), registry)
+	if err != nil {
+		t.Fatalf("new runtime agent entry: %v", err)
+	}
+	info, err := entry.Tool.Info(nil)
+	if err != nil {
+		t.Fatalf("agent tool info: %v", err)
+	}
+	schema, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil {
+		t.Fatalf("agent tool schema: %v", err)
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal agent tool schema: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "triage") || !strings.Contains(text, "registry default (triage)") {
+		t.Fatalf("expected configured subagent metadata in schema, got %s", text)
+	}
+	if strings.Contains(text, "code_writer") || strings.Contains(text, "file_manager") {
+		t.Fatalf("agent tool schema leaked builtin subagent names for custom registry: %s", text)
 	}
 }
 

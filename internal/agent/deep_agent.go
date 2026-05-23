@@ -41,7 +41,9 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 	handlers []adk.ChatModelAgentMiddleware,
 	unknownToolsHandler func(ctx context.Context, name, input string) (string, error),
 	enableTransferFallback bool,
+	registries ...*SubagentRegistry,
 ) (adk.Agent, error) {
+	subagentRegistry := resolveSubagentRegistry(registries...)
 
 	var subAgents []adk.Agent
 	if enableTransferFallback {
@@ -69,7 +71,7 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 		agenttools.NewNotifyUserTool(),
 	}
 
-	instruction := DeepAgentPrompt(ac)
+	instruction := DeepAgentPrompt(ac, subagentRegistry)
 
 	switch mode {
 	case DeepAgentModePlan:
@@ -79,7 +81,7 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 			agenttools.NewUpdateTodoTool(),
 		)
 		directTools = append(directTools, extraTools...)
-		instruction = DeepAgentPlanPrompt(ac)
+		instruction = DeepAgentPlanPrompt(ac, subagentRegistry)
 	case DeepAgentModeDefault:
 		// In default mode keep existing behavior, including extra tools.
 		directTools = append(directTools,
