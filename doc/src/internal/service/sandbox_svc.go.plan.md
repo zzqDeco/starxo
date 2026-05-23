@@ -12,8 +12,14 @@
 - `RunTerminalCommand` 在当前 active sandbox workspace 中执行用户提交的非交互式 shell 命令。
   - 命令成功退出后发出 `workspace:changed`，让 workspace inspector 自动刷新 terminal 产物。
 - `GetStatus` 同时返回新 `runtimeAvailable/sandboxActive/activeSandbox*` 字段和旧 Docker/Container 兼容字段。
+- `StartHealthMonitor`/`healthCheck` 负责保守的远端健康监控：
+  - 先用 raw SSH `echo ping` 判断 SSH liveness。
+  - 单次 SSH probe 失败只记录日志，连续失败达到阈值后才发出 `ssh:disconnected`。
+  - SSH 可用但 active sandbox workspace 不存在时，只发出 `container:deactivated`，保留 SSH manager。
 
 ## 维护要点
 - 旧 Docker 记录状态为 `unavailable` 时禁止激活。
 - 事件名暂时保留 `container:*` 以兼容前端监听。
 - `DisconnectAndDestroy` 会关闭 SSH 并发出断开/停用事件；直接销毁流程由 `ContainerService` 负责发出 `container:destroyed`。
+- 手动断开、重连、销毁和 health failure 必须走统一 helper，确保 health monitor、active sandbox、Wails 事件和 `onContainerDeactivated` callback 不分叉。
+- Health monitor 使用 generation guard；旧 goroutine 返回时不得清理新 manager。

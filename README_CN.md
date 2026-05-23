@@ -266,6 +266,8 @@ npm run dev
 
 创建沙箱时会展示 Python venv 创建、pip 升级、包安装等分步进度。Python bootstrap 命令遵守 `commandTimeoutSec`；pip 失败会提示检查远端网络、pip 源或代理，并 best-effort 清理未完成的新沙箱目录。运行时终端每次在当前 active sandbox workspace 中执行一条命令，没有 active sandbox 时输入会被禁用。
 
+运行时健康检查会区分 SSH liveness 和 active sandbox 可用性。短暂的 sandbox 命令失败不会再直接断开 SSH；如果 active sandbox 消失，Starxo 只停用该沙箱，并用明确错误停止受影响的 agent run。
+
 ## 数据存储
 
 所有持久化数据存储于 `~/.starxo/` 目录：

@@ -266,6 +266,8 @@ Normal Linux package dependencies can be installed with the Install runtime butt
 
 Sandbox creation reports each setup step, including Python venv creation, pip upgrade, and package installation. Python bootstrap commands obey `commandTimeoutSec`; pip failures include remote network, index, and proxy guidance, and incomplete sandbox directories are cleaned up best-effort. The runtime terminal executes one command at a time in the active sandbox workspace and is disabled when no sandbox is active.
 
+Runtime health checks separate SSH liveness from active sandbox availability. A transient sandbox command failure no longer drops the SSH connection; if the active sandbox disappears, Starxo deactivates it and stops any affected agent run with a clear error.
+
 ## Data Storage
 
 All persistent data is stored under `~/.starxo/`:

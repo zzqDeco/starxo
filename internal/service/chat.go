@@ -810,14 +810,56 @@ func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, _ *agentctx.E
 
 // UpdateSandbox updates the sandbox manager reference.
 func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
+	var stoppedSessions []string
 	s.mu.Lock()
 	s.sandbox = sbx
+	if sbx == nil {
+		stoppedSessions = s.cancelRunsForSandboxLossLocked()
+	}
 	s.invalidateRunners()
 	lsp := s.runtimeLSP
+	ctx := s.ctx
 	s.mu.Unlock()
 	if lsp != nil {
 		lsp.CloseAll()
 	}
+	for _, sessionID := range stoppedSessions {
+		wailsEmit(ctx, "agent:error", map[string]interface{}{
+			"sessionId": sessionID,
+			"error":     sandboxConnectionLostAgentText,
+		})
+		s.emitRunState(sessionID)
+	}
+}
+
+func (s *ChatService) cancelRunsForSandboxLossLocked() []string {
+	stopped := make([]string, 0)
+	for sessionID, run := range s.sessions {
+		if run == nil || (!run.running && !run.starting) {
+			continue
+		}
+		if run.cancelFn != nil {
+			run.cancelFn()
+		}
+		if run.starting && run.startDone != nil {
+			close(run.startDone)
+			run.startDone = nil
+		}
+		run.running = false
+		run.starting = false
+		run.cancelFn = nil
+		run.currentAgent = ""
+		run.pendingInterrupt = nil
+		run.pendingStartBundleGeneration = 0
+		run.activeBundleGeneration = 0
+		run.activeRunnerKind = ""
+		stopped = append(stopped, sessionID)
+	}
+	if len(stopped) > 0 {
+		s.cleanupRetiredBundlesLocked()
+	}
+	sort.Strings(stopped)
+	return stopped
 }
 
 // InvalidateRunner forces runners to be rebuilt on the next message.
