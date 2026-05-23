@@ -147,6 +147,8 @@
   - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册
   - runtime deferred tools 和 MCP deferred tools 共用 Eino v0.9 ToolSearch、session discovery 和 permission pipeline
   - Eino `tool_search` 结果会回写到 Starxo `DiscoveredToolRecord`，保证 compact/restore 后已发现工具不会丢失
+  - Eino ToolSearch 候选集使用按 mode 过滤的 deferred catalog superset，避免 pending/failed MCP 状态在 bundle 构建时冻结；真正可调用性仍由 Starxo dynamic surface 和 permission gate 在运行期判定
+  - `agent.runtime.toolSearchMode` 会传入 Eino middleware；`model_native` / `auto` 仅在启用 agentic protocol 时使用 model-native tool search，否则保持 client-side search
   - web tools 当前由本地应用进程执行 HTTP 请求，`WebSearch` provider 来自 `agent.webSearch` 配置；其他 runtime tools 使用远端 sandbox operator
   - `LSP` tool 会先尝试常驻 language server；server 缺失或启动失败时由 tools 层 fallback 到 `rg`/`sed`
 - Eino v0.9 context middleware：

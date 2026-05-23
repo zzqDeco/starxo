@@ -680,18 +680,11 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 	}
 }
 
-func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvider, mode string) (adk.ChatModelAgentMiddleware, error) {
+func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvider, mode, toolSearchMode, agenticProtocol string) (adk.ChatModelAgentMiddleware, error) {
 	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
 		return nil, nil
 	}
-	state := tools.ComputeDeferredMCPState(provider.bundle.MCPCatalog, nil, provider.permissionContext("", mode))
-	dynamicTools := make([]einotool.BaseTool, 0, len(state.SearchablePoolForMode))
-	for _, entry := range state.SearchablePoolForMode {
-		if entry.Tool == nil {
-			continue
-		}
-		dynamicTools = append(dynamicTools, entry.Tool)
-	}
+	dynamicTools := einoV09ToolSearchCandidates(provider.bundle.MCPCatalog, provider.permissionContext("", mode))
 	if len(dynamicTools) == 0 {
 		return nil, nil
 	}
@@ -700,8 +693,50 @@ func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvi
 	}
 	return einotoolsearch.New(ctx, &einotoolsearch.Config{
 		DynamicTools:       dynamicTools,
-		UseModelToolSearch: false,
+		UseModelToolSearch: useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol),
 	})
+}
+
+func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, permCtx tools.ToolPermissionContext) []einotool.BaseTool {
+	if catalog == nil {
+		return nil
+	}
+	entries := catalog.Entries()
+	dynamicTools := make([]einotool.BaseTool, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.ShouldDefer || entry.AlwaysLoad || entry.Tool == nil {
+			continue
+		}
+		if !einoV09PotentiallySearchable(entry, permCtx) {
+			continue
+		}
+		dynamicTools = append(dynamicTools, entry.Tool)
+	}
+	return dynamicTools
+}
+
+func einoV09PotentiallySearchable(entry tools.CatalogEntry, permCtx tools.ToolPermissionContext) bool {
+	if !entry.PermissionSpec.AllowSearch {
+		return false
+	}
+	if permCtx.Mode == "plan" && !entry.ReadOnlyEligible() {
+		return false
+	}
+	if !entry.IsMcp {
+		return true
+	}
+	return true
+}
+
+func useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol string) bool {
+	switch strings.TrimSpace(toolSearchMode) {
+	case "model_native":
+		return strings.TrimSpace(agenticProtocol) != "" && strings.TrimSpace(agenticProtocol) != llm.AgenticProtocolOff
+	case "auto":
+		return strings.TrimSpace(agenticProtocol) != "" && strings.TrimSpace(agenticProtocol) != llm.AgenticProtocolOff
+	default:
+		return false
+	}
 }
 
 // ChatService manages chat interactions between the frontend and the AI agent.
@@ -1876,7 +1911,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				run.addToolResult(msg.ToolCallID, msg.Content)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
 					if call.name == tools.ToolSearchName {
-						s.recordToolSearchOutputForRun(sessionID, msg.Content)
+						s.recordToolSearchOutputForRun(run, msg.Content)
 					}
 					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
 					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, call.args, msg.Content)
@@ -1936,7 +1971,10 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	return strings.Join(allContents, "\n\n"), transferCount, false
 }
 
-func (s *ChatService) recordToolSearchOutputForRun(sessionID, content string) {
+func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, content string) {
+	if run == nil {
+		return
+	}
 	var output struct {
 		Matches []string `json:"matches"`
 	}
@@ -1945,12 +1983,14 @@ func (s *ChatService) recordToolSearchOutputForRun(sessionID, content string) {
 	}
 
 	s.mu.Lock()
-	bundle := s.installedBundle
+	generation := run.activeBundleGeneration
+	bundle := s.findBundleByGenerationLocked(generation)
 	s.mu.Unlock()
 	if bundle == nil || bundle.MCPCatalog == nil {
 		return
 	}
 
+	sessionID := run.sessionID
 	now := s.now().UnixMilli()
 	for _, name := range output.Matches {
 		entry, ok := bundle.MCPCatalog.LookupExact(name)
@@ -3423,12 +3463,12 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	}
 
 	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
-	defaultToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "default")
+	defaultToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "default", cfg.Agent.Runtime.ToolSearchMode, cfg.Agent.Runtime.AgenticProtocol)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build Eino v0.9 default tool_search bridge: %w", err)
 	}
-	planToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "plan")
+	planToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "plan", cfg.Agent.Runtime.ToolSearchMode, cfg.Agent.Runtime.AgenticProtocol)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build Eino v0.9 plan tool_search bridge: %w", err)

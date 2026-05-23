@@ -161,7 +161,7 @@ func (b *remoteSkillBackend) List(ctx context.Context) ([]skill.FrontMatter, err
 	if b == nil || b.backend == nil || b.backend.op == nil {
 		return nil, nil
 	}
-	cmd := "cd " + shellQuote(b.backend.workspace) + " && find .starxo/skills .claude/skills -mindepth 2 -maxdepth 2 -name SKILL.md -print 2>/dev/null | sort"
+	cmd := "cd " + shellQuote(b.backend.workspace) + ` && for d in .starxo/skills .claude/skills; do [ -d "$d" ] && find "$d" -mindepth 2 -maxdepth 2 -name SKILL.md -print; done 2>/dev/null | sort`
 	out, err := b.backend.op.RunCommand(ctx, []string{"sh", "-c", cmd})
 	if err != nil {
 		return nil, nil
@@ -188,6 +188,9 @@ func (b *remoteSkillBackend) Get(ctx context.Context, name string) (skill.Skill,
 	if name == "" {
 		return skill.Skill{}, fmt.Errorf("skill name is required")
 	}
+	if !isSafeSkillName(name) {
+		return skill.Skill{}, fmt.Errorf("invalid skill name %q", name)
+	}
 	candidates := []string{
 		path.Join(".starxo/skills", name, "SKILL.md"),
 		path.Join(".claude/skills", name, "SKILL.md"),
@@ -202,6 +205,16 @@ func (b *remoteSkillBackend) Get(ctx context.Context, name string) (skill.Skill,
 		}
 	}
 	return skill.Skill{}, fmt.Errorf("%w: skill %s", os.ErrNotExist, name)
+}
+
+func isSafeSkillName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	return path.Clean(name) == name
 }
 
 func (b *remoteSkillBackend) readSkill(ctx context.Context, relPath string) (skill.Skill, error) {

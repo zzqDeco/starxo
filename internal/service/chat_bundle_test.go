@@ -16,6 +16,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 
 	"starxo/internal/config"
+	"starxo/internal/llm"
 	"starxo/internal/model"
 	"starxo/internal/tools"
 )
@@ -604,6 +605,66 @@ func TestDeferredUnknownToolHandlerAllowsToolSearchEvenWithoutDeferredMatches(t 
 	}
 	if got != "" {
 		t.Fatalf("expected tool_search to remain allowed, got %q", got)
+	}
+}
+
+func TestEinoV09ToolSearchCandidatesIncludePendingCatalogEntries(t *testing.T) {
+	entry := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(entry); err != nil {
+		t.Fatalf("register entry: %v", err)
+	}
+	permCtx := tools.ToolPermissionContext{
+		Mode: "default",
+		Servers: map[string]tools.MCPServerPermissionState{
+			"alpha": {State: tools.MCPServerStatePending},
+		},
+	}
+	state := tools.ComputeDeferredMCPState(catalog, nil, permCtx)
+	if len(state.SearchablePoolForMode) != 0 {
+		t.Fatalf("expected current searchable pool to be empty without cached metadata, got %#v", state.SearchablePoolForMode)
+	}
+	candidates := einoV09ToolSearchCandidates(catalog, permCtx)
+	if len(candidates) != 1 {
+		t.Fatalf("expected pending catalog entry to remain an Eino tool_search candidate, got %d", len(candidates))
+	}
+}
+
+func TestEinoV09ToolSearchModeHonorsAgenticNativeConfig(t *testing.T) {
+	if useEinoV09ModelToolSearch("client", llm.AgenticProtocolOpenAI) {
+		t.Fatalf("client mode must not use model-native tool search")
+	}
+	if useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOff) {
+		t.Fatalf("model_native without agentic protocol must stay on client-side search")
+	}
+	if !useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOpenAI) {
+		t.Fatalf("expected model_native with agentic protocol to enable model-native tool search")
+	}
+	if !useEinoV09ModelToolSearch("auto", llm.AgenticProtocolArk) {
+		t.Fatalf("expected auto with agentic protocol to enable model-native tool search")
+	}
+}
+
+func TestRecordToolSearchOutputForRunUsesActiveBundleGeneration(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-active-bundle"
+	entry := stubToolSearchCatalogEntry("mcp__old__grep", "old")
+	oldCatalog := tools.NewToolCatalog()
+	if err := oldCatalog.Register(entry); err != nil {
+		t.Fatalf("register old entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.activeBundleGeneration = 1
+	chat.installedBundle = &RunnerBundle{Generation: 2, MCPCatalog: tools.NewToolCatalog()}
+	chat.retiredBundles = []*RunnerBundle{{Generation: 1, MCPCatalog: oldCatalog}}
+	chat.mu.Unlock()
+
+	chat.recordToolSearchOutputForRun(run, `{"matches":["mcp__old__grep"]}`)
+	discovered := run.discoveredToolsSnapshot()
+	if _, ok := discovered[entry.CanonicalName]; !ok {
+		t.Fatalf("expected discovery to use active retired bundle catalog, got %#v", discovered)
 	}
 }
 

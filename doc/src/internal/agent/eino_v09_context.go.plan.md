@@ -13,7 +13,8 @@
 - `remoteWorkspaceBackend` 通过 `commandline.Operator` 读取和写入当前 sandbox workspace 文件。
 - `remoteWorkspaceBackend.resolve(...)` 会拒绝 `..` 逃逸和 workspace 外绝对路径；middleware 文件读写也必须遵守 workspace guard。
 - `reduction` 将大工具结果写入 `.starxo/tool-results`，并使用 `Read` 作为恢复工具名。
-- `skill` 搜索 `.starxo/skills/<name>/SKILL.md` 和 `.claude/skills/<name>/SKILL.md`。
+- `skill` 分别搜索 `.starxo/skills/<name>/SKILL.md` 和 `.claude/skills/<name>/SKILL.md`；任一根目录缺失时不会导致另一个根目录的技能被丢弃。
+- `Get` 会拒绝包含路径分隔符、`.`、`..` 的 skill name，避免请求逃逸到配置的 skill roots 之外。
 - `agentsmd` 读取 `AGENTS.md` 和 `.starxo/AGENTS.md`，作为 transient context 注入。
 - summarization 只处理模型上下文压缩；Starxo 的 runtime sidecar compact 仍由 service 层维护。
 
