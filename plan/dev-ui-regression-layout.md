@@ -12,6 +12,7 @@
 - 新增 `workspace:changed` Wails 事件，terminal、agent runtime 写入、worktree 切换和上传完成后通知前端刷新 workspace。
 - `WorkspacePanel` 对 `workspace:changed` 做 session/container 过滤和 debounce 刷新；当前预览文件变更后自动重载。
 - Workspace panel 增加 container query，窄 inspector 下文件树和预览自动堆叠，避免控件 offscreen。
+- macOS production/dev plist 补充 Local Network 用途声明和 local networking ATS 例外，避免打包 app 访问局域网 SSH 主机时报 `no route to host`。
 
 ## Verification
 - `cd frontend && npm run build`
