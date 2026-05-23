@@ -156,6 +156,9 @@ jobs:
           case "${TARGET}" in
             darwin-universal)
               test -d build/bin/starxo.app
+              test -f build/bin/starxo.app/Contents/Info.plist
+              find build/bin/starxo.app/Contents/Resources -maxdepth 1 -type f -iname '*.icns' -print -quit | grep -q .
+              /usr/libexec/PlistBuddy -c "Print :CFBundleName" build/bin/starxo.app/Contents/Info.plist
               ditto -c -k --keepParent build/bin/starxo.app "dist/starxo-${VERSION}-darwin-universal.zip"
               ;;
             windows-amd64)
@@ -170,11 +173,14 @@ jobs:
                 echo "::error::Windows installer was not found in build/bin; check NSIS/makensis availability"
                 exit 1
               fi
+              test -f build/windows/icon.ico
+              test -f build/windows/wails.exe.manifest
               cp "${exe}" "dist/starxo-${VERSION}-windows-amd64.exe"
               cp "${installer}" "dist/starxo-${VERSION}-windows-amd64-installer.exe"
               ;;
             linux-amd64)
               test -f build/bin/starxo
+              file build/bin/starxo
               tar -C build/bin -czf "dist/starxo-${VERSION}-linux-amd64.tar.gz" starxo
               ;;
             *)

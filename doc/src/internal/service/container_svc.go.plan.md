@@ -10,6 +10,7 @@
 - `StartContainer`/`ActivateContainer` 激活已有 sandbox。
 - `StopContainer`/`DeactivateContainer` 停用当前 sandbox。
 - `DestroyContainer` 删除 registry，当前连接可访问时同步删除远端 workspace。
+- `DestroyContainer` 成功后发出 `container:destroyed` 事件，让 workspace drawer 等 UI 清除 stale sandbox 状态。
 
 ## 维护要点
 - 旧 Docker 不再启动/停止/销毁，只作为 `unavailable` 记录展示和删除。

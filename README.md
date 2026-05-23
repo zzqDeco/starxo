@@ -14,7 +14,8 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
 - **Runtime V2 Tool Surface** — Always-visible `ToolSearch`, direct file/search/edit/shell tools, dynamic `Agent` delegation, worktree isolation, deferred LSP/Skill/Web/Notebook tools, and managed background task output
-- **Tool Permissions** — Risky runtime and MCP tool calls prompt for deny, allow once, or allow for the current session
+- **Runtime Tool Configuration** — Settings for WebSearch/TinyFish diagnostics and persistent LSP server mappings, including custom language server commands
+- **Tool Permissions** — Risky runtime and MCP tool calls enter a queued approval UI with deny, allow once, session grants, and grant management in Settings
 - **MCP Protocol** — Model Context Protocol tool extension support (stdio/SSE transports)
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
@@ -22,7 +23,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
 - **File Transfer** — Upload/download support via SFTP directly into each persistent sandbox workspace, with workspace metadata, path copy, and tmp cleanup
-- **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, workspace drawer, persistent runtime dock, and composer-level mode controls
+- **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, lifecycle-aware workspace drawer, persistent runtime dock, sandbox command terminal, and composer-level mode controls
 
 ## Tech Stack
 
@@ -75,10 +76,12 @@ starxo/
 │   │
 │   ├── service/                     # Wails-bound services (frontend API)
 │   │   ├── chat.go                  #   ChatService: per-session agent lifecycle (SessionRun), messaging, streaming
+│   │   ├── runtime_context_compact.go # Runtime V2 context compact state
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 dynamic Agent tool
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 persistent language server manager
 │   │   ├── runtime_workspaces.go    #   Runtime V2 session-scoped worktree workspace manager
 │   │   ├── runtime_web_tools.go     #   Runtime V2 WebFetch/WebSearch tool implementations
+│   │   ├── websearch_diagnostics.go #   WebSearch/TinyFish configuration diagnostics
 │   │   ├── sandbox_svc.go           #   SandboxService: connect/disconnect/reconnect, health monitor (RWMutex)
 │   │   ├── session_svc.go           #   SessionService: session CRUD, multi-session state coordination
 │   │   ├── settings_svc.go         #   SettingsService: config management, connection testing
@@ -163,15 +166,25 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 
 The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
 
-Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `LSP`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `Agent` can run focused subagents synchronously or in the background, and can request worktree isolation for bounded tasks.
+Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `WorktreeDiff`, `WorktreeMerge`, `LSP`, `LSPEdit`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `LSPEdit` exposes writable language-server rename/format operations through the permission queue. `Agent` can run focused subagents synchronously or in the background, and can request context-scoped worktree isolation for bounded tasks without switching the parent session workspace.
+
+Runtime worktrees now have a review/merge loop: `WorktreeDiff` reports active worktree status, diff stat, and optional patch content; `WorktreeMerge` commits active worktree changes, merges them back into the original sandbox workspace, optionally removes the worktree, and restores the parent workspace. Merge refuses to run while the parent workspace has uncommitted changes, and merge conflicts return structured conflict files/recovery guidance after aborting the parent merge state. The workspace drawer also shows the active session worktree, can review/copy/merge it with confirmation, and the file browser follows the active worktree path.
+
+File-changing runtime tools now emit structured diff metadata. `Write` and `Edit` timeline events show created/updated state, replacement counts, `+/-` line counts, bytes, and bounded patch previews instead of requiring users to inspect raw JSON.
 
 `WebSearch` defaults to DuckDuckGo HTML search and can be redirected through `agent.webSearch.providers`. `type: "tinyfish"` is a dedicated TinyFish Search API adapter for `GET https://api.search.tinyfish.ai` with `X-API-Key` read from `TINYFISH_API_KEY` by default; it supports TinyFish `query`, `location`, `language`, and `page` parameters and parses `results[].title/url/snippet`. `type: "http"` remains available for custom GET/POST providers with headers, body templates, and JSON path extraction.
 
+Settings include static WebSearch diagnostics and an explicit WebSearch smoke test. The smoke test runs only when clicked, then reports provider, URL, duration, and compact results.
+
+`WebFetch` and `WebSearch` only execute `http`/`https` requests. Empty hosts, URL userinfo, unsafe local/private/link-local/multicast/unspecified targets, IPv6 ULA/link-local targets, and `169.254.169.254` are blocked by default; non-public endpoints require an explicit runtime permission grant and redirects are validated before they are followed.
+
 Plan mode keeps only read-only trusted tools visible. Writable tools and shell execution are hidden until the plan is approved.
 
-Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data.
+Risky tool calls are routed through the Runtime V2 permission queue. The desktop UI can deny, allow once, or allow the tool for the current session; session grants are persisted with the session data and can be reviewed or revoked from Settings / Permissions.
 
 Background Bash and Agent jobs can be inspected from the Runtime Tasks panel. The panel lists tasks for the active session, refreshes task status/output, supports copying output, and can stop running tasks through the Runtime V2 task APIs.
+
+Long sessions use token-aware context compaction. Starxo keeps recent turns in full and injects a compact runtime summary that preserves discovered tools, session permission grants, task output pointers, file read ranges, recent edit summaries, todos, plan state, and active worktree routing. Full message history remains persisted in `session_data.json`.
 
 ### Production Build
 
@@ -180,6 +193,8 @@ wails build
 ```
 
 Output goes to `build/bin/`.
+
+Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens. macOS builds declare Local Network access because Starxo connects to LAN sandbox hosts over SSH; allow the system prompt if you use `192.168.x.x` or `.local` remotes.
 
 ### Tagged Release
 
@@ -192,7 +207,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow builds unsigned macOS, Windows, and Linux packages, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
+The release workflow builds unsigned macOS, Windows, and Linux packages, checks basic platform bundle resources, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
 
 After the workflow finishes, verify:
 
@@ -240,6 +255,8 @@ Both flags are disabled by default and are not intended as production-facing con
 The Sandbox settings tab can run a full remote diagnostics pass before saving settings. Linux checks cover `bwrap`, `python3`, Python venv creation, user namespace sysctls, AppArmor's unprivileged user namespace restriction, and a bwrap smoke command. macOS checks cover `sandbox-exec`, `python3`, and a minimal Seatbelt smoke command.
 
 Normal Linux package dependencies can be installed with the Install runtime button. Host security changes such as `sysctl` or AppArmor adjustments are never executed automatically; Starxo only displays copyable commands so the operator can review and run them manually.
+
+Sandbox creation reports each setup step, including Python venv creation, pip upgrade, and package installation. Python bootstrap commands obey `commandTimeoutSec`; pip failures include remote network, index, and proxy guidance, and incomplete sandbox directories are cleaned up best-effort. The runtime terminal executes one command at a time in the active sandbox workspace and is disabled when no sandbox is active.
 
 ## Data Storage
 

@@ -16,10 +16,20 @@
 - legacy aliases 映射到 canonical runtime tool names。
 - plan mode current loaded 只保留 read-only trusted runtime tools。
 - `Edit` tool 能通过 invokable contract 修改文件并返回 patch。
+- `Edit` tool 替换大段旧文本时仍会在 patch 中保留 replacement 内容。
+- `Write` tool 覆盖已有文件时返回 created=false、增删行和 patch metadata。
+- `Write` tool 覆盖大型已有文件时使用 bounded preview，不调用全量 `ReadFile`。
+- `Write` tool 的 bounded patch 会为写入的新内容保留预算，大文件覆盖小文件时仍能看到新增内容预览。
+- bounded patch helper 会在生成预览时按 limit 截断并标记，不依赖先拼完整 patch。
+- bounded patch helper 对超长单行保留可容纳的内容前缀，不退化成只有截断标记。
 - `safeSearchPath` 拒绝 workspace 外 absolute path 和 `..` traversal。
+- `workspaceFilePath` 在 worktree mode 下把 relative path 和 `/workspace/...` 映射到 active worktree，并拒绝 parent workspace absolute path。
+- `workspaceFilePath` 允许 active worktree 自身的 absolute path，避免 `/workspace/.starxo/worktrees/...` 被重复映射。
 - 大型 Bash 输出会写入持久化结果并在 inline stdout 中截断。
 - `Read` tool 会通过 fake workspace manager 使用当前 session active workspace。
-- deferred runtime tools 的 metadata 覆盖 LSP/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。
+- deferred runtime tools 的 metadata 覆盖 LSP/LSPEdit/Skill/NotebookEdit/WebFetch/WebSearch 的 defer/read-only 语义。
+- `LSPEdit` 和 `NotebookEdit` 必须保持 writable deferred，避免绕过 runtime permission queue。
+- `WorktreeDiff` 是 read-only deferred；`WorktreeMerge` 是 writable deferred，plan mode 不直接加载。
 
 ## 5. 维护建议
 - 新增 Runtime V2 core tool 时同步补 alias/permission/path 或执行语义测试。

@@ -17,10 +17,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { width: windowWidth } = useWindowSize()
-const drawerWidth = ref(980)
+const drawerWidth = ref(760)
 
-const minDrawerWidth = computed(() => Math.floor(Math.min(560, windowWidth.value * 0.9)))
-const maxDrawerWidth = computed(() => Math.max(900, Math.floor(windowWidth.value * 0.82)))
+const minDrawerWidth = computed(() => Math.max(320, Math.min(420, windowWidth.value - 24)))
+const maxDrawerWidth = computed(() => Math.max(320, windowWidth.value - 24))
 const effectiveDrawerWidth = computed(() => {
   const clamped = Math.min(drawerWidth.value, maxDrawerWidth.value)
   return Math.max(minDrawerWidth.value, clamped)
@@ -59,7 +59,7 @@ onUnmounted(() => {
     <div class="workspace-group">
       <SplitHandle
         direction="horizontal"
-        :default-size="980"
+        :default-size="760"
         :min-size="minDrawerWidth"
         :max-size="maxDrawerWidth"
         :reverse="true"
@@ -96,7 +96,8 @@ onUnmounted(() => {
 .workspace-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(5, 6, 16, 0.46);
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(4px);
   opacity: 0;
   transition: opacity 180ms ease;
   border: none;
@@ -118,9 +119,10 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
+  background: var(--platform-bg-elevated);
+  backdrop-filter: blur(26px) saturate(1.2);
   border-left: 1px solid var(--border-subtle);
-  box-shadow: -24px 0 42px rgba(0, 0, 0, 0.35);
+  box-shadow: -24px 0 48px rgba(0, 0, 0, 0.2);
 }
 
 .workspace-panel-head {
@@ -131,14 +133,14 @@ onUnmounted(() => {
   gap: 10px;
   padding: 0 10px 0 12px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
 }
 
 .workspace-panel-title {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
 }
 

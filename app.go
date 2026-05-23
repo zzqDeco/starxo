@@ -24,6 +24,7 @@ type App struct {
 	settingsService  *service.SettingsService
 	sessionService   *service.SessionService
 	containerService *service.ContainerService
+	platformService  *service.PlatformService
 }
 
 // NewApp creates a new App with all services initialized.
@@ -44,10 +45,11 @@ func NewApp() *App {
 		containerStore:   containerStore,
 		chatService:      chatSvc,
 		sandboxService:   sandboxSvc,
-		fileService:      service.NewFileService(sandboxSvc),
+		fileService:      service.NewFileService(sandboxSvc, chatSvc),
 		settingsService:  service.NewSettingsService(store),
 		sessionService:   sessionSvc,
 		containerService: containerSvc,
+		platformService:  service.NewPlatformService(),
 	}
 }
 

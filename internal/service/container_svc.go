@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"starxo/internal/model"
 	"starxo/internal/storage"
 )
@@ -153,5 +155,8 @@ func (s *ContainerService) DestroyContainer(containerRegID string) error {
 		}
 	}
 
+	wailsruntime.EventsEmit(s.ctx, "container:destroyed", map[string]string{
+		"containerID": containerRegID,
+	})
 	return nil
 }

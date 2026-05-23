@@ -8,14 +8,15 @@
 - 所属模块: frontend/src/components/terminal (终端模块)
 
 ## 2. 核心职责
-- 终端输出面板组件，使用 xterm.js 显示 Agent 的命令执行输出和容器状态信息。
+- 终端面板组件，使用 xterm.js 显示 Agent/用户命令输出和容器状态信息。
+- 提供当前 active sandbox workspace 的非交互式命令输入，不是持久 PTY。
 - 底部状态栏显示 SSH 连接状态、活跃容器名称和输出行数统计。
 - 提供 xterm.js 不可用时的纯 HTML 回退渲染。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: Wails 事件 (`terminal:output`, `container:ready`, `container:progress`)、connectionStore (sshConnected)、containerStore (activeContainerID)
-- 输出结果: 渲染终端输出 UI + 底部状态栏
+- 输入来源: Wails 事件 (`terminal:output`, `container:ready`, `container:progress`)、SandboxService `RunTerminalCommand`、connectionStore (sshConnected)、containerStore (activeContainerID)
+- 输出结果: 渲染终端输出 UI、命令输入条、底部状态栏
 
 ## 4. 关键实现细节
 - **Wails 事件监听** (通过 useWailsEvent composable):
@@ -23,16 +24,20 @@
   - `container:ready` — 显示带时间戳的容器连接成功消息
   - `container:progress` — 显示带时间戳的容器创建进度 `[HH:MM:SS] [%] step`
 - **xterm.js 初始化**: 动态导入、深色主题配置、FitAddon 自适应
+- 初始 banner 使用短句 “Starxo terminal / Run commands in the active sandbox workspace.”，避免把终端面板表现成营销式或版本号式启动页。
 - **ResizeObserver**: 自动适配容器尺寸
 - **回退模式**: xterm 不可用时使用 div 列表渲染；stderr 样式增加红色左边框 + 浅红背景
 - **状态栏** (.terminal-status-bar):
   - 左侧: SSH 连接状态点 (绿色 connected / 灰色 disconnected) + 活跃容器名称 (Cube 图标)
   - 右侧: 输出行数统计
+- **命令输入条**:
+  - SSH 未连接或没有 active sandbox 时禁用
+  - 提交后调用 `RunTerminalCommand`，命令输出仍通过 `terminal:output` 写入面板
 - **行数计数**: `lineCount` ref 跟踪终端输出总行数，clearTerminal 时重置
 
 ## 5. 依赖关系
 - 内部依赖: `@/composables/useWailsEvent`、`@/stores/connectionStore`、`@/stores/containerStore`
-- 外部依赖: vue、naive-ui、@vicons/ionicons5 (TrashOutline, Cube)、@xterm/xterm (动态导入)、@xterm/addon-fit (动态导入)、vue-i18n
+- 外部依赖: vue、naive-ui、@vicons/ionicons5 (TrashOutline, Cube, PaperPlaneOutline)、@xterm/xterm (动态导入)、@xterm/addon-fit (动态导入)、vue-i18n
 
 ## 6. 变更影响面
 - 新增 connectionStore 和 containerStore 依赖用于状态栏显示
@@ -43,3 +48,5 @@
 - 事件名与后端 SandboxService 发射的事件保持一致（`container:*` 命名空间）。
 - xterm.js 使用动态导入，加载失败时自动回退。
 - 状态栏依赖 connectionStore/containerStore，store 接口变更时需同步更新。
+- 当前命令输入是一次性 shell command runner；如果后续做完整 PTY，需要新增专门的 process/session 生命周期和 resize/stdin/stdout 通道。
+- 终端面板在 native UI pass 中按 inspector 工具面板处理：白色/中性输出面、轻 toolbar、底部状态栏使用系统字体，减少彩色终端装饰。

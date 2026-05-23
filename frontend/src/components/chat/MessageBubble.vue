@@ -59,22 +59,50 @@ function truncStr(s: string, max: number): string {
   return s.length <= max ? s : s.substring(0, max) + '...'
 }
 
+function compactPath(path?: string): string {
+  if (!path) return '-'
+  const normalized = path.replace(/\\/g, '/')
+  const workspaceIndex = normalized.indexOf('/workspace/')
+  const display = workspaceIndex >= 0 ? normalized.slice(workspaceIndex + '/workspace/'.length) : normalized
+  if (display.length <= 64) return display
+  const parts = display.split('/').filter(Boolean)
+  if (parts.length <= 2) return truncStr(display, 64)
+  return `.../${parts.slice(-2).join('/')}`
+}
+
 function summarizeToolCall(evt: TurnEvent): string {
   const name = evt.toolName || 'tool'
   const args = tryParseArgs(evt.toolArgs)
 
-  if (name === 'read_file') return `Read ${args?.path || '-'}`
-  if (name === 'write_file') return `Write ${args?.path || '-'}`
-  if (name === 'list_files') return `List ${args?.path || '/workspace'}`
-  if (name === 'str_replace_editor') return `Edit ${args?.path || '-'}`
-  if (name === 'shell_execute') return `Shell ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
-  if (name === 'python_execute') return `Python ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
-  if (name === 'task') return `Delegate ${args?.subagent_type || 'sub-agent'}`
-  if (name === 'write_todos') return 'Write todos'
-  if (name === 'update_todo') return `Todo ${args?.id || '-'} -> ${args?.status || '-'}`
-  if (name === 'notify_user') return `Notify ${truncStr(args?.message || '-', 50)}`
+  if (name === 'Read' || name === 'read_file') return `${t('message.tool.read')} ${compactPath(args?.file_path || args?.path)}`
+  if (name === 'Write' || name === 'write_file') return `${t('message.tool.write')} ${compactPath(args?.file_path || args?.path)}`
+  if (name === 'Glob' || name === 'list_files') return `${name === 'Glob' ? t('message.tool.glob') : t('message.tool.list')} ${args?.path || args?.pattern || '/workspace'}`
+  if (name === 'Grep') return `${t('message.tool.grep')} ${args?.pattern || args?.query || '-'}`
+  if (name === 'Edit' || name === 'str_replace_editor') return `${t('message.tool.edit')} ${compactPath(args?.file_path || args?.path)}`
+  if (name === 'Bash' || name === 'shell_execute') return `${t('message.tool.shell')} ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
+  if (name === 'python_execute') return `${t('message.tool.python')} ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
+  if (name === 'Agent' || name === 'task') return `${t('message.tool.delegate')} ${args?.subagent_type || args?.subagentType || t('message.agent.subagent')}`
+  if (name === 'ToolSearch') return `${t('message.tool.toolSearch')} ${args?.query || '-'}`
+  if (name === 'WebSearch') return `${t('message.tool.webSearch')} ${args?.query || '-'}`
+  if (name === 'WebFetch') return `${t('message.tool.webFetch')} ${args?.url || '-'}`
+  if (name === 'TaskOutput') return `${t('message.tool.taskOutput')} ${args?.task_id || args?.taskID || '-'}`
+  if (name === 'TaskStop') return `${t('message.tool.taskStop')} ${args?.task_id || args?.taskID || '-'}`
+  if (name === 'write_todos') return t('message.tool.todos')
+  if (name === 'update_todo') return `${t('message.tool.todoUpdate')} -> ${todoStatusLabel(args?.status)}`
+  if (name === 'notify_user') return `${t('message.tool.notify')} ${truncStr(args?.message || '-', 50)}`
 
   return truncStr(name, 70)
+}
+
+function todoStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    pending: t('message.todoStatus.pending'),
+    in_progress: t('message.todoStatus.inProgress'),
+    done: t('message.todoStatus.done'),
+    failed: t('message.todoStatus.failed'),
+    blocked: t('message.todoStatus.blocked'),
+  }
+  return labels[status || ''] || t('common.unknown')
 }
 
 function summarizeEvent(evt: TurnEvent): string {
@@ -250,11 +278,11 @@ function agentColor(name: string): string {
 
 function agentLabel(name: string): string {
   const labels: Record<string, string> = {
-    'orchestrator': 'Orchestrator',
-    'code_writer': 'Code Writer',
-    'code_executor': 'Code Executor',
-    'file_manager': 'File Manager',
-    'coding_agent': 'Coding Agent'
+    'orchestrator': t('message.agent.orchestrator'),
+    'code_writer': t('message.agent.codeWriter'),
+    'code_executor': t('message.agent.codeExecutor'),
+    'file_manager': t('message.agent.fileManager'),
+    'coding_agent': t('message.agent.codingAgent')
   }
   return labels[name] || name
 }
@@ -330,9 +358,9 @@ function copyContent() {
           <div v-if="seg.type === 'transfer'" class="transfer-divider">
             <span class="transfer-line"></span>
             <span class="transfer-label">
-              <span :style="{ color: agentColor(seg.fromAgent || '') }">{{ agentLabel(seg.fromAgent || '') }}</span>
+              <span>{{ agentLabel(seg.fromAgent || '') }}</span>
               <span class="transfer-arrow">&rarr;</span>
-              <span :style="{ color: agentColor(seg.agent) }">{{ agentLabel(seg.agent) }}</span>
+              <span>{{ agentLabel(seg.agent) }}</span>
             </span>
             <span class="transfer-line"></span>
           </div>
@@ -440,24 +468,24 @@ function copyContent() {
   font-size: 12px;
 }
 
-/* User — de-bubbled: flat text with a 3px cyan bar on the right */
 .user-bubble {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  max-width: 92%;
+  max-width: min(680px, 92%);
 }
 
 .user-content {
-  background: transparent;
+  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
   color: var(--text-primary);
-  border-right: 3px solid var(--accent-cyan);
-  padding: 2px 14px 2px 16px;
-  font-size: var(--fs-md);
-  line-height: var(--lh-normal);
+  border: 1px solid var(--border-subtle);
+  border-radius: 13px;
+  padding: 8px 11px;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-  text-align: right;
+  text-align: left;
 }
 
 /* Assistant */
@@ -471,19 +499,32 @@ function copyContent() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .assistant-avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, var(--accent-cyan-dim), var(--accent-cyan));
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--text-faint);
   flex-shrink: 0;
+}
+
+:global(:root[data-platform="macos"] .assistant-header){
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+:global(:root[data-platform="macos"] .assistant-avatar){
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: 5px;
 }
 
 .bubble-content {
@@ -492,10 +533,10 @@ function copyContent() {
 }
 
 .assistant-bubble > .bubble-content {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px var(--radius-lg) var(--radius-lg) var(--radius-lg);
-  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .msg-time {
@@ -526,7 +567,7 @@ function copyContent() {
 
 .copy-btn:hover {
   color: var(--text-secondary);
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   opacity: 1;
 }
 
@@ -535,6 +576,10 @@ function copyContent() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+:global(:root[data-platform="macos"] .timeline-container){
+  gap: 1px;
 }
 
 /* Transfer divider */
@@ -556,9 +601,10 @@ function copyContent() {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  font-weight: 600;
-  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
   white-space: nowrap;
+  color: var(--text-muted);
 }
 
 .transfer-arrow {
@@ -579,25 +625,32 @@ function copyContent() {
 }
 
 .segment-color-bar {
-  width: 3px;
+  width: 2px;
   height: 14px;
   border-radius: 2px;
-  background: var(--seg-color);
+  background: transparent;
   flex-shrink: 0;
 }
 
 .segment-agent-name {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--seg-color);
-  letter-spacing: 0.3px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+
+:global(:root[data-platform="macos"] .segment-agent-name),
+:global(:root[data-platform="macos"] .subagent-name){
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
 }
 
 .segment-events {
-  padding-left: 11px;
-  border-left: 1px solid var(--border-subtle);
-  margin-left: 1px;
+  padding-left: 0;
+  border-left: 0;
+  margin-left: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -605,56 +658,62 @@ function copyContent() {
 
 /* ==================== Sub-agent collapsible segment ==================== */
 .subagent-segment {
-  background: color-mix(in srgb, var(--agent-color) 4%, var(--bg-deepest));
-  border: 1px solid color-mix(in srgb, var(--agent-color) 15%, transparent);
-  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--platform-bg-raised) 74%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
   margin: 6px 0;
   overflow: hidden;
   transition: border-color 200ms ease;
 }
 
+:global(:root[data-platform="macos"] .subagent-segment){
+  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
+  border-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  border-radius: 8px;
+}
+
 .subagent-segment:hover {
-  border-color: color-mix(in srgb, var(--agent-color) 30%, transparent);
+  border-color: color-mix(in srgb, var(--border-strong) 58%, transparent);
 }
 
 .subagent-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   cursor: pointer;
   user-select: none;
   transition: background 150ms ease;
 }
 
 .subagent-header:hover {
-  background: color-mix(in srgb, var(--agent-color) 6%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-raised) 62%, transparent);
 }
 
 .subagent-icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--agent-color) 15%, transparent);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--agent-color);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .subagent-name {
   font-size: 12px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--agent-color);
-  letter-spacing: 0.3px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  letter-spacing: 0;
   flex-shrink: 0;
 }
 
 .subagent-state-pill {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 500;
   font-family: var(--font-mono);
   padding: 1px 6px;
   border-radius: 999px;
@@ -662,16 +721,22 @@ function copyContent() {
   flex-shrink: 0;
 }
 
+:global(:root[data-platform="macos"] .subagent-state-pill){
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  background: transparent;
+}
+
 .subagent-state-pill.running {
-  color: var(--accent-violet);
-  border-color: rgba(167, 139, 250, 0.35);
-  background: rgba(167, 139, 250, 0.1);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+  background: transparent;
 }
 
 .subagent-state-pill.done {
-  color: var(--accent-emerald);
-  border-color: rgba(16, 185, 129, 0.35);
-  background: rgba(16, 185, 129, 0.1);
+  color: var(--text-faint);
+  border-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  background: transparent;
 }
 
 .subagent-stats {
@@ -682,7 +747,7 @@ function copyContent() {
 }
 
 .subagent-status.done {
-  color: var(--accent-emerald);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -730,13 +795,13 @@ function copyContent() {
 }
 
 .subagent-body {
-  border-top: 1px solid color-mix(in srgb, var(--agent-color) 10%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
   padding: 8px 12px 10px;
 }
 
 .subagent-body .segment-events {
   padding-left: 8px;
-  border-left-color: color-mix(in srgb, var(--agent-color) 20%, transparent);
+  border-left-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
 }
 
 /* Expand/collapse transition */

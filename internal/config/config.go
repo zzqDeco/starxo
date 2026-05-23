@@ -62,8 +62,24 @@ type MCPServerConfig struct {
 }
 
 type AgentConfig struct {
-	MaxIterations int             `json:"maxIterations"`
-	WebSearch     WebSearchConfig `json:"webSearch"`
+	MaxIterations int              `json:"maxIterations"`
+	WebSearch     WebSearchConfig  `json:"webSearch"`
+	LSP           RuntimeLSPConfig `json:"lsp"`
+}
+
+type RuntimeLSPConfig struct {
+	Enabled          *bool                    `json:"enabled,omitempty"`
+	RequestTimeoutMS int                      `json:"requestTimeoutMs,omitempty"`
+	MaxResultBytes   int                      `json:"maxResultBytes,omitempty"`
+	Servers          []RuntimeLSPServerConfig `json:"servers,omitempty"`
+}
+
+type RuntimeLSPServerConfig struct {
+	Language   string   `json:"language"`
+	Executable string   `json:"executable,omitempty"`
+	Command    []string `json:"command,omitempty"`
+	Extensions []string `json:"extensions,omitempty"`
+	Disabled   bool     `json:"disabled,omitempty"`
 }
 
 type WebSearchConfig struct {
@@ -96,6 +112,7 @@ type WebSearchProviderConfig struct {
 
 func DefaultConfig() *AppConfig {
 	webSearchEnabled := true
+	lspEnabled := true
 	return &AppConfig{
 		SSH: SSHConfig{Port: 22, User: "root"},
 		Sandbox: SandboxConfig{
@@ -114,6 +131,11 @@ func DefaultConfig() *AppConfig {
 			WebSearch: WebSearchConfig{
 				Enabled:         &webSearchEnabled,
 				DefaultProvider: "duckduckgo",
+			},
+			LSP: RuntimeLSPConfig{
+				Enabled:          &lspEnabled,
+				RequestTimeoutMS: 15000,
+				MaxResultBytes:   16 * 1024,
 			},
 		},
 	}
@@ -166,6 +188,16 @@ func NormalizeAppConfig(cfg *AppConfig) {
 	}
 	if cfg.Agent.WebSearch.DefaultProvider == "" {
 		cfg.Agent.WebSearch.DefaultProvider = defaults.Agent.WebSearch.DefaultProvider
+	}
+	if cfg.Agent.LSP.Enabled == nil {
+		enabled := true
+		cfg.Agent.LSP.Enabled = &enabled
+	}
+	if cfg.Agent.LSP.RequestTimeoutMS == 0 {
+		cfg.Agent.LSP.RequestTimeoutMS = defaults.Agent.LSP.RequestTimeoutMS
+	}
+	if cfg.Agent.LSP.MaxResultBytes == 0 {
+		cfg.Agent.LSP.MaxResultBytes = defaults.Agent.LSP.MaxResultBytes
 	}
 
 	cfg.Docker = nil

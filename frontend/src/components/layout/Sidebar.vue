@@ -7,12 +7,14 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
 const feedback = useUiFeedback()
+const props = defineProps<{ compact?: boolean }>()
 const newChatDisabled = computed(() => sessionStore.isBusy)
 
 // Renaming state
@@ -132,10 +134,20 @@ function runStateClass(sessionId: string) {
   if (state.running) return 'running'
   return state.mode === 'plan' ? 'plan' : 'idle'
 }
+
+function handleTitlebarDoubleClick() {
+  void toggleWindowZoom()
+}
 </script>
 
 <template>
-  <nav class="sidebar" :aria-label="t('sidebar.sessions')">
+  <nav class="sidebar" :class="{ compact: props.compact }" :aria-label="t('sidebar.sessions')">
+    <div
+      class="sidebar-window-hit-area"
+      aria-hidden="true"
+      @dblclick="handleTitlebarDoubleClick"
+    ></div>
+
     <!-- New Chat Button -->
     <div class="sidebar-top">
       <NButton
@@ -177,6 +189,7 @@ function runStateClass(sessionId: string) {
         :key="sess.id"
         :class="['session-item', { active: sess.id === sessionStore.activeSessionId, disabled: sessionStore.switching }]"
         :tabindex="sessionStore.switching ? -1 : 0"
+        :title="sess.title || t('sidebar.untitled')"
         role="button"
         @click="handleSessionClick(sess.id)"
         @keydown.enter="handleSessionClick(sess.id)"
@@ -269,11 +282,13 @@ function runStateClass(sessionId: string) {
         type="primary"
         size="small"
         block
+        :aria-label="t('common.connect')"
         :loading="connectionStore.connecting"
         @click="connectionStore.connect()"
         class="conn-btn"
       >
-        {{ t('common.connect') }}
+        <span class="conn-btn-dot" aria-hidden="true"></span>
+        <span class="conn-btn-label">{{ t('common.connect') }}</span>
       </NButton>
       <NButton
         v-else
@@ -281,10 +296,12 @@ function runStateClass(sessionId: string) {
         size="small"
         block
         ghost
+        :aria-label="t('common.disconnect')"
         @click="connectionStore.disconnect()"
         class="conn-btn"
       >
-        {{ t('common.disconnect') }}
+        <span class="conn-btn-dot connected" aria-hidden="true"></span>
+        <span class="conn-btn-label">{{ t('common.disconnect') }}</span>
       </NButton>
     </div>
   </nav>
@@ -295,20 +312,38 @@ function runStateClass(sessionId: string) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--space-md);
+  padding: 12px 8px 10px;
   background: transparent;
+  position: relative;
+}
+
+.sidebar-window-hit-area {
+  display: none;
 }
 
 .sidebar-top {
   flex-shrink: 0;
-  margin-bottom: var(--space-lg);
+  margin-bottom: 12px;
 }
 
 .new-chat-btn {
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.3px;
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
+  --n-border: 1px solid var(--border-subtle) !important;
+  --n-border-hover: 1px solid var(--border-strong) !important;
+  --n-border-pressed: 1px solid var(--border-strong) !important;
+  --n-border-focus: 1px solid var(--border-strong) !important;
+  --n-text-color: var(--text-primary) !important;
+  --n-text-color-hover: var(--text-primary) !important;
+  --n-text-color-pressed: var(--text-primary) !important;
+  --n-text-color-focus: var(--text-primary) !important;
+  --n-ripple-color: transparent !important;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
   border-radius: var(--radius-md) !important;
-  box-shadow: var(--shadow-cyan);
+  box-shadow: none;
 }
 
 .new-chat-btn :deep(.n-button__content) {
@@ -326,14 +361,14 @@ function runStateClass(sessionId: string) {
 }
 
 .new-chat-kbd {
-  font-family: var(--font-brand);
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.25);
-  color: rgba(255, 255, 255, 0.7);
-  letter-spacing: 0.5px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 70%, transparent);
+  color: var(--text-muted);
+  letter-spacing: 0;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -347,10 +382,10 @@ function runStateClass(sessionId: string) {
 
 .section-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 0 8px;
   margin-bottom: 8px;
 }
@@ -404,10 +439,10 @@ function runStateClass(sessionId: string) {
 .session-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px 8px 14px;
-  min-height: 56px;
-  border-radius: var(--radius-md);
+  gap: 8px;
+  padding: 7px 8px;
+  min-height: 46px;
+  border-radius: 7px;
   cursor: pointer;
   border: 1px solid transparent;
   transition: background var(--transition-ui), border-color var(--transition-ui), box-shadow var(--transition-ui);
@@ -417,7 +452,7 @@ function runStateClass(sessionId: string) {
 }
 
 .session-item:hover {
-  background: color-mix(in srgb, var(--bg-hover) 82%, black);
+  background: var(--platform-bg-hover);
 }
 
 .session-item.disabled {
@@ -426,32 +461,44 @@ function runStateClass(sessionId: string) {
 }
 
 .session-item.active {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%);
-  border-color: rgba(34, 211, 238, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.04);
+  background: var(--platform-bg-active);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:global(:root[data-platform="macos"] .session-item){
+  min-height: 46px;
+  border-radius: 8px;
+  border-color: transparent;
+}
+
+:global(:root[data-platform="macos"] .session-item.active){
+  background: var(--platform-bg-active);
+  box-shadow: none;
+}
+
+:global(:root[data-platform="macos"] .session-title){
+  font-weight: 500;
 }
 
 .session-item:focus-visible {
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.25);
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px var(--platform-accent-soft);
 }
 
 /* Active cyan bar */
 .active-bar {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
+  display: none;
 }
 
 .session-icon {
-  color: var(--accent-cyan);
+  color: var(--text-muted);
   margin-top: 2px;
   flex-shrink: 0;
+}
+
+.session-item.active .session-icon {
+  color: var(--text-primary);
 }
 
 .session-info {
@@ -464,7 +511,7 @@ function runStateClass(sessionId: string) {
 
 .session-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -502,13 +549,58 @@ function runStateClass(sessionId: string) {
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--text-faint);
-  padding: 1px 6px;
-  background: rgba(2, 6, 23, 0.72);
-  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
   margin-top: 2px;
   width: fit-content;
+}
+
+:global(:root[data-platform="macos"] .new-chat-btn){
+  height: 32px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+:global(:root[data-platform="macos"] .new-chat-kbd){
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-faint);
+}
+
+:global(:root[data-platform="macos"] .sidebar){
+  padding: 44px 8px 10px;
+}
+
+:global(:root[data-platform="macos"] .sidebar-window-hit-area){
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 42px;
+  z-index: 2;
+  --wails-draggable: no-drag;
+}
+
+:global(:root[data-platform="macos"] .section-label){
+  padding: 0 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: var(--fw-medium);
+  color: var(--text-faint);
+}
+
+:global(:root[data-platform="macos"] .session-item){
+  padding: 7px 8px;
+  gap: 8px;
+}
+
+:global(:root[data-platform="macos"] .session-meta),
+:global(:root[data-platform="macos"] .no-container-hint){
+  font-size: 10.5px;
 }
 
 .container-badge-text {
@@ -520,7 +612,7 @@ function runStateClass(sessionId: string) {
 
 .container-count {
   font-size: 9px;
-  color: var(--accent-cyan);
+  color: var(--text-faint);
   font-weight: 600;
 }
 
@@ -538,29 +630,29 @@ function runStateClass(sessionId: string) {
   width: fit-content;
   max-width: 100%;
   margin-top: 3px;
-  padding: 2px 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: rgba(2, 6, 23, 0.58);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-faint);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   line-height: 1.2;
 }
 
 .session-run-badge.running {
-  color: var(--accent-cyan);
-  border-color: rgba(34, 211, 238, 0.28);
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
 }
 
 .session-run-badge.waiting {
   color: var(--accent-amber);
-  border-color: rgba(245, 158, 11, 0.32);
+  border-color: color-mix(in srgb, var(--accent-amber) 28%, transparent);
 }
 
 .session-run-badge.plan {
-  color: var(--accent-violet);
-  border-color: rgba(167, 139, 250, 0.28);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
 }
 
 .run-pulse {
@@ -591,17 +683,14 @@ function runStateClass(sessionId: string) {
 
 .dot-green {
   background: var(--accent-emerald);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
 }
 
 .dot-red {
   background: var(--accent-rose);
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.3);
 }
 
 .dot-yellow {
   background: var(--accent-amber);
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 .dot-grey {
@@ -611,16 +700,15 @@ function runStateClass(sessionId: string) {
 .dot-pulse {
   animation: pulse 1.5s ease-in-out infinite;
   background: var(--accent-amber);
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 /* Bottom section */
 .sidebar-bottom {
   flex-shrink: 0;
   border-top: 1px solid var(--border-subtle);
-  padding-top: 12px;
+  padding-top: 10px;
   margin-top: 8px;
-  background: linear-gradient(180deg, transparent 0%, rgba(2, 6, 23, 0.26) 100%);
+  background: transparent;
 }
 
 .conn-strip {
@@ -665,8 +753,8 @@ function runStateClass(sessionId: string) {
 
 .conn-error {
   padding: 6px 8px;
-  background: rgba(244, 63, 94, 0.1);
-  border: 1px solid rgba(244, 63, 94, 0.25);
+  background: color-mix(in srgb, var(--accent-rose) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-rose) 24%, transparent);
   border-radius: var(--radius-md);
   margin-bottom: 8px;
 }
@@ -679,6 +767,151 @@ function runStateClass(sessionId: string) {
 }
 
 .conn-btn {
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
+  --n-border: 1px solid var(--border-subtle) !important;
+  --n-border-hover: 1px solid var(--border-strong) !important;
+  --n-border-pressed: 1px solid var(--border-strong) !important;
+  --n-border-focus: 1px solid var(--border-strong) !important;
+  --n-text-color: var(--text-primary) !important;
+  --n-text-color-hover: var(--text-primary) !important;
+  --n-text-color-pressed: var(--text-primary) !important;
+  --n-text-color-focus: var(--text-primary) !important;
+  --n-ripple-color: transparent !important;
   margin-top: 2px;
+}
+
+.conn-btn-dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-rose);
+}
+
+.conn-btn-dot.connected {
+  background: var(--accent-emerald);
+}
+
+.sidebar.compact {
+  align-items: center;
+  padding: 10px 6px;
+}
+
+:global(:root[data-platform="macos"] .sidebar.compact){
+  padding-top: 44px;
+}
+
+.sidebar.compact .sidebar-top {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.sidebar.compact .new-chat-btn {
+  width: 44px;
+  min-width: 44px;
+  height: 34px;
+  padding: 0 !important;
+  margin: 0 auto;
+}
+
+.sidebar.compact .new-chat-btn :deep(.n-button__content) {
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.compact .new-chat-label,
+.sidebar.compact .new-chat-kbd,
+.sidebar.compact .section-label,
+.sidebar.compact .empty-hint,
+.sidebar.compact .session-info,
+.sidebar.compact .conn-label,
+.sidebar.compact .conn-progress,
+.sidebar.compact .conn-error,
+.sidebar.compact .conn-btn-label {
+  display: none;
+}
+
+.sidebar.compact .sessions-list {
+  width: 100%;
+}
+
+.sidebar.compact .session-item {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0 auto 6px;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.compact .session-icon {
+  margin: 0;
+  font-size: 18px;
+}
+
+.sidebar.compact .session-menu-btn {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  opacity: 0;
+  background: var(--platform-bg-raised);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--elev-1);
+}
+
+.sidebar.compact .session-item:hover .session-menu-btn,
+.sidebar.compact .session-item:focus-within .session-menu-btn {
+  opacity: 1;
+}
+
+.sidebar.compact .session-item.active::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  box-shadow: 0 0 0 2px var(--platform-bg-sidebar);
+}
+
+.sidebar.compact .sidebar-bottom {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.sidebar.compact .conn-strip {
+  display: none;
+}
+
+.sidebar.compact .conn-btn {
+  display: inline-flex;
+  width: 44px;
+  min-width: 44px;
+  height: 32px;
+  margin: 0 auto;
+  padding: 0 !important;
+  justify-content: center;
+  border-radius: var(--radius-md) !important;
+}
+
+.sidebar.compact .conn-btn :deep(.n-button__content) {
+  justify-content: center;
+}
+
+.sidebar.compact .conn-btn-dot {
+  display: block;
 }
 </style>

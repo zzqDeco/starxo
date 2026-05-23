@@ -77,7 +77,8 @@ const attachedFileName = computed(() => {
           <NTooltip trigger="hover" placement="top">
             <template #trigger>
               <NButton
-                :type="agentMode === 'default' ? 'primary' : 'default'"
+                type="default"
+                :class="['mode-btn', { active: agentMode === 'default' }]"
                 :disabled="isStreaming || modeSwitching"
                 :loading="modeSwitching && agentMode !== 'default'"
                 @click="emit('switch-mode', 'default')"
@@ -91,7 +92,8 @@ const attachedFileName = computed(() => {
           <NTooltip trigger="hover" placement="top">
             <template #trigger>
               <NButton
-                :type="agentMode === 'plan' ? 'primary' : 'default'"
+                type="default"
+                :class="['mode-btn', { active: agentMode === 'plan' }]"
                 :disabled="isStreaming || modeSwitching"
                 :loading="modeSwitching && agentMode !== 'plan'"
                 @click="emit('switch-mode', 'plan')"
@@ -195,13 +197,59 @@ const attachedFileName = computed(() => {
   font-family: var(--font-brand);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
 }
 
 .mode-buttons {
   flex-shrink: 0;
+}
+
+:global(:root[data-platform="macos"] .composer-meta){
+  margin-bottom: 6px;
+}
+
+:global(:root[data-platform="macos"] .mode-caption){
+  display: none;
+}
+
+:global(:root[data-platform="macos"] .mode-buttons){
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 70%, transparent);
+}
+
+:global(:root[data-platform="macos"] .mode-buttons .n-button){
+  --n-height: 22px !important;
+  --n-border-radius: 6px !important;
+  --n-padding: 0 8px !important;
+  --n-font-size: 11px !important;
+  --n-border: 1px solid transparent !important;
+  --n-border-hover: 1px solid transparent !important;
+  --n-border-pressed: 1px solid transparent !important;
+  --n-border-focus: 1px solid transparent !important;
+  --n-ripple-color: transparent !important;
+}
+
+:global(:root[data-platform="macos"] .mode-buttons .mode-btn.active){
+  --n-color: var(--platform-bg-raised) !important;
+  --n-color-hover: var(--platform-bg-raised) !important;
+  --n-color-pressed: var(--platform-bg-raised) !important;
+  --n-color-focus: var(--platform-bg-raised) !important;
+  --n-text-color: var(--text-primary) !important;
+  --n-text-color-hover: var(--text-primary) !important;
+  --n-text-color-pressed: var(--text-primary) !important;
+  --n-text-color-focus: var(--text-primary) !important;
+  background: var(--platform-bg-raised) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--platform-shadow-1);
+}
+
+:global(:root[data-platform="macos"] .mode-buttons .mode-btn.active .n-button__state-border),
+:global(:root[data-platform="macos"] .mode-buttons .mode-btn.active .n-button__border){
+  border-color: transparent !important;
 }
 
 .composer-hint {
@@ -210,13 +258,17 @@ const attachedFileName = computed(() => {
   white-space: nowrap;
 }
 
+:global(:root[data-platform="macos"] .composer-hint){
+  display: none;
+}
+
 .attached-file {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
   padding: 4px 8px;
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 76%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   width: fit-content;
@@ -246,37 +298,28 @@ const attachedFileName = computed(() => {
   display: flex;
   align-items: flex-end;
   gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
+  padding: 6px 9px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-surface) 88%, black);
-  box-shadow: var(--elev-2);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
+  box-shadow: none;
   position: relative;
   transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
 }
 
-.input-shell::after {
-  content: "";
-  position: absolute;
-  left: var(--space-md);
-  right: var(--space-md);
-  bottom: 0;
-  height: 1px;
-  background: var(--accent-cyan);
-  transform: scaleX(0);
-  transform-origin: left center;
-  opacity: 0;
-  transition: transform var(--transition-ui), opacity var(--transition-ui);
-  pointer-events: none;
+:global(:root[data-platform="macos"] .input-shell){
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 82%, transparent);
+  box-shadow: none;
+}
+
+:global(:root[data-platform="macos"] .chat-input .n-input-wrapper){
+  padding-left: 2px;
 }
 
 .input-shell:focus-within {
-  border-color: var(--accent-cyan-dim);
-}
-
-.input-shell:focus-within::after {
-  transform: scaleX(1);
-  opacity: 0.7;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px var(--platform-accent-soft);
 }
 
 .chat-input {
@@ -294,7 +337,7 @@ const attachedFileName = computed(() => {
   font-family: var(--font-sans) !important;
   font-size: var(--fs-sm) !important;
   line-height: var(--lh-normal) !important;
-  padding: var(--space-sm) 0 !important;
+  padding: 6px 0 !important;
   background: transparent !important;
   border: none !important;
   resize: none !important;
@@ -316,8 +359,23 @@ const attachedFileName = computed(() => {
 
 .send-btn {
   flex-shrink: 0;
-  box-shadow: var(--shadow-cyan);
+  box-shadow: none;
   transition: opacity var(--transition-ui), transform var(--transition-ui);
+}
+
+:global(:root[data-platform="macos"] .send-btn){
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
+  --n-text-color: var(--platform-accent) !important;
+  --n-text-color-hover: var(--platform-accent-hover) !important;
+  --n-text-color-pressed: var(--platform-accent-hover) !important;
+  --n-text-color-focus: var(--platform-accent) !important;
+  --n-border: 1px solid transparent !important;
+  --n-border-hover: 1px solid transparent !important;
+  --n-border-pressed: 1px solid transparent !important;
+  --n-border-focus: 1px solid transparent !important;
 }
 
 .send-btn:disabled {

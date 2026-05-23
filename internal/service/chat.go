@@ -129,6 +129,9 @@ type SessionRun struct {
 	permissionGrants          map[string]model.RuntimePermissionGrant
 	deferredAnnouncementState *model.DeferredAnnouncementState
 	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
+	runtimeContextCompact     *model.RuntimeContextCompact
+	fileReadState             map[string]model.RuntimeFileReadState
+	diffSummaries             []model.RuntimeDiffSummary
 	planDocument              *model.PlanDocument
 	pendingPlanApproval       *model.PendingPlanApproval
 	pendingPlanAttachment     *model.PendingPlanAttachment
@@ -186,9 +189,13 @@ func (r *SessionRun) addUserTurn(id, content string, timestamp int64) {
 }
 
 func (r *SessionRun) prepareMessages() []*schema.Message {
+	return r.prepareMessagesWithCompact(nil)
+}
+
+func (r *SessionRun) prepareMessagesWithCompact(compact *model.RuntimeContextCompact) []*schema.Message {
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
-	return r.ctxEngine.PrepareMessages()
+	return r.ctxEngine.PrepareMessagesWithCompact(nil, compact)
 }
 
 func (r *SessionRun) clearSessionState() {
@@ -201,6 +208,9 @@ func (r *SessionRun) clearSessionState() {
 	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
+	r.runtimeContextCompact = nil
+	r.fileReadState = make(map[string]model.RuntimeFileReadState)
+	r.diffSummaries = nil
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
@@ -240,6 +250,9 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
+	r.runtimeContextCompact = nil
+	r.fileReadState = make(map[string]model.RuntimeFileReadState)
+	r.diffSummaries = nil
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
@@ -251,9 +264,18 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.mode = data.Mode
 	r.deferredAnnouncementState = cloneDeferredAnnouncementState(data.DeferredAnnouncementState)
 	r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState)
+	r.runtimeContextCompact = model.CloneRuntimeContextCompact(data.RuntimeContextCompact)
 	r.planDocument = model.ClonePlanDocument(data.PlanDocument)
 	r.pendingPlanApproval = model.ClonePendingPlanApproval(data.PendingPlanApproval)
 	r.pendingPlanAttachment = model.ClonePendingPlanAttachment(data.PendingPlanAttachment)
+	if data.RuntimeContextCompact != nil {
+		for _, state := range data.RuntimeContextCompact.FileReadState {
+			if state.FilePath != "" {
+				r.fileReadState[state.FilePath] = state
+			}
+		}
+		r.diffSummaries = append([]model.RuntimeDiffSummary(nil), data.RuntimeContextCompact.DiffSummaries...)
+	}
 	for _, record := range data.DiscoveredTools {
 		if record.CanonicalName == "" {
 			continue
@@ -299,6 +321,7 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 			PermissionGrants:          grants,
 			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
+			RuntimeContextCompact:     model.CloneRuntimeContextCompact(r.runtimeContextCompact),
 			Mode:                      r.mode,
 			PlanDocument:              model.ClonePlanDocument(r.planDocument),
 			PendingPlanApproval:       model.ClonePendingPlanApproval(r.pendingPlanApproval),
@@ -790,6 +813,7 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		timeline:         agentctx.NewTimelineCollector(),
 		discoveredTools:  make(map[string]model.DiscoveredToolRecord),
 		permissionGrants: make(map[string]model.RuntimePermissionGrant),
+		fileReadState:    make(map[string]model.RuntimeFileReadState),
 		mode:             model.ModeDefault,
 	}
 	s.sessions[sessionID] = run
@@ -1235,6 +1259,7 @@ func (s *ChatService) RemoveSession(sessionID string) {
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
 	s.cleanupRetiredBundlesLocked()
+	tools.ClearTodosForSession(sessionID)
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,7 +1519,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	startCancel()
 
 	// Prepare messages
-	messages := run.prepareMessages()
+	messages := s.prepareMessagesForRun(sessionID, run)
 	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 
 	// Launch the agent run in a goroutine
@@ -1651,7 +1676,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	lastContentByAgent := make(map[string]string) // dedup
 
 	// Track pending tool_call_ids to detect orphans (tool calls without results)
-	pendingToolCalls := make(map[string]bool)
+	pendingToolCalls := make(map[string]pendingRuntimeToolCall)
 
 	sessionID := run.sessionID
 
@@ -1799,24 +1824,35 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				})
 				// Track pending tool call IDs
 				for _, tc := range msg.ToolCalls {
-					pendingToolCalls[tc.ID] = true
+					pendingToolCalls[tc.ID] = pendingRuntimeToolCall{
+						name: tc.Function.Name,
+						args: tc.Function.Arguments,
+					}
 				}
 				continue // Don't fall through to allContents — tool call content is already stored
 			}
 
 			// Emit tool result events
 			if msg.Role == schema.Tool && msg.ToolCallID != "" {
+				resultContent := truncateResult(msg.Content, 1000)
+				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
+					resultContent = timelineToolResultContent(call.name, msg.Content)
+				}
 				s.emitTimelineForRun(TimelineEvent{
 					ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 					Type:      "tool_result",
 					Agent:     event.AgentName,
-					Content:   truncateResult(msg.Content, 1000),
+					Content:   resultContent,
 					ToolID:    msg.ToolCallID,
 					Timestamp: time.Now().UnixMilli(),
 				}, run)
 
 				// Store tool result in session's context history
 				run.addToolResult(msg.ToolCallID, msg.Content)
+				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
+					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
+					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, call.args, msg.Content)
+				}
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
 
@@ -1870,6 +1906,400 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	}
 
 	return strings.Join(allContents, "\n\n"), transferCount, false
+}
+
+func timelineToolResultLimit(toolName string) int {
+	switch toolName {
+	case tools.RuntimeToolWorktreeDiff:
+		return 24000
+	case tools.RuntimeToolWrite, "write_file", tools.RuntimeToolEdit, "str_replace_editor":
+		return 8000
+	case tools.RuntimeToolWorktreeMerge, tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree:
+		return 6000
+	default:
+		return 1000
+	}
+}
+
+func timelineToolResultContent(toolName string, result string) string {
+	limit := timelineToolResultLimit(toolName)
+	switch toolName {
+	case tools.RuntimeToolWorktreeDiff:
+		return truncateWorktreeDiffTimelineJSON(result, limit)
+	case tools.RuntimeToolWorktreeMerge:
+		return truncateWorktreeMergeTimelineJSON(result, limit)
+	case tools.RuntimeToolWrite, "write_file", tools.RuntimeToolEdit, "str_replace_editor":
+		return truncateFileDiffTimelineJSON(toolName, result, limit)
+	}
+	return truncateResult(result, limit)
+}
+
+func truncateFileDiffTimelineJSON(toolName string, result string, limit int) string {
+	if limit <= 0 || len(result) <= limit {
+		return result
+	}
+	switch toolName {
+	case tools.RuntimeToolWrite, "write_file":
+		var out tools.WriteOutput
+		if err := json.Unmarshal([]byte(result), &out); err != nil {
+			return truncateResult(result, limit)
+		}
+		next, ok := encodeTimelinePatchResult(limit, out.Patch, func(patch string, truncated bool) (string, error) {
+			out.Patch = patch
+			out.Truncated = out.Truncated || truncated
+			encoded, err := json.Marshal(out)
+			return string(encoded), err
+		})
+		if ok {
+			return next
+		}
+	case tools.RuntimeToolEdit, "str_replace_editor":
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err != nil {
+			return truncateResult(result, limit)
+		}
+		next, ok := encodeTimelinePatchResult(limit, out.Patch, func(patch string, truncated bool) (string, error) {
+			out.Patch = patch
+			out.Truncated = out.Truncated || truncated
+			encoded, err := json.Marshal(out)
+			return string(encoded), err
+		})
+		if ok {
+			return next
+		}
+	}
+	return truncateResult(result, limit)
+}
+
+func encodeTimelinePatchResult(limit int, patch string, encode func(string, bool) (string, error)) (string, bool) {
+	encoded, err := encode(patch, false)
+	if err != nil {
+		return "", false
+	}
+	if len(encoded) <= limit {
+		return encoded, true
+	}
+	for i := 0; i < 16 && len(encoded) > limit; i++ {
+		over := len(encoded) - limit
+		nextPatch, truncated := shrinkTimelineText(patch, over+256)
+		if !truncated {
+			return "", false
+		}
+		patch = nextPatch
+		encoded, err = encode(patch, true)
+		if err != nil {
+			return "", false
+		}
+	}
+	if len(encoded) > limit {
+		return "", false
+	}
+	return encoded, true
+}
+
+func truncateWorktreeDiffTimelineJSON(result string, limit int) string {
+	if limit <= 0 || len(result) <= limit {
+		return result
+	}
+	var out tools.WorktreeDiffOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return truncateResult(result, limit)
+	}
+	if out.Diff != "" && out.UntrackedDiff != "" {
+		// DiffWorktree serializes untracked patches into Diff as the combined
+		// patch payload. Timeline JSON can omit the duplicate field and still
+		// render the full review patch in the frontend.
+		out.UntrackedDiff = ""
+	}
+
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return truncateResult(result, limit)
+	}
+	if len(encoded) <= limit {
+		return string(encoded)
+	}
+
+	for i := 0; i < 24 && len(encoded) > limit; i++ {
+		over := len(encoded) - limit
+		reduced := false
+		switch {
+		case out.Diff != "":
+			next, truncated := shrinkTimelineText(out.Diff, over+512)
+			out.Diff = next
+			out.Truncated = out.Truncated || truncated
+			reduced = truncated
+		case out.UntrackedDiff != "":
+			next, truncated := shrinkTimelineText(out.UntrackedDiff, over+512)
+			out.UntrackedDiff = next
+			out.UntrackedTruncated = out.UntrackedTruncated || truncated
+			reduced = truncated
+		case out.DiffStat != "":
+			next, truncated := shrinkTimelineText(out.DiffStat, over+256)
+			out.DiffStat = next
+			reduced = truncated
+		case out.Status != "":
+			next, truncated := shrinkTimelineText(out.Status, over+256)
+			out.Status = next
+			reduced = truncated
+		case out.Message != "":
+			next, truncated := shrinkTimelineText(out.Message, over+128)
+			out.Message = next
+			reduced = truncated
+		}
+		if !reduced {
+			return truncateResult(result, limit)
+		}
+		encoded, err = json.Marshal(out)
+		if err != nil {
+			return truncateResult(result, limit)
+		}
+	}
+	if len(encoded) > limit {
+		return truncateResult(result, limit)
+	}
+	return string(encoded)
+}
+
+func truncateWorktreeMergeTimelineJSON(result string, limit int) string {
+	if limit <= 0 || len(result) <= limit {
+		return result
+	}
+	var out tools.WorktreeMergeOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return truncateResult(result, limit)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return truncateResult(result, limit)
+	}
+	for i := 0; i < 16 && len(encoded) > limit; i++ {
+		over := len(encoded) - limit
+		reduced := false
+		switch {
+		case out.MergeOutput != "":
+			next, truncated := shrinkTimelineText(out.MergeOutput, over+512)
+			out.MergeOutput = next
+			reduced = truncated
+		case len(out.ConflictFiles) > 0:
+			next, truncated := shrinkTimelineConflictFiles(out.ConflictFiles, over+512)
+			out.ConflictFiles = next
+			reduced = truncated
+		case out.RecoveryHint != "":
+			next, truncated := shrinkTimelineText(out.RecoveryHint, over+256)
+			out.RecoveryHint = next
+			reduced = truncated
+		case out.Message != "":
+			next, truncated := shrinkTimelineText(out.Message, over+128)
+			out.Message = next
+			reduced = truncated
+		}
+		if !reduced {
+			return truncateResult(result, limit)
+		}
+		encoded, err = json.Marshal(out)
+		if err != nil {
+			return truncateResult(result, limit)
+		}
+	}
+	if len(encoded) > limit {
+		return truncateResult(result, limit)
+	}
+	return string(encoded)
+}
+
+func shrinkTimelineConflictFiles(files []string, removeBytes int) ([]string, bool) {
+	if len(files) == 0 {
+		return files, false
+	}
+	next := append([]string(nil), files...)
+	changed := false
+	if len(next) > 20 {
+		omitted := len(next) - 20
+		next = append(next[:20], fmt.Sprintf("... (%d more files)", omitted))
+		changed = true
+	}
+	for i, file := range next {
+		if len(file) <= 160 {
+			continue
+		}
+		next[i] = file[:120] + "..." + file[len(file)-32:]
+		changed = true
+	}
+	if changed {
+		return next, true
+	}
+	if len(next) > 1 {
+		omitted := len(next) - 1
+		return []string{next[0], fmt.Sprintf("... (%d more files)", omitted)}, true
+	}
+	shortened, truncated := shrinkTimelineText(next[0], removeBytes+128)
+	if truncated {
+		next[0] = shortened
+		return next, true
+	}
+	return files, false
+}
+
+func shrinkTimelineText(value string, removeBytes int) (string, bool) {
+	if value == "" {
+		return value, false
+	}
+	marker := "\n... (truncated for timeline)"
+	target := len(value) - removeBytes
+	if target > len(value)-1 {
+		target = len(value) - 1
+	}
+	if target <= len(marker) {
+		return "", true
+	}
+	if target >= len(value) {
+		return value, false
+	}
+	return value[:target-len(marker)] + marker, true
+}
+
+func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, argsJSON, result string) {
+	if strings.HasPrefix(strings.TrimSpace(result), "Error:") {
+		return
+	}
+	switch toolName {
+	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
+		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sessionID, "action": toolName})
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{SessionID: sessionID, Source: "agent", Action: toolName})
+	case tools.RuntimeToolWorktreeDiff:
+		wailsEmit(s.ctx, "runtime:worktree_reviewed", map[string]string{"sessionId": sessionID})
+	}
+	if path, ok := runtimeToolWorkspaceChangePath(toolName, argsJSON, result); ok {
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+			SessionID: sessionID,
+			Path:      path,
+			Source:    "agent",
+			Action:    toolName,
+		})
+	}
+}
+
+func runtimeToolWorkspaceChangePath(toolName, argsJSON, result string) (string, bool) {
+	switch toolName {
+	case tools.RuntimeToolWrite:
+		var out tools.WriteOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil && out.FilePath != "" {
+			return out.FilePath, true
+		}
+		return "", false
+	case "write_file":
+		var legacyOut struct {
+			Success bool `json:"success"`
+		}
+		if err := json.Unmarshal([]byte(result), &legacyOut); err == nil && legacyOut.Success {
+			if path := runtimeToolArgPath(argsJSON); path != "" {
+				return path, true
+			}
+		}
+		return "", false
+	case tools.RuntimeToolEdit:
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil && out.FilePath != "" {
+			return out.FilePath, true
+		}
+		return "", false
+	case "str_replace_editor":
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil && out.FilePath != "" {
+			return out.FilePath, true
+		}
+		args := runtimeToolArgs(argsJSON)
+		if strings.EqualFold(args.Command, "view") {
+			return "", false
+		}
+		if path := args.FilePathOrPath(); path != "" {
+			return path, true
+		}
+		return "", false
+	case tools.RuntimeToolLSPEdit:
+		var out tools.LSPEditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			if len(out.ChangedFiles) > 1 {
+				return "", out.EditCount > 0
+			}
+			if len(out.ChangedFiles) > 0 {
+				return out.ChangedFiles[0], out.EditCount > 0
+			}
+			return out.FilePath, out.EditCount > 0
+		}
+		return "", false
+	case tools.RuntimeToolNotebookEdit:
+		var out tools.NotebookEditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return out.FilePath, out.Command != "view"
+		}
+		return "", false
+	case tools.RuntimeToolBash, "shell_execute":
+		if !bashCommandLooksMutating(runtimeToolArgs(argsJSON).Command) {
+			return "", false
+		}
+		var out tools.BashOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return "", out.BackgroundTaskID == "" && out.ExitCode == 0
+		}
+		var shellOut tools.ShellOutput
+		if err := json.Unmarshal([]byte(result), &shellOut); err == nil {
+			return "", shellOut.ExitCode == 0
+		}
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+type runtimeToolArgsSnapshot struct {
+	Path     string `json:"path"`
+	FilePath string `json:"file_path"`
+	Command  string `json:"command"`
+}
+
+func (a runtimeToolArgsSnapshot) FilePathOrPath() string {
+	if a.FilePath != "" {
+		return a.FilePath
+	}
+	return a.Path
+}
+
+func runtimeToolArgs(argsJSON string) runtimeToolArgsSnapshot {
+	var args runtimeToolArgsSnapshot
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+	return args
+}
+
+func runtimeToolArgPath(argsJSON string) string {
+	return runtimeToolArgs(argsJSON).FilePathOrPath()
+}
+
+func bashCommandLooksMutating(command string) bool {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return false
+	}
+	lowered := strings.ToLower(cmd)
+	if strings.ContainsAny(lowered, "><") {
+		return true
+	}
+	mutatingNeedles := []string{
+		"touch ", "mkdir ", "rm ", "mv ", "cp ", "chmod ", "chown ", "ln ",
+		"tee ", "sed -i", "perl -i", "patch ", "git apply", "git checkout",
+		"git switch", "git restore", "git reset", "git clean", "go mod tidy",
+		"gofmt -w", "prettier --write", "npm install", "npm i ", "pnpm install",
+		"yarn install", "bun install", "cargo add", "cargo fmt", "ruff --fix",
+		"python -m pip install", "pip install",
+	}
+	for _, needle := range mutatingNeedles {
+		needle = strings.TrimSpace(needle)
+		if strings.Contains(lowered, needle+" ") || strings.HasPrefix(lowered, needle+" ") || lowered == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -2314,7 +2744,7 @@ func (s *ChatService) ClearHistory() error {
 	sessionSvc := s.sessionService
 	s.mu.Unlock()
 
-	tools.ClearTodos()
+	tools.ClearTodosForSession(sessionID)
 	if sessionSvc != nil && sessionID != "" {
 		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
 			logger.Warn("[CHAT] Failed to schedule clear-history save", "session", sessionID, "error", err)
@@ -2413,6 +2843,7 @@ func (s *ChatService) ExportSessionSnapshot(sessionID string) (*SessionSnapshot,
 		}, nil
 	}
 
+	s.refreshRuntimeContextCompact(sessionID, run)
 	snapshot := run.snapshot()
 	debug, err := s.exportDeferredSurfaceDebugForSnapshot(sessionID)
 	if err != nil {
@@ -2435,8 +2866,21 @@ func logSessionDataNormalizeWarnings(sessionID, source string, warnings []string
 func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model.SessionData) {
 	s.mu.Lock()
 	run := s.getOrCreateRun(sessionID)
+	tasks := s.runtimeTasks
+	workspaces := s.runtimeWorkspaces
 	s.mu.Unlock()
 	run.importSessionData(data)
+	if data != nil && data.RuntimeContextCompact != nil {
+		if tasks != nil {
+			tasks.RestoreCompactTasks(sessionID, data.RuntimeContextCompact.Tasks)
+		}
+		if workspaces != nil {
+			workspaces.RestoreCompactSnapshot(sessionID, data.RuntimeContextCompact.Workspace)
+		}
+		tools.RestoreTodosForSession(sessionID, data.RuntimeContextCompact.Todos)
+	} else {
+		tools.ClearTodosForSession(sessionID)
+	}
 }
 
 func (s *ChatService) RestoreSessionData(sessionID string, data *model.SessionData) {
@@ -2821,6 +3265,9 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	}
 	provider := &deferredMCPProvider{chat: s, bundle: bundle}
 	ac := s.buildAgentContext()
+	if s.runtimeLSP != nil {
+		s.runtimeLSP.SetConfig(cfg.Agent.LSP)
+	}
 
 	topLevelCatalog := tools.NewToolCatalog()
 	runtimeEntries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
@@ -2851,7 +3298,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred runtime tools: %w", err)
 	}
-	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch)
+	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch, provider)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build deferred web tools: %w", err)
@@ -3429,6 +3876,10 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 	// The context carries session identity for proper event routing.
 	ac.OnToolEvent = func(ctx context.Context, agentName, eventType, toolName, toolArgs, toolID, result string) {
 		sessionID := SessionIDFromContext(ctx)
+		content := result
+		if eventType == "tool_result" {
+			content = timelineToolResultContent(toolName, result)
+		}
 		s.emitTimelineForSession(TimelineEvent{
 			ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 			Type:      eventType,
@@ -3436,9 +3887,12 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 			ToolName:  toolName,
 			ToolArgs:  toolArgs,
 			ToolID:    toolID,
-			Content:   result,
+			Content:   content,
 			Timestamp: time.Now().UnixMilli(),
 		}, sessionID)
+		if eventType == "tool_result" {
+			s.emitRuntimeWorktreeToolEvent(sessionID, toolName, toolArgs, result)
+		}
 	}
 
 	return ac

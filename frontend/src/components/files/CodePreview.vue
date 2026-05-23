@@ -145,7 +145,7 @@ function formatSize(bytes: number): string {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
 }
 
 .code-header {
@@ -155,7 +155,7 @@ function formatSize(bytes: number): string {
   gap: 10px;
   border-bottom: 1px solid var(--border-subtle);
   padding: 8px 12px;
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
@@ -193,7 +193,7 @@ function formatSize(bytes: number): string {
 
 .crumb-seg.leaf {
   color: var(--accent-cyan);
-  font-weight: var(--fw-medium);
+  font-weight: var(--fw-semibold);
 }
 
 .code-stats {
@@ -244,7 +244,7 @@ function formatSize(bytes: number): string {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.7;
-  background: rgba(255, 255, 255, 0.01);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 58%, transparent);
 }
 
 .line-content {

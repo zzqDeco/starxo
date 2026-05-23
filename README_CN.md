@@ -14,7 +14,8 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
 - **Runtime V2 工具面** — 始终可用的 `ToolSearch`、直接文件/搜索/编辑/shell 工具、动态 `Agent` 委派、worktree 隔离、deferred LSP/Skill/Web/Notebook 工具，以及长任务后台输出管理
-- **工具权限审批** — 高风险 runtime 和 MCP 工具调用会弹出审批，可拒绝、允许一次或本会话允许
+- **Runtime 工具配置** — 设置页支持 WebSearch/TinyFish 诊断和常驻 LSP server 映射配置，可自定义 language server 命令
+- **工具权限审批** — 高风险 runtime 和 MCP 工具调用进入排队审批 UI，可拒绝、允许一次、本会话允许，并可在设置页管理授权
 - **MCP 协议** — 支持 Model Context Protocol 扩展工具（stdio/SSE 传输）
 - **多 LLM 支持** — OpenAI / DeepSeek / 火山引擎 Ark / Ollama
 - **多语言界面** — 中文/英文（vue-i18n）
@@ -22,7 +23,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **多会话并行执行** — 多个会话可同时运行 Agent；切换会话不会取消后台运行的 Agent，切换时完整恢复状态快照
 - **会话持久化** — 完整的会话管理，统一存储消息历史、timeline 事件和流式状态
 - **文件传输** — 通过 SFTP 直接上传/下载到每个持久沙箱工作区，并提供工作区元信息、路径复制和 tmp 清理
-- **开发工作台 UI** — 高信息密度深色工作台，包含命令面板、会话栏、中央执行画布、工作区抽屉、右侧运行时 Dock 和 composer 内模式控制
+- **开发工作台 UI** — 高信息密度深色工作台，包含命令面板、会话栏、中央执行画布、随沙箱生命周期同步的工作区抽屉、右侧运行时 Dock、沙箱命令终端和 composer 内模式控制
 
 ## 技术栈
 
@@ -75,10 +76,12 @@ starxo/
 │   │
 │   ├── service/                     # Wails 绑定服务（前端 API）
 │   │   ├── chat.go                  #   ChatService：Per-Session Agent 生命周期（SessionRun）、消息收发、流式输出
+│   │   ├── runtime_context_compact.go # Runtime V2 上下文压缩状态
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 动态 Agent 工具
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 常驻 language server 管理
 │   │   ├── runtime_workspaces.go    #   Runtime V2 会话级 worktree workspace 管理
 │   │   ├── runtime_web_tools.go     #   Runtime V2 WebFetch/WebSearch 工具实现
+│   │   ├── websearch_diagnostics.go #   WebSearch/TinyFish 配置诊断
 │   │   ├── sandbox_svc.go           #   SandboxService：连接/断开/重连、健康监控（RWMutex 并发安全）
 │   │   ├── session_svc.go           #   SessionService：会话 CRUD、多会话状态协调
 │   │   ├── settings_svc.go          #   SettingsService：配置管理、连接测试
@@ -163,15 +166,25 @@ wails dev
 
 顶层 Agent 现在使用更小的 always-loaded runtime 工具面，并通过 `ToolSearch` 按需发现 deferred tools。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
 
-当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 worktree 隔离。
+当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`WorktreeDiff`、`WorktreeMerge`、`LSP`、`LSPEdit`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`LSPEdit` 通过 permission queue 暴露可写的 language-server rename/format 操作。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
+
+Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active worktree 状态、diff stat 和可选 patch；`WorktreeMerge` 会提交 active worktree 修改，合并回原沙箱 workspace，可选移除 worktree，并恢复父会话 workspace。父 workspace 有未提交修改时会拒绝 merge；遇到 Git 冲突时会先 abort 父 workspace 的 merge 状态，再返回结构化冲突文件和恢复提示。工作区抽屉也会显示当前会话的 active worktree，可直接审阅、复制、确认合并，并且文件浏览会跟随 active worktree 路径。
+
+会修改文件的 runtime tools 现在会输出结构化 diff 元数据。`Write` 和 `Edit` 的 timeline 事件会展示创建/更新状态、替换数、`+/-` 行数、字节数和受限 patch 预览，不再要求用户阅读原始 JSON。
 
 `WebSearch` 默认使用 DuckDuckGo HTML 搜索，也可以通过 `agent.webSearch.providers` 切换 provider。`type: "tinyfish"` 是专用 TinyFish Search API 适配器，对齐 `GET https://api.search.tinyfish.ai`，默认从 `TINYFISH_API_KEY` 读取 API key 并写入 `X-API-Key`，支持 TinyFish `query`、`location`、`language`、`page` 参数，并解析 `results[].title/url/snippet`。`type: "http"` 继续用于自定义 GET/POST provider，支持 headers、body template 和 JSON path 提取。
 
+设置页提供 WebSearch 静态诊断和显式 smoke test。smoke test 只在用户点击时运行，并返回 provider、URL、耗时和紧凑结果。
+
+`WebFetch` 和 `WebSearch` 只执行 `http`/`https` 请求。空 host、URL userinfo、本地/私有/link-local/组播/未指定地址、IPv6 ULA/link-local 地址以及 `169.254.169.254` 默认阻止；访问非公网 endpoint 需要显式 runtime permission 授权，redirect 跟随后也会先重新校验目标。
+
 计划模式只暴露 read-only trusted 工具；写入、编辑和 shell 执行会在计划批准后才进入可见工具面。
 
-高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化。
+高风险工具调用会进入 Runtime V2 permission queue。桌面端可选择拒绝、允许一次或本会话允许；本会话授权会随 session data 持久化，并可在设置页 Permissions 分区查看或撤销。
 
 后台 Bash 和 Agent 任务可在运行任务面板中查看。面板按当前会话列出任务，支持刷新状态/输出、复制输出，并可通过 Runtime V2 task APIs 停止运行中的任务。
+
+长会话使用 token-aware context compaction。Starxo 会完整保留最近轮次，并注入一段 compact runtime summary，用于保留已发现工具、本会话权限、后台任务 output pointer、文件读取范围、最近编辑摘要、todos、plan 状态和 active worktree routing。完整消息历史仍保存在 `session_data.json`。
 
 ### 生产构建
 
@@ -180,6 +193,8 @@ wails build
 ```
 
 产物输出至 `build/bin/` 目录。
+
+Starxo 会在构建时使用 Wails 的平台原生窗口壳配置。macOS 使用统一隐藏标题栏并跟随系统外观，Windows 跟随系统主题并在可用时使用 Mica，Linux 使用更保守的 GTK/WebKit fallback。Vue 内容区会跟随系统明暗模式，并应用平台化设计 token。macOS 包会声明 Local Network 权限，因为 Starxo 需要通过 SSH 连接局域网 sandbox 主机；如果使用 `192.168.x.x` 或 `.local` 远端，请允许系统弹窗。
 
 ### Tag 发布
 
@@ -192,7 +207,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-发布工作流会构建未签名的 macOS、Windows、Linux 包，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
+发布工作流会构建未签名的 macOS、Windows、Linux 包，检查基础平台 bundle 资源，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
 
 工作流结束后需要检查：
 
@@ -240,6 +255,8 @@ npm run dev
 沙箱设置页可以在保存设置前执行完整远端诊断。Linux 检查包括 `bwrap`、`python3`、Python venv 创建、user namespace sysctl、AppArmor unprivileged user namespace 限制，以及 bwrap smoke 命令。macOS 检查包括 `sandbox-exec`、`python3` 和最小 Seatbelt smoke 命令。
 
 普通 Linux 包依赖可以通过“安装运行时”按钮安装。`sysctl`、AppArmor 等主机安全策略变更不会自动执行；Starxo 只展示可复制命令，由操作者审阅后手动运行。
+
+创建沙箱时会展示 Python venv 创建、pip 升级、包安装等分步进度。Python bootstrap 命令遵守 `commandTimeoutSec`；pip 失败会提示检查远端网络、pip 源或代理，并 best-effort 清理未完成的新沙箱目录。运行时终端每次在当前 active sandbox workspace 中执行一条命令，没有 active sandbox 时输入会被禁用。
 
 ## 数据存储
 

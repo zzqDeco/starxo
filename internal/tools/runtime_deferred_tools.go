@@ -15,6 +15,7 @@ import (
 
 const (
 	RuntimeToolLSP          = "LSP"
+	RuntimeToolLSPEdit      = "LSPEdit"
 	RuntimeToolSkill        = "Skill"
 	RuntimeToolNotebookEdit = "NotebookEdit"
 	RuntimeToolWebFetch     = "WebFetch"
@@ -31,6 +32,15 @@ type LSPInput struct {
 	Limit     int    `json:"limit,omitempty" jsonschema:"description=max result lines"`
 }
 
+type LSPEditInput struct {
+	Operation string `json:"operation" jsonschema:"description=rename or format"`
+	FilePath  string `json:"file_path" jsonschema:"description=file path inside the workspace"`
+	Line      int    `json:"line,omitempty" jsonschema:"description=1-based line for rename"`
+	Character int    `json:"character,omitempty" jsonschema:"description=1-based character for rename; defaults to 1"`
+	NewName   string `json:"new_name,omitempty" jsonschema:"description=new symbol name for rename"`
+	Language  string `json:"language,omitempty" jsonschema:"description=optional language override: go, typescript, javascript, python, or rust"`
+}
+
 type LSPOutput struct {
 	Operation      string `json:"operation"`
 	Engine         string `json:"engine,omitempty"`
@@ -39,6 +49,16 @@ type LSPOutput struct {
 	FilePath       string `json:"filePath,omitempty"`
 	ResultCount    int    `json:"resultCount,omitempty"`
 	FallbackReason string `json:"fallbackReason,omitempty"`
+}
+
+type LSPEditOutput struct {
+	Operation    string   `json:"operation"`
+	Engine       string   `json:"engine,omitempty"`
+	Language     string   `json:"language,omitempty"`
+	FilePath     string   `json:"filePath,omitempty"`
+	ChangedFiles []string `json:"changedFiles,omitempty"`
+	EditCount    int      `json:"editCount"`
+	Summary      string   `json:"summary"`
 }
 
 type SkillInput struct {
@@ -70,11 +90,13 @@ type NotebookEditOutput struct {
 
 type RuntimeLSPManager interface {
 	Query(ctx context.Context, op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, input LSPInput) (LSPOutput, bool, error)
+	Edit(ctx context.Context, op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, input LSPEditInput) (LSPEditOutput, bool, error)
 }
 
 func NewRuntimeDeferredCatalogEntries(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, lsp RuntimeLSPManager) ([]CatalogEntry, error) {
 	builders := []func() (CatalogEntry, error){
 		func() (CatalogEntry, error) { return newLSPCatalogEntry(op, workspacePath, workspaces, lsp) },
+		func() (CatalogEntry, error) { return newLSPEditCatalogEntry(op, workspacePath, workspaces, lsp) },
 		func() (CatalogEntry, error) { return newSkillCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newNotebookEditCatalogEntry(op, workspacePath, workspaces) },
 	}
@@ -122,6 +144,27 @@ func newLSPCatalogEntry(op commandline.Operator, workspacePath string, workspace
 	}
 	entry := deferredRuntimeCatalogEntry(RuntimeToolLSP, "LSP", "Code intelligence operations over the workspace.", ToolClassRuntimeFile, true, t)
 	entry.SearchHint = "definition references hover symbols code intelligence language server"
+	return entry, nil
+}
+
+func newLSPEditCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager, lsp RuntimeLSPManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolLSPEdit,
+		"Apply language-server edits in the workspace. Supports rename and format; requires runtime permission approval.",
+		func(ctx context.Context, input LSPEditInput) (LSPEditOutput, error) {
+			if lsp == nil {
+				return LSPEditOutput{}, fmt.Errorf("LSP edit manager is not available")
+			}
+			output, handled, err := lsp.Edit(ctx, op, workspacePath, workspaces, input)
+			if !handled && err == nil {
+				err = fmt.Errorf("LSP edit operation %q is not available", strings.TrimSpace(input.Operation))
+			}
+			return output, err
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	entry := deferredRuntimeCatalogEntry(RuntimeToolLSPEdit, "LSP Edit", "Writable language-server operations such as rename and format.", ToolClassRuntimeFile, false, t)
+	entry.SearchHint = "rename format apply edit code action language server"
 	return entry, nil
 }
 

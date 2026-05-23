@@ -10,6 +10,10 @@ export function DiagnoseSandboxRuntime(arg1) {
   return window['go']['service']['SettingsService']['DiagnoseSandboxRuntime'](arg1);
 }
 
+export function DiagnoseWebSearch(arg1) {
+  return window['go']['service']['SettingsService']['DiagnoseWebSearch'](arg1);
+}
+
 export function GetSettings() {
   return window['go']['service']['SettingsService']['GetSettings']();
 }
@@ -36,4 +40,8 @@ export function TestLLMConnection(arg1) {
 
 export function TestSSHConnection(arg1) {
   return window['go']['service']['SettingsService']['TestSSHConnection'](arg1);
+}
+
+export function TestWebSearch(arg1, arg2) {
+  return window['go']['service']['SettingsService']['TestWebSearch'](arg1, arg2);
 }

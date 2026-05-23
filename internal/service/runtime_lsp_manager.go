@@ -9,13 +9,16 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/cloudwego/eino-ext/components/tool/commandline"
 
+	"starxo/internal/config"
 	"starxo/internal/logger"
 	"starxo/internal/sandbox"
 	"starxo/internal/tools"
@@ -34,6 +37,7 @@ type runtimeLSPManager struct {
 	mu      sync.Mutex
 	servers map[string]*runtimeLSPServer
 	now     func() time.Time
+	cfg     config.RuntimeLSPConfig
 }
 
 type runtimeLSPServerSpec struct {
@@ -49,12 +53,80 @@ func newRuntimeLSPManager(now func() time.Time) *runtimeLSPManager {
 	return &runtimeLSPManager{
 		servers: make(map[string]*runtimeLSPServer),
 		now:     now,
+		cfg:     normalizeRuntimeLSPConfig(config.RuntimeLSPConfig{}),
 	}
+}
+
+type RuntimeLSPStatus struct {
+	Enabled          bool                     `json:"enabled"`
+	RequestTimeoutMS int                      `json:"requestTimeoutMs"`
+	MaxResultBytes   int                      `json:"maxResultBytes"`
+	Configured       []RuntimeLSPConfigured   `json:"configured"`
+	Servers          []RuntimeLSPServerStatus `json:"servers"`
+}
+
+type RuntimeLSPConfigured struct {
+	Language   string   `json:"language"`
+	Executable string   `json:"executable"`
+	Command    []string `json:"command"`
+	Extensions []string `json:"extensions,omitempty"`
+	Disabled   bool     `json:"disabled,omitempty"`
+}
+
+type RuntimeLSPServerStatus struct {
+	SessionID    string `json:"sessionId"`
+	Workspace    string `json:"workspace"`
+	Language     string `json:"language"`
+	Executable   string `json:"executable"`
+	Command      string `json:"command"`
+	Alive        bool   `json:"alive"`
+	OpenDocs     int    `json:"openDocs"`
+	RequestCount int64  `json:"requestCount"`
+	StartedAt    int64  `json:"startedAt"`
+	LastUsedAt   int64  `json:"lastUsedAt,omitempty"`
+	LastError    string `json:"lastError,omitempty"`
+}
+
+func (m *runtimeLSPManager) SetConfig(cfg config.RuntimeLSPConfig) {
+	cfg = normalizeRuntimeLSPConfig(cfg)
+	m.mu.Lock()
+	m.cfg = cfg
+	m.mu.Unlock()
+}
+
+func (m *runtimeLSPManager) Status(sessionID string) RuntimeLSPStatus {
+	cfg := m.configSnapshot()
+	m.mu.Lock()
+	servers := make([]RuntimeLSPServerStatus, 0, len(m.servers))
+	for _, server := range m.servers {
+		if sessionID != "" && server.sessionID != sessionID {
+			continue
+		}
+		servers = append(servers, server.status())
+	}
+	m.mu.Unlock()
+	return RuntimeLSPStatus{
+		Enabled:          runtimeLSPEnabled(cfg),
+		RequestTimeoutMS: cfg.RequestTimeoutMS,
+		MaxResultBytes:   cfg.MaxResultBytes,
+		Configured:       runtimeLSPConfiguredStatus(cfg),
+		Servers:          servers,
+	}
+}
+
+func (m *runtimeLSPManager) configSnapshot() config.RuntimeLSPConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return cloneRuntimeLSPConfig(m.cfg)
 }
 
 func (m *runtimeLSPManager) Query(ctx context.Context, op commandline.Operator, workspacePath string, workspaces tools.RuntimeWorkspaceManager, input tools.LSPInput) (tools.LSPOutput, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	cfg := m.configSnapshot()
+	if !runtimeLSPEnabled(cfg) {
+		return tools.LSPOutput{}, false, nil
 	}
 	opName := runtimeLSPOperation(input.Operation)
 	if !runtimeLSPCanHandle(opName, input) {
@@ -72,7 +144,7 @@ func (m *runtimeLSPManager) Query(ctx context.Context, op commandline.Operator, 
 		return tools.LSPOutput{}, false, fmt.Errorf("sandbox workspace is not active")
 	}
 
-	spec, languageID, ok, err := m.resolveServerSpec(ctx, op, workspace, input)
+	spec, languageID, ok, err := m.resolveServerSpec(ctx, op, workspace, input, cfg)
 	if err != nil || !ok {
 		return tools.LSPOutput{}, false, err
 	}
@@ -90,7 +162,7 @@ func (m *runtimeLSPManager) Query(ctx context.Context, op commandline.Operator, 
 		languageID = runtimeLSPLanguageIDForFile(spec.Language, input.FilePath)
 	}
 
-	server, err := m.server(ctx, starter, workspace, spec)
+	server, err := m.server(ctx, starter, workspace, spec, cfg)
 	if err != nil {
 		return tools.LSPOutput{}, false, err
 	}
@@ -100,7 +172,7 @@ func (m *runtimeLSPManager) Query(ctx context.Context, op commandline.Operator, 
 			return tools.LSPOutput{}, false, err
 		}
 	}
-	result, count, err := server.query(ctx, opName, targetPath, input)
+	result, count, err := server.query(ctx, opName, targetPath, input, runtimeLSPTimeout(cfg), runtimeLSPMaxBytes(cfg))
 	if err != nil {
 		m.dropServer(server.key)
 		return tools.LSPOutput{}, false, err
@@ -112,6 +184,104 @@ func (m *runtimeLSPManager) Query(ctx context.Context, op commandline.Operator, 
 		Result:      result,
 		FilePath:    input.FilePath,
 		ResultCount: count,
+	}, true, nil
+}
+
+func (m *runtimeLSPManager) Edit(ctx context.Context, op commandline.Operator, workspacePath string, workspaces tools.RuntimeWorkspaceManager, input tools.LSPEditInput) (tools.LSPEditOutput, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg := m.configSnapshot()
+	if !runtimeLSPEnabled(cfg) {
+		return tools.LSPEditOutput{}, false, nil
+	}
+	opName := runtimeLSPEditOperation(input.Operation)
+	if !runtimeLSPEditCanHandle(opName, input) {
+		return tools.LSPEditOutput{}, false, nil
+	}
+	starter, ok := op.(runtimeLSPProcessStarter)
+	if !ok {
+		return tools.LSPEditOutput{}, false, fmt.Errorf("sandbox operator does not support persistent processes")
+	}
+	workspace := cleanRuntimeRemotePath(workspacePath)
+	if workspaces != nil {
+		workspace = cleanRuntimeRemotePath(workspaces.CurrentWorkspace(ctx, workspacePath))
+	}
+	if workspace == "" || workspace == "." {
+		return tools.LSPEditOutput{}, false, fmt.Errorf("sandbox workspace is not active")
+	}
+
+	lspInput := tools.LSPInput{
+		Operation: opName,
+		FilePath:  input.FilePath,
+		Line:      input.Line,
+		Character: input.Character,
+		Language:  input.Language,
+	}
+	spec, languageID, ok, err := m.resolveServerSpec(ctx, op, workspace, lspInput, cfg)
+	if err != nil || !ok {
+		return tools.LSPEditOutput{}, false, err
+	}
+	targetPath, err := runtimeLSPWorkspaceFilePath(ctx, input.FilePath, workspacePath, workspaces)
+	if err != nil {
+		return tools.LSPEditOutput{}, false, err
+	}
+	content, err := op.ReadFile(ctx, targetPath)
+	if err != nil {
+		return tools.LSPEditOutput{}, false, err
+	}
+	languageID = runtimeLSPLanguageIDForFile(spec.Language, input.FilePath)
+
+	server, err := m.server(ctx, starter, workspace, spec, cfg)
+	if err != nil {
+		return tools.LSPEditOutput{}, false, err
+	}
+	if err := server.openOrChange(ctx, targetPath, languageID, content); err != nil {
+		m.dropServer(server.key)
+		return tools.LSPEditOutput{}, false, err
+	}
+
+	workspaceEdit, err := server.edit(ctx, opName, targetPath, input, runtimeLSPTimeout(cfg))
+	if err != nil {
+		m.dropServer(server.key)
+		return tools.LSPEditOutput{}, false, err
+	}
+	if opName == "format" {
+		if runtimeLSPFormatHasNoTextEdits(workspaceEdit) {
+			return tools.LSPEditOutput{
+				Operation:    opName,
+				Engine:       "lsp:" + spec.Language,
+				Language:     spec.Language,
+				FilePath:     input.FilePath,
+				ChangedFiles: nil,
+				EditCount:    0,
+				Summary:      "No LSP edits were needed.",
+			}, true, nil
+		}
+		workspaceEdit, err = runtimeLSPTextEditsAsWorkspaceEdit(workspaceEdit, targetPath)
+		if err != nil {
+			return tools.LSPEditOutput{}, false, err
+		}
+	}
+	applied, err := runtimeLSPApplyWorkspaceEdit(ctx, op, workspace, workspacePath, workspaces, workspaceEdit)
+	if err != nil {
+		return tools.LSPEditOutput{}, false, err
+	}
+	for _, file := range applied.ChangedFiles {
+		updated, readErr := op.ReadFile(ctx, file)
+		if readErr != nil {
+			continue
+		}
+		_ = server.openOrChange(ctx, file, runtimeLSPLanguageIDForFile(spec.Language, file), updated)
+	}
+	return tools.LSPEditOutput{
+		Operation:    opName,
+		Engine:       "lsp:" + spec.Language,
+		Language:     spec.Language,
+		FilePath:     input.FilePath,
+		ChangedFiles: applied.ChangedFiles,
+		EditCount:    applied.EditCount,
+		Summary:      fmt.Sprintf("Applied %d LSP edits across %d file(s).", applied.EditCount, len(applied.ChangedFiles)),
 	}, true, nil
 }
 
@@ -138,8 +308,9 @@ func (m *runtimeLSPManager) dropServer(key string) {
 	}
 }
 
-func (m *runtimeLSPManager) server(ctx context.Context, starter runtimeLSPProcessStarter, workspace string, spec runtimeLSPServerSpec) (*runtimeLSPServer, error) {
-	key := strings.Join([]string{workspaceSessionID(ctx), workspace, spec.Language}, "\x00")
+func (m *runtimeLSPManager) server(ctx context.Context, starter runtimeLSPProcessStarter, workspace string, spec runtimeLSPServerSpec, cfg config.RuntimeLSPConfig) (*runtimeLSPServer, error) {
+	sessionID := workspaceSessionID(ctx)
+	key := strings.Join([]string{sessionID, workspace, spec.Language, spec.Executable, strings.Join(spec.Command, "\x00")}, "\x00")
 	m.mu.Lock()
 	if server := m.servers[key]; server != nil && server.isAlive() {
 		m.mu.Unlock()
@@ -153,8 +324,8 @@ func (m *runtimeLSPManager) server(ctx context.Context, starter runtimeLSPProces
 	if err != nil {
 		return nil, err
 	}
-	server := newRuntimeLSPServer(key, workspace, spec, proc)
-	if err := server.initialize(ctx); err != nil {
+	server := newRuntimeLSPServer(key, sessionID, workspace, spec, proc, m.now().UnixMilli())
+	if err := server.initialize(ctx, runtimeLSPTimeout(cfg)); err != nil {
 		server.close()
 		return nil, err
 	}
@@ -170,10 +341,10 @@ func (m *runtimeLSPManager) server(ctx context.Context, starter runtimeLSPProces
 	return server, nil
 }
 
-func (m *runtimeLSPManager) resolveServerSpec(ctx context.Context, op commandline.Operator, workspace string, input tools.LSPInput) (runtimeLSPServerSpec, string, bool, error) {
+func (m *runtimeLSPManager) resolveServerSpec(ctx context.Context, op commandline.Operator, workspace string, input tools.LSPInput, cfg config.RuntimeLSPConfig) (runtimeLSPServerSpec, string, bool, error) {
 	language := runtimeLSPNormalizeLanguage(input.Language)
 	if language == "" {
-		language = runtimeLSPLanguageFromPath(input.FilePath)
+		language = runtimeLSPLanguageFromPath(input.FilePath, cfg)
 	}
 	if language == "" {
 		language = m.detectWorkspaceLanguage(ctx, op, workspace)
@@ -181,7 +352,7 @@ func (m *runtimeLSPManager) resolveServerSpec(ctx context.Context, op commandlin
 	if language == "" {
 		return runtimeLSPServerSpec{}, "", false, fmt.Errorf("could not infer LSP language")
 	}
-	spec, ok := runtimeLSPServerSpecForLanguage(language)
+	spec, ok := runtimeLSPServerSpecForLanguage(language, cfg)
 	if !ok {
 		return runtimeLSPServerSpec{}, "", false, fmt.Errorf("no LSP server mapping for language %q", language)
 	}
@@ -209,21 +380,26 @@ func (m *runtimeLSPManager) detectWorkspaceLanguage(ctx context.Context, op comm
 }
 
 type runtimeLSPServer struct {
-	key     string
-	root    string
-	spec    runtimeLSPServerSpec
-	proc    sandbox.RuntimeProcess
-	stdin   io.WriteCloser
-	reader  *bufio.Reader
-	writeMu sync.Mutex
+	key       string
+	sessionID string
+	root      string
+	spec      runtimeLSPServerSpec
+	proc      sandbox.RuntimeProcess
+	stdin     io.WriteCloser
+	reader    *bufio.Reader
+	writeMu   sync.Mutex
 
-	mu        sync.Mutex
-	nextID    int64
-	pending   map[int64]chan runtimeLSPResponse
-	openDocs  map[string]*runtimeLSPOpenDoc
-	readErr   error
-	readDone  chan struct{}
-	closeOnce sync.Once
+	mu           sync.Mutex
+	nextID       int64
+	pending      map[int64]chan runtimeLSPResponse
+	openDocs     map[string]*runtimeLSPOpenDoc
+	readErr      error
+	readDone     chan struct{}
+	closeOnce    sync.Once
+	startedAt    int64
+	lastUsedAt   int64
+	requestCount int64
+	lastError    string
 }
 
 type runtimeLSPResponse struct {
@@ -242,17 +418,19 @@ type runtimeLSPOpenDoc struct {
 	Language string
 }
 
-func newRuntimeLSPServer(key, root string, spec runtimeLSPServerSpec, proc sandbox.RuntimeProcess) *runtimeLSPServer {
+func newRuntimeLSPServer(key, sessionID, root string, spec runtimeLSPServerSpec, proc sandbox.RuntimeProcess, startedAt int64) *runtimeLSPServer {
 	server := &runtimeLSPServer{
-		key:      key,
-		root:     root,
-		spec:     spec,
-		proc:     proc,
-		stdin:    proc.Stdin(),
-		reader:   bufio.NewReader(proc.Stdout()),
-		pending:  make(map[int64]chan runtimeLSPResponse),
-		openDocs: make(map[string]*runtimeLSPOpenDoc),
-		readDone: make(chan struct{}),
+		key:       key,
+		sessionID: sessionID,
+		root:      root,
+		spec:      spec,
+		proc:      proc,
+		stdin:     proc.Stdin(),
+		reader:    bufio.NewReader(proc.Stdout()),
+		pending:   make(map[int64]chan runtimeLSPResponse),
+		openDocs:  make(map[string]*runtimeLSPOpenDoc),
+		readDone:  make(chan struct{}),
+		startedAt: startedAt,
 	}
 	go server.readLoop()
 	go io.Copy(io.Discard, proc.Stderr())
@@ -279,8 +457,8 @@ func (s *runtimeLSPServer) close() {
 	})
 }
 
-func (s *runtimeLSPServer) initialize(ctx context.Context) error {
-	initCtx, cancel := context.WithTimeout(ctx, runtimeLSPRequestTimeout)
+func (s *runtimeLSPServer) initialize(ctx context.Context, timeout time.Duration) error {
+	initCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	_, err := s.call(initCtx, "initialize", map[string]any{
 		"processId": nil,
@@ -345,16 +523,75 @@ func (s *runtimeLSPServer) openOrChange(ctx context.Context, filePath, languageI
 	})
 }
 
-func (s *runtimeLSPServer) query(ctx context.Context, operation, filePath string, input tools.LSPInput) (string, int, error) {
+func (s *runtimeLSPServer) query(ctx context.Context, operation, filePath string, input tools.LSPInput, timeout time.Duration, maxBytes int) (string, int, error) {
 	method, params := runtimeLSPMethodAndParams(operation, filePath, input)
-	callCtx, cancel := context.WithTimeout(ctx, runtimeLSPRequestTimeout)
+	s.markRequestStart()
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	result, err := s.call(callCtx, method, params)
 	if err != nil {
+		s.markRequestError(err.Error())
 		return "", 0, err
 	}
-	formatted, count := runtimeLSPFormatResult(result)
+	formatted, count := runtimeLSPFormatResult(result, maxBytes)
 	return formatted, count, nil
+}
+
+func (s *runtimeLSPServer) edit(ctx context.Context, operation, filePath string, input tools.LSPEditInput, timeout time.Duration) (json.RawMessage, error) {
+	method, params := runtimeLSPEditMethodAndParams(operation, filePath, input)
+	s.markRequestStart()
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	result, err := s.call(callCtx, method, params)
+	if err != nil {
+		s.markRequestError(err.Error())
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(result)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("LSP %s returned no edits", method)
+	}
+	if bytes.Equal(trimmed, []byte("null")) && operation != "format" {
+		return nil, fmt.Errorf("LSP %s returned no edits", method)
+	}
+	return result, nil
+}
+
+func (s *runtimeLSPServer) markRequestStart() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastUsedAt = time.Now().UnixMilli()
+	s.requestCount++
+	s.lastError = ""
+}
+
+func (s *runtimeLSPServer) markRequestError(lastErr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastUsedAt = time.Now().UnixMilli()
+	s.lastError = lastErr
+}
+
+func (s *runtimeLSPServer) status() RuntimeLSPServerStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status := RuntimeLSPServerStatus{
+		SessionID:    s.sessionID,
+		Workspace:    s.root,
+		Language:     s.spec.Language,
+		Executable:   s.spec.Executable,
+		Command:      strings.Join(s.spec.Command, " "),
+		Alive:        s.isAlive(),
+		OpenDocs:     len(s.openDocs),
+		RequestCount: s.requestCount,
+		StartedAt:    s.startedAt,
+		LastUsedAt:   s.lastUsedAt,
+		LastError:    s.lastError,
+	}
+	if status.LastError == "" && s.readErr != nil {
+		status.LastError = s.readErr.Error()
+	}
+	return status
 }
 
 func (s *runtimeLSPServer) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -544,6 +781,32 @@ func runtimeLSPMethodAndParams(operation, filePath string, input tools.LSPInput)
 	}
 }
 
+func runtimeLSPEditMethodAndParams(operation, filePath string, input tools.LSPEditInput) (string, any) {
+	switch operation {
+	case "rename":
+		params := runtimeLSPTextDocumentPosition(filePath, tools.LSPInput{
+			FilePath:  input.FilePath,
+			Line:      input.Line,
+			Character: input.Character,
+		})
+		params["newName"] = strings.TrimSpace(input.NewName)
+		return "textDocument/rename", params
+	case "format":
+		return "textDocument/formatting", map[string]any{
+			"textDocument": map[string]any{"uri": runtimeLSPFileURI(filePath)},
+			"options": map[string]any{
+				"tabSize":      2,
+				"insertSpaces": true,
+			},
+		}
+	default:
+		return "textDocument/formatting", map[string]any{
+			"textDocument": map[string]any{"uri": runtimeLSPFileURI(filePath)},
+			"options":      map[string]any{"tabSize": 2, "insertSpaces": true},
+		}
+	}
+}
+
 func runtimeLSPTextDocumentPosition(filePath string, input tools.LSPInput) map[string]any {
 	line := input.Line - 1
 	if line < 0 {
@@ -562,7 +825,300 @@ func runtimeLSPTextDocumentPosition(filePath string, input tools.LSPInput) map[s
 	}
 }
 
-func runtimeLSPFormatResult(raw json.RawMessage) (string, int) {
+type runtimeLSPApplyResult struct {
+	ChangedFiles []string
+	EditCount    int
+}
+
+type runtimeLSPPendingWrite struct {
+	target   string
+	original string
+	content  string
+}
+
+type runtimeLSPPosition struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type runtimeLSPRange struct {
+	Start runtimeLSPPosition `json:"start"`
+	End   runtimeLSPPosition `json:"end"`
+}
+
+type runtimeLSPTextEdit struct {
+	Range   runtimeLSPRange `json:"range"`
+	NewText string          `json:"newText"`
+}
+
+type runtimeLSPWorkspaceEdit struct {
+	Changes         map[string][]runtimeLSPTextEdit `json:"changes"`
+	DocumentChanges []json.RawMessage               `json:"documentChanges"`
+}
+
+type runtimeLSPTextDocumentEdit struct {
+	TextDocument struct {
+		URI string `json:"uri"`
+	} `json:"textDocument"`
+	Edits []runtimeLSPTextEdit `json:"edits"`
+}
+
+func runtimeLSPApplyWorkspaceEdit(ctx context.Context, op commandline.Operator, workspace, workspacePath string, workspaces tools.RuntimeWorkspaceManager, raw json.RawMessage) (runtimeLSPApplyResult, error) {
+	editsByFile, err := runtimeLSPWorkspaceEditByFile(raw, workspace)
+	if err != nil {
+		return runtimeLSPApplyResult{}, err
+	}
+	if len(editsByFile) == 0 {
+		return runtimeLSPApplyResult{}, fmt.Errorf("LSP edit response did not contain text edits")
+	}
+	files := make([]string, 0, len(editsByFile))
+	for file := range editsByFile {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	result := runtimeLSPApplyResult{ChangedFiles: files}
+	pending := make([]runtimeLSPPendingWrite, 0, len(files))
+	for _, file := range files {
+		target, err := runtimeLSPWorkspaceFilePath(ctx, file, workspacePath, workspaces)
+		if err != nil {
+			return runtimeLSPApplyResult{}, err
+		}
+		if target != file {
+			return runtimeLSPApplyResult{}, fmt.Errorf("LSP edit target %s resolved unexpectedly to %s", file, target)
+		}
+		content, err := op.ReadFile(ctx, target)
+		if err != nil {
+			return runtimeLSPApplyResult{}, err
+		}
+		next, err := runtimeLSPApplyTextEdits(content, editsByFile[file])
+		if err != nil {
+			return runtimeLSPApplyResult{}, fmt.Errorf("apply edits to %s: %w", file, err)
+		}
+		editCount := len(editsByFile[file])
+		pending = append(pending, runtimeLSPPendingWrite{target: target, original: content, content: next})
+		result.EditCount += editCount
+	}
+	for i, write := range pending {
+		if err := op.WriteFile(ctx, write.target, write.content); err != nil {
+			return runtimeLSPApplyResult{}, runtimeLSPRollbackWrites(ctx, op, pending[:i+1], err)
+		}
+	}
+	return result, nil
+}
+
+func runtimeLSPRollbackWrites(ctx context.Context, op commandline.Operator, writes []runtimeLSPPendingWrite, writeErr error) error {
+	rollbackErrs := make([]string, 0)
+	for i := len(writes) - 1; i >= 0; i-- {
+		write := writes[i]
+		if err := op.WriteFile(ctx, write.target, write.original); err != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Sprintf("%s: %v", write.target, err))
+		}
+	}
+	if len(rollbackErrs) > 0 {
+		return fmt.Errorf("write LSP edit: %w; rollback failed: %s", writeErr, strings.Join(rollbackErrs, "; "))
+	}
+	return fmt.Errorf("write LSP edit: %w; rolled back previous file changes", writeErr)
+}
+
+func runtimeLSPWorkspaceEditByFile(raw json.RawMessage, workspace string) (map[string][]runtimeLSPTextEdit, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	out := make(map[string][]runtimeLSPTextEdit)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return nil, fmt.Errorf("text edit array requires a target document")
+	}
+	var workspaceEdit runtimeLSPWorkspaceEdit
+	if err := json.Unmarshal(trimmed, &workspaceEdit); err != nil {
+		return nil, err
+	}
+	for uri, edits := range workspaceEdit.Changes {
+		if len(edits) == 0 {
+			continue
+		}
+		file, err := runtimeLSPFilePathFromURI(uri, workspace)
+		if err != nil {
+			return nil, err
+		}
+		out[file] = append(out[file], edits...)
+	}
+	for _, rawChange := range workspaceEdit.DocumentChanges {
+		var probe struct {
+			Kind         string `json:"kind"`
+			TextDocument *struct {
+				URI string `json:"uri"`
+			} `json:"textDocument"`
+		}
+		if err := json.Unmarshal(rawChange, &probe); err != nil {
+			return nil, err
+		}
+		if probe.TextDocument == nil || probe.TextDocument.URI == "" {
+			if probe.Kind != "" {
+				return nil, fmt.Errorf("unsupported LSP document change kind %q", probe.Kind)
+			}
+			return nil, fmt.Errorf("unsupported LSP document change without textDocument")
+		}
+		var docEdit runtimeLSPTextDocumentEdit
+		if err := json.Unmarshal(rawChange, &docEdit); err != nil {
+			return nil, err
+		}
+		if len(docEdit.Edits) == 0 {
+			continue
+		}
+		file, err := runtimeLSPFilePathFromURI(docEdit.TextDocument.URI, workspace)
+		if err != nil {
+			return nil, err
+		}
+		out[file] = append(out[file], docEdit.Edits...)
+	}
+	return out, nil
+}
+
+func runtimeLSPTextEditsAsWorkspaceEdit(raw json.RawMessage, targetPath string) (json.RawMessage, error) {
+	var edits []runtimeLSPTextEdit
+	if err := json.Unmarshal(raw, &edits); err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(runtimeLSPWorkspaceEdit{
+		Changes: map[string][]runtimeLSPTextEdit{
+			runtimeLSPFileURI(targetPath): edits,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func runtimeLSPFormatHasNoTextEdits(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return true
+	}
+	var edits []runtimeLSPTextEdit
+	if err := json.Unmarshal(trimmed, &edits); err != nil {
+		return false
+	}
+	return len(edits) == 0
+}
+
+func runtimeLSPFilePathFromURI(uri, workspace string) (string, error) {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme != "file" {
+		return "", fmt.Errorf("unsupported LSP edit URI scheme %q", parsed.Scheme)
+	}
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		return "", fmt.Errorf("unsupported LSP edit URI host %q", parsed.Host)
+	}
+	file := cleanRuntimeRemotePath(parsed.Path)
+	workspace = cleanRuntimeRemotePath(workspace)
+	if file == "" || workspace == "" || (file != workspace && !strings.HasPrefix(file, workspace+"/")) {
+		return "", fmt.Errorf("LSP edit target %s is outside workspace %s", file, workspace)
+	}
+	return file, nil
+}
+
+func runtimeLSPApplyTextEdits(content string, edits []runtimeLSPTextEdit) (string, error) {
+	if len(edits) == 0 {
+		return content, nil
+	}
+	type indexedEdit struct {
+		edit       runtimeLSPTextEdit
+		start, end int
+		index      int
+	}
+	indexed := make([]indexedEdit, 0, len(edits))
+	for i, edit := range edits {
+		start, err := runtimeLSPPositionOffset(content, edit.Range.Start)
+		if err != nil {
+			return "", err
+		}
+		end, err := runtimeLSPPositionOffset(content, edit.Range.End)
+		if err != nil {
+			return "", err
+		}
+		if start > end {
+			return "", fmt.Errorf("invalid edit range: start %d after end %d", start, end)
+		}
+		indexed = append(indexed, indexedEdit{edit: edit, start: start, end: end, index: i})
+	}
+	sort.SliceStable(indexed, func(i, j int) bool {
+		if indexed[i].start == indexed[j].start {
+			if indexed[i].end == indexed[j].end {
+				return indexed[i].index > indexed[j].index
+			}
+			return indexed[i].end > indexed[j].end
+		}
+		return indexed[i].start > indexed[j].start
+	})
+	next := content
+	for _, item := range indexed {
+		if item.start < 0 || item.end > len(next) || item.start > item.end {
+			return "", fmt.Errorf("edit range %d:%d is outside document", item.start, item.end)
+		}
+		next = next[:item.start] + item.edit.NewText + next[item.end:]
+	}
+	return next, nil
+}
+
+func runtimeLSPPositionOffset(content string, pos runtimeLSPPosition) (int, error) {
+	if pos.Line < 0 || pos.Character < 0 {
+		return 0, fmt.Errorf("negative LSP position")
+	}
+	starts := runtimeLSPLineStartOffsets(content)
+	if pos.Line >= len(starts) {
+		if pos.Line == len(starts) && pos.Character == 0 {
+			return len(content), nil
+		}
+		return 0, fmt.Errorf("line %d is outside document", pos.Line)
+	}
+	start := starts[pos.Line]
+	end := len(content)
+	if pos.Line+1 < len(starts) {
+		end = starts[pos.Line+1]
+		if end > start && content[end-1] == '\n' {
+			end--
+		}
+		if end > start && content[end-1] == '\r' {
+			end--
+		}
+	}
+	return start + runtimeLSPUTF16ColumnToByteOffset(content[start:end], pos.Character), nil
+}
+
+func runtimeLSPLineStartOffsets(content string) []int {
+	starts := []int{0}
+	for i, r := range content {
+		if r == '\n' {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
+}
+
+func runtimeLSPUTF16ColumnToByteOffset(line string, character int) int {
+	if character <= 0 {
+		return 0
+	}
+	units := 0
+	for idx, r := range line {
+		width := len(utf16.Encode([]rune{r}))
+		if units+width > character {
+			return idx
+		}
+		units += width
+		if units == character {
+			return idx + len(string(r))
+		}
+	}
+	return len(line)
+}
+
+func runtimeLSPFormatResult(raw json.RawMessage, maxBytes int) (string, int) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return "No LSP result.", 0
@@ -576,8 +1132,11 @@ func runtimeLSPFormatResult(raw json.RawMessage) (string, int) {
 		data = trimmed
 	}
 	count := runtimeLSPResultCount(v)
-	if len(data) > runtimeLSPMaxResultBytes {
-		data = append(data[:runtimeLSPMaxResultBytes], []byte("\n[truncated]")...)
+	if maxBytes <= 0 {
+		maxBytes = runtimeLSPMaxResultBytes
+	}
+	if len(data) > maxBytes {
+		data = append(data[:maxBytes], []byte("\n[truncated]")...)
 	}
 	return string(data), count
 }
@@ -603,6 +1162,17 @@ func runtimeLSPOperation(operation string) string {
 	return operation
 }
 
+func runtimeLSPEditOperation(operation string) string {
+	switch strings.TrimSpace(operation) {
+	case "rename":
+		return "rename"
+	case "format", "formatting":
+		return "format"
+	default:
+		return strings.TrimSpace(operation)
+	}
+}
+
 func runtimeLSPCanHandle(operation string, input tools.LSPInput) bool {
 	switch operation {
 	case "definition", "references", "hover":
@@ -611,6 +1181,17 @@ func runtimeLSPCanHandle(operation string, input tools.LSPInput) bool {
 		return strings.TrimSpace(input.FilePath) != ""
 	case "workspace_symbol":
 		return strings.TrimSpace(input.Symbol) != ""
+	default:
+		return false
+	}
+}
+
+func runtimeLSPEditCanHandle(operation string, input tools.LSPEditInput) bool {
+	switch operation {
+	case "rename":
+		return strings.TrimSpace(input.FilePath) != "" && input.Line > 0 && strings.TrimSpace(input.NewName) != ""
+	case "format":
+		return strings.TrimSpace(input.FilePath) != ""
 	default:
 		return false
 	}
@@ -625,8 +1206,21 @@ func runtimeLSPNeedsDocument(operation string) bool {
 	}
 }
 
-func runtimeLSPServerSpecForLanguage(language string) (runtimeLSPServerSpec, bool) {
-	switch runtimeLSPNormalizeLanguage(language) {
+func runtimeLSPServerSpecForLanguage(language string, cfg config.RuntimeLSPConfig) (runtimeLSPServerSpec, bool) {
+	language = runtimeLSPNormalizeLanguage(language)
+	for _, server := range cfg.Servers {
+		if server.Disabled {
+			continue
+		}
+		if runtimeLSPNormalizeLanguage(server.Language) != language {
+			continue
+		}
+		spec, ok := runtimeLSPServerSpecFromConfig(server)
+		if ok {
+			return spec, true
+		}
+	}
+	switch language {
 	case "go":
 		return runtimeLSPServerSpec{Language: "go", Executable: "gopls", Command: []string{"gopls", "serve"}}, true
 	case "typescript":
@@ -642,6 +1236,25 @@ func runtimeLSPServerSpecForLanguage(language string) (runtimeLSPServerSpec, boo
 	}
 }
 
+func runtimeLSPServerSpecFromConfig(server config.RuntimeLSPServerConfig) (runtimeLSPServerSpec, bool) {
+	language := runtimeLSPNormalizeLanguage(server.Language)
+	if language == "" {
+		return runtimeLSPServerSpec{}, false
+	}
+	command := append([]string(nil), server.Command...)
+	executable := strings.TrimSpace(server.Executable)
+	if len(command) == 0 && executable != "" {
+		command = []string{executable}
+	}
+	if len(command) == 0 {
+		return runtimeLSPServerSpec{}, false
+	}
+	if executable == "" {
+		executable = command[0]
+	}
+	return runtimeLSPServerSpec{Language: language, Executable: executable, Command: command}, true
+}
+
 func runtimeLSPNormalizeLanguage(language string) string {
 	switch strings.ToLower(strings.TrimSpace(language)) {
 	case "go", "golang":
@@ -655,12 +1268,31 @@ func runtimeLSPNormalizeLanguage(language string) string {
 	case "rs", "rust":
 		return "rust"
 	default:
+		normalized := strings.ToLower(strings.TrimSpace(language))
+		if isRuntimeLSPSafeIdentifier(normalized) {
+			return normalized
+		}
 		return ""
 	}
 }
 
-func runtimeLSPLanguageFromPath(filePath string) string {
-	switch strings.ToLower(path.Ext(filePath)) {
+func runtimeLSPLanguageFromPath(filePath string, cfg config.RuntimeLSPConfig) string {
+	ext := strings.ToLower(path.Ext(filePath))
+	for _, server := range cfg.Servers {
+		if server.Disabled {
+			continue
+		}
+		for _, candidate := range server.Extensions {
+			candidate = strings.ToLower(strings.TrimSpace(candidate))
+			if candidate != "" && !strings.HasPrefix(candidate, ".") {
+				candidate = "." + candidate
+			}
+			if candidate != "" && candidate == ext {
+				return runtimeLSPNormalizeLanguage(server.Language)
+			}
+		}
+	}
+	switch ext {
 	case ".go":
 		return "go"
 	case ".ts", ".tsx":
@@ -700,6 +1332,102 @@ func runtimeLSPLanguageIDForFile(language, filePath string) string {
 	}
 }
 
+func normalizeRuntimeLSPConfig(cfg config.RuntimeLSPConfig) config.RuntimeLSPConfig {
+	cfg = cloneRuntimeLSPConfig(cfg)
+	if cfg.Enabled == nil {
+		enabled := true
+		cfg.Enabled = &enabled
+	}
+	if cfg.RequestTimeoutMS <= 0 {
+		cfg.RequestTimeoutMS = int(runtimeLSPRequestTimeout / time.Millisecond)
+	}
+	if cfg.MaxResultBytes <= 0 {
+		cfg.MaxResultBytes = runtimeLSPMaxResultBytes
+	}
+	return cfg
+}
+
+func cloneRuntimeLSPConfig(cfg config.RuntimeLSPConfig) config.RuntimeLSPConfig {
+	out := cfg
+	if cfg.Enabled != nil {
+		enabled := *cfg.Enabled
+		out.Enabled = &enabled
+	}
+	out.Servers = append([]config.RuntimeLSPServerConfig(nil), cfg.Servers...)
+	for i := range out.Servers {
+		out.Servers[i].Command = append([]string(nil), out.Servers[i].Command...)
+		out.Servers[i].Extensions = append([]string(nil), out.Servers[i].Extensions...)
+	}
+	return out
+}
+
+func runtimeLSPEnabled(cfg config.RuntimeLSPConfig) bool {
+	return cfg.Enabled == nil || *cfg.Enabled
+}
+
+func runtimeLSPTimeout(cfg config.RuntimeLSPConfig) time.Duration {
+	if cfg.RequestTimeoutMS <= 0 {
+		return runtimeLSPRequestTimeout
+	}
+	return time.Duration(cfg.RequestTimeoutMS) * time.Millisecond
+}
+
+func runtimeLSPMaxBytes(cfg config.RuntimeLSPConfig) int {
+	if cfg.MaxResultBytes <= 0 {
+		return runtimeLSPMaxResultBytes
+	}
+	return cfg.MaxResultBytes
+}
+
+func runtimeLSPConfiguredStatus(cfg config.RuntimeLSPConfig) []RuntimeLSPConfigured {
+	defaults := []config.RuntimeLSPServerConfig{
+		{Language: "go", Executable: "gopls", Command: []string{"gopls", "serve"}, Extensions: []string{".go"}},
+		{Language: "typescript", Executable: "typescript-language-server", Command: []string{"typescript-language-server", "--stdio"}, Extensions: []string{".ts", ".tsx"}},
+		{Language: "javascript", Executable: "typescript-language-server", Command: []string{"typescript-language-server", "--stdio"}, Extensions: []string{".js", ".jsx", ".mjs", ".cjs"}},
+		{Language: "python", Executable: "pyright-langserver", Command: []string{"pyright-langserver", "--stdio"}, Extensions: []string{".py", ".pyi"}},
+		{Language: "rust", Executable: "rust-analyzer", Command: []string{"rust-analyzer"}, Extensions: []string{".rs"}},
+	}
+	merged := append(defaults, cfg.Servers...)
+	out := make([]RuntimeLSPConfigured, 0, len(merged))
+	for _, item := range merged {
+		language := runtimeLSPNormalizeLanguage(item.Language)
+		if language == "" {
+			continue
+		}
+		spec, ok := runtimeLSPServerSpecFromConfig(item)
+		if !ok {
+			spec, ok = runtimeLSPServerSpecForLanguage(language, config.RuntimeLSPConfig{})
+		}
+		if !ok {
+			continue
+		}
+		out = append(out, RuntimeLSPConfigured{
+			Language:   language,
+			Executable: spec.Executable,
+			Command:    append([]string(nil), spec.Command...),
+			Extensions: append([]string(nil), item.Extensions...),
+			Disabled:   item.Disabled,
+		})
+	}
+	return out
+}
+
+func isRuntimeLSPSafeIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func runtimeLSPCommandAvailable(ctx context.Context, op commandline.Operator, workspace, executable string) (bool, error) {
 	cmd := "cd " + shellQuoteRuntime(workspace) + " && command -v " + shellQuoteRuntime(executable) + " >/dev/null 2>&1"
 	output, err := op.RunCommand(ctx, []string{"sh", "-lc", cmd})
@@ -721,18 +1449,35 @@ func runtimeLSPWorkspaceFilePath(ctx context.Context, filePath, workspacePath st
 	if p == "" {
 		return "", fmt.Errorf("file_path is required")
 	}
-	if p == "/workspace" {
+	switch {
+	case p == "/workspace":
 		p = workspace
-	} else if strings.HasPrefix(p, "/workspace/") {
-		p = path.Join(workspace, strings.TrimPrefix(p, "/workspace/"))
-	} else if !strings.HasPrefix(p, "/") {
+	case strings.HasPrefix(p, "/"):
+		cleaned := cleanRuntimeRemotePath(p)
+		if runtimeLSPPathInside(cleaned, workspace) {
+			p = cleaned
+		} else if strings.HasPrefix(p, "/workspace/") {
+			p = path.Join(workspace, strings.TrimPrefix(p, "/workspace/"))
+		} else {
+			p = cleaned
+		}
+	default:
 		p = path.Join(workspace, p)
 	}
 	p = cleanRuntimeRemotePath(p)
-	if p != workspace && !strings.HasPrefix(p, workspace+"/") {
+	if !runtimeLSPPathInside(p, workspace) {
 		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, workspace)
 	}
 	return p, nil
+}
+
+func runtimeLSPPathInside(p, root string) bool {
+	p = cleanRuntimeRemotePath(p)
+	root = cleanRuntimeRemotePath(root)
+	if p == "" || root == "" {
+		return false
+	}
+	return p == root || strings.HasPrefix(p, root+"/")
 }
 
 func runtimeLSPFileURI(filePath string) string {

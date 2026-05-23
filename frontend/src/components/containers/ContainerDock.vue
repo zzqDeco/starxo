@@ -90,9 +90,9 @@ const activeContainerName = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  padding: 12px 12px 10px;
+  padding: 10px 12px 9px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(2, 6, 23, 0.32);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
 }
 
 .runtime-title-block {
@@ -106,9 +106,9 @@ const activeContainerName = computed(() => {
   color: var(--text-faint);
   font-family: var(--font-brand);
   font-size: var(--fs-2xs);
-  font-weight: var(--fw-bold);
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .runtime-active {
@@ -117,7 +117,7 @@ const activeContainerName = computed(() => {
   gap: 6px;
   min-width: 0;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -125,7 +125,7 @@ const activeContainerName = computed(() => {
 }
 
 .runtime-active .n-icon {
-  color: var(--accent-emerald);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -139,7 +139,7 @@ const activeContainerName = computed(() => {
   height: 30px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--bg-deepest);
+  background: transparent;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
@@ -151,14 +151,33 @@ const activeContainerName = computed(() => {
 }
 
 .runtime-tab:hover {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
 .runtime-tab.active {
-  color: var(--accent-cyan);
-  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-elevated));
-  border-color: rgba(34, 211, 238, 0.3);
+  color: var(--text-primary);
+  background: var(--platform-bg-content);
+  border-color: var(--border-subtle);
+  box-shadow: var(--elev-1);
+}
+
+:global(:root[data-platform="macos"] .runtime-tab){
+  height: 28px;
+  border-radius: 7px;
+  background: transparent;
+}
+
+:global(:root[data-platform="macos"] .runtime-tabs){
+  padding: 2px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
+  border: 1px solid var(--border-subtle);
+  gap: 0;
+}
+
+:global(:root[data-platform="macos"] .runtime-tab){
+  border-color: transparent;
 }
 
 .runtime-body {

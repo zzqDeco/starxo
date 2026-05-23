@@ -27,9 +27,17 @@ const (
 	RuntimeToolExitPlanMode  = "ExitPlanMode"
 	RuntimeToolEnterWorktree = "EnterWorktree"
 	RuntimeToolExitWorktree  = "ExitWorktree"
+	RuntimeToolWorktreeDiff  = "WorktreeDiff"
+	RuntimeToolWorktreeMerge = "WorktreeMerge"
 
 	runtimeLargeOutputThreshold = 32 * 1024
+	runtimeToolPatchLimit       = 20 * 1024
+	runtimeWriteOldPreviewLimit = runtimeToolPatchLimit / 3
 )
+
+type runtimeFilePreviewReader interface {
+	ReadFilePreview(ctx context.Context, path string, maxBytes int) (content string, bytes int64, lines int, exists bool, truncated bool, err error)
+}
 
 type RuntimeTaskRef struct {
 	TaskID     string `json:"taskId"`
@@ -45,8 +53,10 @@ type RuntimeTaskSnapshot struct {
 	Description string `json:"description"`
 	Command     string `json:"command,omitempty"`
 	OutputPath  string `json:"outputPath,omitempty"`
+	OutputSize  int64  `json:"outputSize,omitempty"`
 	StartedAt   int64  `json:"startedAt"`
 	FinishedAt  int64  `json:"finishedAt,omitempty"`
+	DurationMs  int64  `json:"durationMs,omitempty"`
 	ExitCode    int    `json:"exitCode,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
@@ -75,6 +85,8 @@ type RuntimeWorkspaceManager interface {
 	CurrentWorkspace(ctx context.Context, defaultWorkspace string) string
 	EnterWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, name string) (WorktreeOutput, error)
 	ExitWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, action string, discardChanges bool) (WorktreeOutput, error)
+	DiffWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, includePatch bool, maxBytes int) (WorktreeDiffOutput, error)
+	MergeWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, commitMessage string, removeWorktree bool) (WorktreeMergeOutput, error)
 }
 
 type BashInput struct {
@@ -115,10 +127,13 @@ type WriteInput struct {
 }
 
 type WriteOutput struct {
-	FilePath   string `json:"filePath"`
-	Created    bool   `json:"created"`
-	Bytes      int    `json:"bytes"`
-	LinesAdded int    `json:"linesAdded"`
+	FilePath     string `json:"filePath"`
+	Created      bool   `json:"created"`
+	Bytes        int    `json:"bytes"`
+	LinesAdded   int    `json:"linesAdded"`
+	LinesRemoved int    `json:"linesRemoved,omitempty"`
+	Patch        string `json:"patch,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
 }
 
 type EditInput struct {
@@ -134,6 +149,7 @@ type EditOutput struct {
 	LinesAdded   int    `json:"linesAdded"`
 	LinesRemoved int    `json:"linesRemoved"`
 	Patch        string `json:"patch,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
 }
 
 type GlobInput struct {
@@ -208,6 +224,43 @@ type WorktreeOutput struct {
 	Message        string `json:"message"`
 }
 
+type WorktreeDiffInput struct {
+	IncludePatch bool `json:"include_patch,omitempty" jsonschema:"description=include patch content in addition to status and stat"`
+	MaxBytes     int  `json:"max_bytes,omitempty" jsonschema:"description=max patch bytes when include_patch is true; default 20000"`
+}
+
+type WorktreeDiffOutput struct {
+	WorkspacePath      string `json:"workspacePath"`
+	WorktreePath       string `json:"worktreePath"`
+	WorktreeBranch     string `json:"worktreeBranch"`
+	Status             string `json:"status"`
+	DiffStat           string `json:"diffStat"`
+	Diff               string `json:"diff,omitempty"`
+	UntrackedDiff      string `json:"untrackedDiff,omitempty"`
+	Truncated          bool   `json:"truncated,omitempty"`
+	UntrackedTruncated bool   `json:"untrackedTruncated,omitempty"`
+	Message            string `json:"message"`
+}
+
+type WorktreeMergeInput struct {
+	CommitMessage  string `json:"commit_message,omitempty" jsonschema:"description=commit and merge message; defaults to Starxo runtime worktree merge"`
+	RemoveWorktree bool   `json:"remove_worktree,omitempty" jsonschema:"description=remove the worktree and delete its local branch after a successful merge"`
+}
+
+type WorktreeMergeOutput struct {
+	Action         string   `json:"action"`
+	WorkspacePath  string   `json:"workspacePath"`
+	WorktreePath   string   `json:"worktreePath"`
+	WorktreeBranch string   `json:"worktreeBranch"`
+	CommitMessage  string   `json:"commitMessage,omitempty"`
+	Removed        bool     `json:"removed"`
+	Conflicted     bool     `json:"conflicted,omitempty"`
+	ConflictFiles  []string `json:"conflictFiles,omitempty"`
+	MergeOutput    string   `json:"mergeOutput,omitempty"`
+	RecoveryHint   string   `json:"recoveryHint,omitempty"`
+	Message        string   `json:"message"`
+}
+
 func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string, tasks RuntimeTaskManager, workspaces RuntimeWorkspaceManager) ([]CatalogEntry, error) {
 	builders := []func() (CatalogEntry, error){
 		func() (CatalogEntry, error) { return newBashCatalogEntry(op, workspacePath, tasks, workspaces) },
@@ -221,6 +274,8 @@ func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string,
 		newExitPlanModeCatalogEntry,
 		func() (CatalogEntry, error) { return newEnterWorktreeCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newExitWorktreeCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newWorktreeDiffCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newWorktreeMergeCatalogEntry(op, workspacePath, workspaces) },
 	}
 	entries := make([]CatalogEntry, 0, len(builders))
 	for _, build := range builders {
@@ -393,18 +448,27 @@ func newWriteCatalogEntry(op commandline.Operator, workspacePath string, workspa
 			if err != nil {
 				return WriteOutput{}, err
 			}
-			created := false
-			if _, err := op.ReadFile(ctx, target); err != nil {
-				created = true
+			previous, err := readExistingFilePreview(ctx, op, target, runtimeWriteOldPreviewLimit)
+			if err != nil {
+				return WriteOutput{}, err
 			}
 			if err := op.WriteFile(ctx, target, input.Content); err != nil {
 				return WriteOutput{}, err
 			}
+			patch, patchTruncated := buildReplacementPatchLimited(previous.Content, input.Content, runtimeToolPatchLimit)
+			truncated := previous.Truncated || patchTruncated
+			linesRemoved := 0
+			if previous.Exists {
+				linesRemoved = previous.Lines
+			}
 			return WriteOutput{
-				FilePath:   target,
-				Created:    created,
-				Bytes:      len(input.Content),
-				LinesAdded: len(splitLines(input.Content)),
+				FilePath:     target,
+				Created:      !previous.Exists,
+				Bytes:        len(input.Content),
+				LinesAdded:   len(splitLines(input.Content)),
+				LinesRemoved: linesRemoved,
+				Patch:        patch,
+				Truncated:    truncated,
 			}, nil
 		})
 	if err != nil {
@@ -445,12 +509,14 @@ func newEditCatalogEntry(op commandline.Operator, workspacePath string, workspac
 			if err := op.WriteFile(ctx, target, next); err != nil {
 				return EditOutput{}, err
 			}
+			patch, truncated := buildReplacementPatchLimited(input.OldString, input.NewString, runtimeToolPatchLimit)
 			return EditOutput{
 				FilePath:     target,
 				Replacements: replacements,
 				LinesAdded:   countLinesDelta(input.NewString, input.OldString, true) * replacements,
 				LinesRemoved: countLinesDelta(input.NewString, input.OldString, false) * replacements,
-				Patch:        buildSimplePatch(input.OldString, input.NewString),
+				Patch:        patch,
+				Truncated:    truncated,
 			}, nil
 		})
 	if err != nil {
@@ -653,6 +719,40 @@ func newExitWorktreeCatalogEntry(op commandline.Operator, workspacePath string, 
 	return deferredRuntimeCatalogEntry(RuntimeToolExitWorktree, "Exit Worktree", "Exit a worktree session created by EnterWorktree.", ToolClassRuntime, false, t), nil
 }
 
+func newWorktreeDiffCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolWorktreeDiff,
+		"Review the current runtime worktree status, diff stat, and optional patch.",
+		func(ctx context.Context, input WorktreeDiffInput) (WorktreeDiffOutput, error) {
+			if workspaces == nil {
+				return WorktreeDiffOutput{}, fmt.Errorf("runtime worktree manager is not available")
+			}
+			return workspaces.DiffWorktree(ctx, op, workspacePath, input.IncludePatch, input.MaxBytes)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	entry := deferredRuntimeCatalogEntry(RuntimeToolWorktreeDiff, "Worktree Diff", "Review current runtime worktree changes.", ToolClassRuntimeFile, true, t)
+	entry.SearchHint = "worktree diff review status patch changes"
+	return entry, nil
+}
+
+func newWorktreeMergeCatalogEntry(op commandline.Operator, workspacePath string, workspaces RuntimeWorkspaceManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolWorktreeMerge,
+		"Commit and merge the active runtime worktree back into the original sandbox workspace.",
+		func(ctx context.Context, input WorktreeMergeInput) (WorktreeMergeOutput, error) {
+			if workspaces == nil {
+				return WorktreeMergeOutput{}, fmt.Errorf("runtime worktree manager is not available")
+			}
+			return workspaces.MergeWorktree(ctx, op, workspacePath, input.CommitMessage, input.RemoveWorktree)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	entry := deferredRuntimeCatalogEntry(RuntimeToolWorktreeMerge, "Worktree Merge", "Merge current runtime worktree changes back to the original workspace.", ToolClassRuntimeFile, false, t)
+	entry.SearchHint = "worktree merge commit apply changes original workspace"
+	return entry, nil
+}
+
 func currentWorkspace(ctx context.Context, defaultWorkspace string, workspaces RuntimeWorkspaceManager) string {
 	if workspaces == nil {
 		return defaultWorkspace
@@ -673,6 +773,7 @@ func workspaceFilePath(ctx context.Context, filePath string, workspaceRoot strin
 	if base == "" || base == "." {
 		base = root
 	}
+	base = cleanRemotePath(base)
 
 	p := strings.TrimSpace(filePath)
 	if p == "" {
@@ -681,18 +782,38 @@ func workspaceFilePath(ctx context.Context, filePath string, workspaceRoot strin
 	switch {
 	case p == "/workspace":
 		p = base
-	case strings.HasPrefix(p, "/workspace/"):
-		p = path.Join(base, strings.TrimPrefix(p, "/workspace/"))
 	case strings.HasPrefix(p, "/"):
-		p = cleanRemotePath(p)
+		cleaned := cleanRemotePath(p)
+		if isRemotePathInside(cleaned, base) {
+			p = cleaned
+		} else if strings.HasPrefix(p, "/workspace/") {
+			p = path.Join(base, strings.TrimPrefix(p, "/workspace/"))
+		} else {
+			p = cleaned
+		}
 	default:
 		p = path.Join(base, p)
 	}
 	p = cleanRemotePath(p)
-	if p != root && !strings.HasPrefix(p, root+"/") {
-		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, root)
+	if !isRemotePathInside(p, base) {
+		return "", fmt.Errorf("path %s is outside sandbox workspace %s", filePath, base)
 	}
 	return p, nil
+}
+
+func isRemotePathInside(p, root string) bool {
+	p = cleanRemotePath(p)
+	root = cleanRemotePath(root)
+	if p == "" || root == "" {
+		return false
+	}
+	if p == root {
+		return true
+	}
+	if root == "/" {
+		return strings.HasPrefix(p, "/")
+	}
+	return strings.HasPrefix(p, root+"/")
 }
 
 func cleanRemotePath(p string) string {
@@ -705,6 +826,44 @@ func cleanRemotePath(p string) string {
 		cleaned = "/" + cleaned
 	}
 	return cleaned
+}
+
+type existingFilePreview struct {
+	Exists    bool
+	Content   string
+	Bytes     int64
+	Lines     int
+	Truncated bool
+}
+
+func readExistingFilePreview(ctx context.Context, op commandline.Operator, target string, maxBytes int) (existingFilePreview, error) {
+	if previewer, ok := op.(runtimeFilePreviewReader); ok {
+		content, bytes, lines, exists, truncated, err := previewer.ReadFilePreview(ctx, target, maxBytes)
+		if err != nil {
+			return existingFilePreview{}, err
+		}
+		return existingFilePreview{
+			Exists:    exists,
+			Content:   content,
+			Bytes:     bytes,
+			Lines:     lines,
+			Truncated: truncated,
+		}, nil
+	}
+
+	// Non-remote test or legacy operators may not support bounded previews.
+	// Production RemoteOperator implements ReadFilePreview so large overwrites
+	// do not require reading the whole old file just to render a diff summary.
+	content, err := op.ReadFile(ctx, target)
+	if err != nil {
+		return existingFilePreview{Exists: false}, nil
+	}
+	return existingFilePreview{
+		Exists:  true,
+		Content: content,
+		Bytes:   int64(len(content)),
+		Lines:   len(splitLines(content)),
+	}, nil
 }
 
 func safeSearchPath(p string) (string, error) {
@@ -801,20 +960,92 @@ func countLinesDelta(newString, oldString string, added bool) int {
 }
 
 func buildSimplePatch(oldString, newString string) string {
-	oldLines := splitLines(oldString)
-	newLines := splitLines(newString)
+	patch, _ := buildSimplePatchLimited(oldString, newString, 0)
+	return patch
+}
+
+func buildSimplePatchLimited(oldString, newString string, limit int) (string, bool) {
 	var b strings.Builder
-	for _, line := range oldLines {
-		b.WriteString("-")
-		b.WriteString(line)
-		b.WriteString("\n")
+	truncated := !appendPatchContentLimited(&b, "-", oldString, limit)
+	if !truncated {
+		truncated = !appendPatchContentLimited(&b, "+", newString, limit)
 	}
-	for _, line := range newLines {
-		b.WriteString("+")
-		b.WriteString(line)
-		b.WriteString("\n")
+	return finishLimitedPatch(b.String(), truncated, limit)
+}
+
+func buildReplacementPatchLimited(oldString, newString string, limit int) (string, bool) {
+	if limit <= 0 {
+		return buildSimplePatchLimited(oldString, newString, limit)
 	}
-	return strings.TrimSuffix(b.String(), "\n")
+	oldBudget := limit / 2
+	if oldBudget < 1 {
+		oldBudget = 1
+	}
+	var b strings.Builder
+	truncated := !appendPatchContentLimited(&b, "-", oldString, oldBudget)
+	if !appendPatchContentLimited(&b, "+", newString, limit) {
+		truncated = true
+	}
+	return finishLimitedPatch(b.String(), truncated, limit)
+}
+
+func finishLimitedPatch(content string, truncated bool, limit int) (string, bool) {
+	patch := strings.TrimSuffix(content, "\n")
+	if !truncated {
+		return patch, false
+	}
+	marker := "\n... (patch truncated)"
+	if limit <= 0 {
+		return patch + marker, true
+	}
+	if limit <= len(marker) {
+		return "", true
+	}
+	if len(patch)+len(marker) <= limit {
+		return patch + marker, true
+	}
+	return patch[:limit-len(marker)] + marker, true
+}
+
+func appendPatchContentLimited(b *strings.Builder, prefix, content string, limit int) bool {
+	if content == "" {
+		return true
+	}
+	content = strings.TrimSuffix(content, "\n")
+	if content == "" {
+		return true
+	}
+	for {
+		line, rest, found := strings.Cut(content, "\n")
+		if !appendPatchLineLimited(b, prefix, line, limit) {
+			return false
+		}
+		if !found {
+			return true
+		}
+		content = rest
+	}
+}
+
+func appendPatchLineLimited(b *strings.Builder, prefix, line string, limit int) bool {
+	nextLen := b.Len() + len(prefix) + len(line) + 1
+	if limit > 0 && nextLen > limit {
+		remaining := limit - b.Len()
+		lineBudget := remaining - len(prefix) - 1
+		if lineBudget > 0 {
+			if lineBudget > len(line) {
+				lineBudget = len(line)
+			}
+			b.WriteString(prefix)
+			b.WriteString(line[:lineBudget])
+			b.WriteString("\n")
+		}
+		return false
+	}
+	b.WriteString(prefix)
+	b.WriteString(line)
+	b.WriteString("\n")
+	return true
 }
 
 func grepFilenames(mode string, lines []string) []string {
@@ -822,7 +1053,7 @@ func grepFilenames(mode string, lines []string) []string {
 	for _, line := range lines {
 		name := line
 		if mode == "content" || mode == "count" {
-			if idx := strings.IndexByte(line, ':'); idx >= 0 {
+			if idx := strings.Index(line, ":"); idx >= 0 {
 				name = line[:idx]
 			}
 		}
@@ -835,5 +1066,33 @@ func grepFilenames(mode string, lines []string) []string {
 	for name := range seen {
 		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
+}
+
+func clampOutputMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "files_with_matches", "count":
+		return strings.TrimSpace(mode)
+	default:
+		return "content"
+	}
+}
+
+func appendMaybe(args []string, flag, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return args
+	}
+	return append(args, flag, value)
+}
+
+func truncateLines(lines []string, offset, limit int) ([]string, bool) {
+	if offset > len(lines) {
+		return []string{}, false
+	}
+	lines = lines[offset:]
+	if limit <= 0 || len(lines) <= limit {
+		return lines, false
+	}
+	return lines[:limit], true
 }

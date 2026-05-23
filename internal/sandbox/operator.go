@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/eino-ext/components/tool/commandline"
@@ -50,6 +51,59 @@ func (o *RemoteOperator) ReadFile(ctx context.Context, filePath string) (string,
 		return "", fmt.Errorf("failed to read file %s (exit %d): %s", filePath, exitCode, stderr)
 	}
 	return stdout, nil
+}
+
+func (o *RemoteOperator) ReadFilePreview(ctx context.Context, filePath string, maxBytes int) (string, int64, int, bool, bool, error) {
+	target, err := o.workspacePath(filePath)
+	if err != nil {
+		return "", 0, 0, false, false, err
+	}
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	quoted := shellQuote(target)
+	statCmd := fmt.Sprintf("if [ -f %s ]; then bytes=$(wc -c < %s | tr -d '[:space:]'); lines=$(awk 'END { print NR }' %s); printf 'file\\t%%s\\t%%s\\n' \"$bytes\" \"$lines\"; elif [ -e %s ]; then printf 'other\\t0\\t0\\n'; else printf 'missing\\t0\\t0\\n'; fi", quoted, quoted, quoted, quoted)
+	stdout, stderr, exitCode, err := o.runtime.ExecInSandbox(ctx, []string{"sh", "-lc", statCmd})
+	if err != nil {
+		return "", 0, 0, false, false, fmt.Errorf("failed to inspect file %s: %w", filePath, err)
+	}
+	if exitCode != 0 {
+		return "", 0, 0, false, false, fmt.Errorf("failed to inspect file %s (exit %d): %s", filePath, exitCode, stderr)
+	}
+	fields := strings.Split(strings.TrimSpace(stdout), "\t")
+	if len(fields) == 0 || fields[0] == "" || fields[0] == "missing" {
+		return "", 0, 0, false, false, nil
+	}
+	if fields[0] == "other" {
+		return "", 0, 0, true, true, nil
+	}
+	if len(fields) != 3 || fields[0] != "file" {
+		return "", 0, 0, false, false, fmt.Errorf("unexpected file stat output for %s: %q", filePath, stdout)
+	}
+	bytes, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return "", 0, 0, false, false, fmt.Errorf("unexpected file size for %s: %q", filePath, fields[1])
+	}
+	lines, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return "", 0, 0, false, false, fmt.Errorf("unexpected line count for %s: %q", filePath, fields[2])
+	}
+	if maxBytes == 0 || bytes == 0 {
+		return "", bytes, lines, true, bytes > 0, nil
+	}
+	limit := int64(maxBytes)
+	if bytes < limit {
+		limit = bytes
+	}
+	headCmd := fmt.Sprintf("head -c %d %s", limit, quoted)
+	content, stderr, exitCode, err := o.runtime.ExecInSandbox(ctx, []string{"sh", "-lc", headCmd})
+	if err != nil {
+		return "", 0, 0, false, false, fmt.Errorf("failed to preview file %s: %w", filePath, err)
+	}
+	if exitCode != 0 {
+		return "", 0, 0, false, false, fmt.Errorf("failed to preview file %s (exit %d): %s", filePath, exitCode, stderr)
+	}
+	return content, bytes, lines, true, bytes > int64(len(content)), nil
 }
 
 func (o *RemoteOperator) WriteFile(ctx context.Context, filePath string, content string) error {

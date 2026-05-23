@@ -11,6 +11,7 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 
 	"starxo/internal/logger"
+	"starxo/internal/model"
 )
 
 // TodoItem represents a single task in the DAG.
@@ -26,18 +27,140 @@ type WriteTodosInput struct {
 	Todos []TodoItem `json:"todos" jsonschema:"description=the complete list of todos with their current statuses and dependencies"`
 }
 
-// todoStore is the in-memory store for the current todo list.
-// It is used by both write_todos and update_todo tools.
+// todoStore is the in-memory store for todo lists.
+// It is used by both write_todos and update_todo tools. Session-scoped agent
+// runs use bySession; the package-level wrappers keep the original global
+// bucket for compatibility with older callers/tests that do not pass sessionID.
 var todoStore struct {
-	mu    sync.Mutex
-	todos []TodoItem
+	mu        sync.Mutex
+	todos     []TodoItem
+	bySession map[string][]TodoItem
 }
 
-// ClearTodos resets the in-memory todo store (used on session switch).
-func ClearTodos() {
+func todoSessionID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if sessionID, ok := ctx.Value("sessionID").(string); ok {
+		return sessionID
+	}
+	return ""
+}
+
+func cloneTodoItems(items []TodoItem) []TodoItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]TodoItem, len(items))
+	for i, item := range items {
+		out[i] = TodoItem{
+			ID:        item.ID,
+			Title:     item.Title,
+			Status:    item.Status,
+			DependsOn: append([]string(nil), item.DependsOn...),
+		}
+	}
+	return out
+}
+
+func todoItemsFromRuntime(items []model.RuntimeTodoItem) []TodoItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]TodoItem, len(items))
+	for i, item := range items {
+		out[i] = TodoItem{
+			ID:        item.ID,
+			Title:     item.Title,
+			Status:    item.Status,
+			DependsOn: append([]string(nil), item.DependsOn...),
+		}
+	}
+	return out
+}
+
+func runtimeTodosFromTodoItems(items []TodoItem) []model.RuntimeTodoItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]model.RuntimeTodoItem, len(items))
+	for i, todo := range items {
+		out[i] = model.RuntimeTodoItem{
+			ID:        todo.ID,
+			Title:     todo.Title,
+			Status:    todo.Status,
+			DependsOn: append([]string(nil), todo.DependsOn...),
+		}
+	}
+	return out
+}
+
+func todosForSessionLocked(sessionID string) []TodoItem {
+	if sessionID == "" {
+		return todoStore.todos
+	}
+	return todoStore.bySession[sessionID]
+}
+
+func setTodosForSessionLocked(sessionID string, items []TodoItem) {
+	if sessionID == "" {
+		todoStore.todos = cloneTodoItems(items)
+		return
+	}
+	if len(items) == 0 {
+		delete(todoStore.bySession, sessionID)
+		return
+	}
+	if todoStore.bySession == nil {
+		todoStore.bySession = make(map[string][]TodoItem)
+	}
+	todoStore.bySession[sessionID] = cloneTodoItems(items)
+}
+
+// ClearTodosForSession resets the in-memory todo store for a session.
+func ClearTodosForSession(sessionID string) {
 	todoStore.mu.Lock()
-	todoStore.todos = nil
+	if sessionID == "" {
+		todoStore.todos = nil
+	} else {
+		delete(todoStore.bySession, sessionID)
+	}
 	todoStore.mu.Unlock()
+}
+
+// ClearTodos resets the global compatibility todo store.
+func ClearTodos() {
+	ClearTodosForSession("")
+}
+
+// SnapshotTodosForSession returns a copy of a session's in-memory todo list
+// using the model package shape so it can be persisted with session compact state.
+func SnapshotTodosForSession(sessionID string) []model.RuntimeTodoItem {
+	todoStore.mu.Lock()
+	defer todoStore.mu.Unlock()
+	return runtimeTodosFromTodoItems(todosForSessionLocked(sessionID))
+}
+
+// SnapshotTodos returns a copy of the global compatibility todo list.
+func SnapshotTodos() []model.RuntimeTodoItem {
+	return SnapshotTodosForSession("")
+}
+
+// RestoreTodosForSession replaces a session's in-memory todo list from
+// persisted compact state.
+func RestoreTodosForSession(sessionID string, items []model.RuntimeTodoItem) {
+	todoStore.mu.Lock()
+	defer todoStore.mu.Unlock()
+	if len(items) == 0 {
+		setTodosForSessionLocked(sessionID, nil)
+		return
+	}
+	setTodosForSessionLocked(sessionID, todoItemsFromRuntime(items))
+}
+
+// RestoreTodos replaces the global compatibility todo list from persisted compact state.
+func RestoreTodos(items []model.RuntimeTodoItem) {
+	RestoreTodosForSession("", items)
 }
 
 // NewWriteTodosTool creates a tool that tracks task progress as a DAG.
@@ -65,10 +188,11 @@ func NewWriteTodosTool() tool.BaseTool {
 				}
 			}
 
+			sessionID := todoSessionID(ctx)
+
 			// Store todos
 			todoStore.mu.Lock()
-			todoStore.todos = make([]TodoItem, len(input.Todos))
-			copy(todoStore.todos, input.Todos)
+			setTodosForSessionLocked(sessionID, input.Todos)
 			todoStore.mu.Unlock()
 
 			// Diagnostic log: verify stored IDs
@@ -76,7 +200,7 @@ func NewWriteTodosTool() tool.BaseTool {
 			for i, t := range input.Todos {
 				ids[i] = t.ID
 			}
-			logger.Info("[TODOS] Store updated", "count", len(input.Todos), "ids", strings.Join(ids, ","))
+			logger.Info("[TODOS] Store updated", "session", sessionID, "count", len(input.Todos), "ids", strings.Join(ids, ","))
 
 			// Build summary
 			counts := map[string]int{}
@@ -128,20 +252,22 @@ func NewUpdateTodoTool() tool.BaseTool {
 
 			todoStore.mu.Lock()
 			defer todoStore.mu.Unlock()
+			sessionID := todoSessionID(ctx)
+			todos := todosForSessionLocked(sessionID)
 
 			// Debug log: record store state at lookup time
-			storedIDs := make([]string, len(todoStore.todos))
-			for i, t := range todoStore.todos {
+			storedIDs := make([]string, len(todos))
+			for i, t := range todos {
 				storedIDs[i] = t.ID
 			}
-			logger.Debug("[TODOS] update_todo lookup", "target", input.ID, "store_count", len(todoStore.todos), "stored_ids", strings.Join(storedIDs, ","))
+			logger.Debug("[TODOS] update_todo lookup", "session", sessionID, "target", input.ID, "store_count", len(todos), "stored_ids", strings.Join(storedIDs, ","))
 
 			found := false
-			for i := range todoStore.todos {
-				if todoStore.todos[i].ID == input.ID {
-					todoStore.todos[i].Status = input.Status
+			for i := range todos {
+				if todos[i].ID == input.ID {
+					todos[i].Status = input.Status
 					if input.Title != "" {
-						todoStore.todos[i].Title = input.Title
+						todos[i].Title = input.Title
 					}
 					found = true
 					break
@@ -149,12 +275,13 @@ func NewUpdateTodoTool() tool.BaseTool {
 			}
 
 			if !found {
-				return fmt.Sprintf("Warning: todo with ID %q not found in current store (store has %d items). The todo list may need to be re-declared with write_todos.", input.ID, len(todoStore.todos)), nil
+				return fmt.Sprintf("Warning: todo with ID %q not found in current store (store has %d items). The todo list may need to be re-declared with write_todos.", input.ID, len(todos)), nil
 			}
+			setTodosForSessionLocked(sessionID, todos)
 
 			// Build summary
 			counts := map[string]int{}
-			for _, t := range todoStore.todos {
+			for _, t := range todos {
 				counts[t.Status]++
 			}
 			parts := []string{}
@@ -164,7 +291,7 @@ func NewUpdateTodoTool() tool.BaseTool {
 				}
 			}
 
-			data, _ := json.Marshal(todoStore.todos)
+			data, _ := json.Marshal(todos)
 			return fmt.Sprintf("Updated todo %q to %s (%s)\n---\n%s", input.ID, input.Status, strings.Join(parts, ", "), string(data)), nil
 		},
 	)

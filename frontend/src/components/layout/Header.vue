@@ -1,18 +1,16 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import { NButton, NTooltip, NIcon } from 'naive-ui'
-import { Settings, FolderOpen, Search, Flash, List } from '@vicons/ionicons5'
+import { Settings, FolderOpen, Search, List } from '@vicons/ionicons5'
 import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
 import { useI18n } from 'vue-i18n'
-import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const { t, locale } = useI18n()
-const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 
 const activeSessionTitle = computed(() => sessionStore.activeSession?.title || t('sidebar.untitled'))
-const modeLabel = computed(() => chatStore.agentMode === 'plan' ? t('chat.modePlan') : t('chat.modeDefault'))
 
 defineProps<{
   workspaceDrawerVisible: boolean
@@ -30,13 +28,22 @@ function toggleLocale() {
   locale.value = locale.value === 'en' ? 'zh' : 'en'
   localStorage.setItem('locale', locale.value)
 }
+
+function isInteractiveTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest('button, a, input, textarea, select, [role="button"], .n-button, .n-input')
+}
+
+function handleTitlebarDoubleClick(event: MouseEvent) {
+  if (isInteractiveTarget(event.target)) return
+  void toggleWindowZoom()
+}
 </script>
 
 <template>
-  <header class="app-header wails-drag" role="banner">
+  <header class="app-header wails-drag" role="banner" @dblclick="handleTitlebarDoubleClick">
     <div class="header-left">
       <div class="app-title" aria-label="Starxo">
-        <span class="title-icon" aria-hidden="true"><NIcon size="14"><Flash /></NIcon></span>
         <span class="title-text">{{ t('header.title') }}</span>
       </div>
     </div>
@@ -51,7 +58,7 @@ function toggleLocale() {
         <NIcon size="14" class="command-icon"><Search /></NIcon>
         <span class="command-copy">
           <span class="command-main">{{ activeSessionTitle }}</span>
-          <span class="command-sub">{{ modeLabel }} · {{ t('header.commandPlaceholder') }}</span>
+          <span class="command-sub">{{ t('header.commandPlaceholder') }}</span>
         </span>
         <kbd class="command-kbd" aria-hidden="true">⌘K</kbd>
       </button>
@@ -137,42 +144,41 @@ function toggleLocale() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
-  padding: 0 var(--space-lg);
-  background: rgba(2, 6, 23, 0.72);
-  backdrop-filter: blur(14px);
+  height: 50px;
+  padding: 0 12px;
+  background: var(--platform-bg-toolbar);
+  backdrop-filter: blur(20px) saturate(1.15);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   z-index: var(--z-sticky, 20);
   position: relative;
 }
 
+:global(:root[data-platform="macos"] .app-header){
+  height: 48px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 90%, transparent);
+}
+
 .header-left {
   display: flex;
   align-items: center;
   gap: var(--space-md);
+  --wails-draggable: no-drag;
 }
 
 .app-title {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 6px;
   user-select: none;
-}
-
-.title-icon {
-  color: var(--accent-cyan);
-  display: flex;
-  filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.32));
 }
 
 .title-text {
   font-family: var(--font-brand);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-bold);
-  color: var(--text-primary);
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  letter-spacing: 0;
 }
 
 .header-center {
@@ -180,34 +186,43 @@ function toggleLocale() {
   display: flex;
   justify-content: center;
   min-width: 0;
-  padding: 0 var(--space-lg);
+  padding: 0 12px;
+  --wails-draggable: no-drag;
 }
 
 .command-trigger {
-  width: min(520px, 100%);
-  height: 38px;
+  width: min(460px, 100%);
+  height: 34px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-surface) 86%, black);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 74%, transparent);
   color: var(--text-secondary);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-sm);
-  padding: 0 var(--space-md);
+  padding: 0 10px;
   text-align: left;
   transition: border-color var(--transition-ui), background var(--transition-ui), box-shadow var(--transition-ui);
 }
 
+:global(:root[data-platform="macos"] .command-trigger){
+  height: 32px;
+  max-width: 440px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 80%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--border-subtle) 80%, transparent);
+}
+
 .command-trigger:hover,
 .command-trigger:focus-visible {
-  background: var(--bg-elevated);
-  border-color: var(--accent-cyan-dim);
-  box-shadow: var(--shadow-glow);
+  background: var(--platform-bg-raised);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 .command-icon {
-  color: var(--accent-cyan);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -228,8 +243,17 @@ function toggleLocale() {
 
 .command-main {
   font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+:global(:root[data-platform="macos"] .command-main){
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+:global(:root[data-platform="macos"] .command-sub){
+  font-size: 10.5px;
 }
 
 .command-sub {
@@ -238,10 +262,10 @@ function toggleLocale() {
 }
 
 .command-kbd {
-  font-family: var(--font-brand);
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  background: var(--bg-deepest);
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 78%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
@@ -251,8 +275,9 @@ function toggleLocale() {
 .header-right {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 4px;
   flex-shrink: 0;
+  --wails-draggable: no-drag;
 }
 
 .header-btn {
@@ -265,10 +290,10 @@ function toggleLocale() {
 }
 
 .lang-btn {
-  font-family: var(--font-brand);
+  font-family: var(--font-sans);
   font-size: var(--fs-xs) !important;
-  font-weight: var(--fw-bold) !important;
-  letter-spacing: 0.5px;
+  font-weight: var(--fw-medium) !important;
+  letter-spacing: 0;
   min-width: 32px;
 }
 

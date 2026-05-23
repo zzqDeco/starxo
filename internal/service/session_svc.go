@@ -150,8 +150,8 @@ func (s *SessionService) CreateSession(title string) (*model.Session, error) {
 		s.chatService.SetActiveSessionID(sess.ID)
 	}
 
-	// Clear todo state for the new session
-	tools.ClearTodos()
+	// Clear todo state for the new session without disturbing background sessions.
+	tools.ClearTodosForSession(sess.ID)
 
 	s.activeSession = sess
 	return sess, nil
@@ -186,18 +186,21 @@ func (s *SessionService) SwitchSession(sessionID string) error {
 	}
 
 	// Tell ChatService to switch active session
+	targetRunning := false
 	if s.chatService != nil {
 		s.chatService.SetActiveSessionID(sessionID)
+		targetRunning = s.chatService.IsSessionRunning(sessionID)
 
 		// Only load from disk if the session is NOT currently running
 		// (a running session already has up-to-date state in its SessionRun)
-		if !s.chatService.IsSessionRunning(sessionID) {
+		if !targetRunning {
 			s.chatService.restoreNormalizedSessionData(sessionID, sessionData)
 		}
 	}
 
-	// Clear per-session todo state
-	tools.ClearTodos()
+	if s.chatService == nil && !targetRunning {
+		restoreTodosFromSessionData(sessionID, sessionData)
+	}
 
 	s.activeSession = sess
 
@@ -512,6 +515,7 @@ func (s *SessionService) EnsureDefaultSession() error {
 			return fmt.Errorf("failed to create default session: %w", err)
 		}
 		s.activeSession = sess
+		tools.ClearTodosForSession(sess.ID)
 		return nil
 	}
 
@@ -526,9 +530,19 @@ func (s *SessionService) EnsureDefaultSession() error {
 	}
 	if s.chatService != nil && sessionData != nil {
 		s.chatService.restoreNormalizedSessionData(mostRecent.ID, sessionData)
+	} else {
+		restoreTodosFromSessionData(mostRecent.ID, sessionData)
 	}
 
 	return nil
+}
+
+func restoreTodosFromSessionData(sessionID string, sessionData *model.SessionData) {
+	if sessionData != nil && sessionData.RuntimeContextCompact != nil {
+		tools.RestoreTodosForSession(sessionID, sessionData.RuntimeContextCompact.Todos)
+		return
+	}
+	tools.ClearTodosForSession(sessionID)
 }
 
 // EnrichedSession extends Session with live container info for the frontend.

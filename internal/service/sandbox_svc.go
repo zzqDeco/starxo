@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -456,7 +457,9 @@ func (s *SandboxService) DisconnectAndDestroy() error {
 	// Remove from registry
 	if activeRegID != "" {
 		_ = s.containerStore.Remove(activeRegID)
+		wailsruntime.EventsEmit(appCtx, "container:deactivated", nil)
 	}
+	wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
 
 	return err
 }
@@ -492,6 +495,54 @@ func (s *SandboxService) GetStatus() SandboxStatusDTO {
 	}
 
 	return status
+}
+
+// RunTerminalCommand executes a user-submitted command in the active sandbox workspace.
+func (s *SandboxService) RunTerminalCommand(command string) (TerminalCommandResult, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return TerminalCommandResult{}, fmt.Errorf("terminal command is empty")
+	}
+
+	s.mu.RLock()
+	mgr := s.manager
+	appCtx := s.ctx
+	eventCtx := s.ctx
+	activeContainerID := s.activeContainerRegID
+	s.mu.RUnlock()
+	if appCtx == nil {
+		appCtx = context.Background()
+	}
+
+	if mgr == nil || !mgr.SSHConnected() {
+		return TerminalCommandResult{}, fmt.Errorf("SSH not connected")
+	}
+	if !mgr.HasActiveContainer() {
+		return TerminalCommandResult{}, fmt.Errorf("no sandbox is active")
+	}
+	op := mgr.Operator()
+	if op == nil {
+		return TerminalCommandResult{}, fmt.Errorf("sandbox operator is not available")
+	}
+
+	output, err := op.RunCommand(appCtx, []string{"sh", "-lc", command})
+	if err != nil {
+		result := TerminalCommandResult{Command: command, Stderr: err.Error(), ExitCode: -1}
+		return result, err
+	}
+	if output.ExitCode == 0 {
+		wailsEmit(eventCtx, "workspace:changed", WorkspaceChangedEvent{
+			ContainerID: activeContainerID,
+			Source:      "terminal",
+			Action:      "command",
+		})
+	}
+	return TerminalCommandResult{
+		Command:  command,
+		Stdout:   output.Stdout,
+		Stderr:   output.Stderr,
+		ExitCode: output.ExitCode,
+	}, nil
 }
 
 // Manager returns the underlying SandboxManager for internal use by other services.

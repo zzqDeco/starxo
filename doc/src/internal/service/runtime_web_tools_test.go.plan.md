@@ -18,6 +18,10 @@
 - TinyFish provider 缺少 API key 环境变量时返回明确错误。
 - `TINYFISH_API_KEY` 存在时运行真实 TinyFish Search API smoke test；未设置时自动 skip。
 - POST provider 可使用 body template 和 `resultsPath` 提取数组结果。
+- 覆盖 WebFetch unsafe scheme、空 host、userinfo、本地/私有/metadata/IPv6 非公网地址默认阻止。
+- 覆盖非公网 endpoint allow/deny permission 行为、permission 输入脱敏，以及 redirect 目标在执行前重新校验。
+- 覆盖 WebSearch custom provider 和 TinyFish endpoint 使用同一 endpoint guard。
 
 ## 5. 维护建议
 - 增加 provider 类型或 JSON path 语法时同步补解析测试。
+- endpoint 安全策略变更时同步补充 WebFetch 与 WebSearch provider 两侧测试，避免只覆盖直连 fetch。

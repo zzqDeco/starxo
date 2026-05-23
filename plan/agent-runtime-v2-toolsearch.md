@@ -73,6 +73,7 @@
 - `WebFetch` and `WebSearch` are deferred runtime tools executed by the local app process.
 - `WebSearch` supports `agent.webSearch` provider configuration, including DuckDuckGo fallback, custom HTTP providers, and a dedicated TinyFish Search API adapter.
 - TinyFish provider alignment: `GET https://api.search.tinyfish.ai`, `X-API-Key` from `TINYFISH_API_KEY` by default, request parameters `query/location/language/page`, and response parsing from `results[].title/url/snippet`.
+- Web endpoints are guarded before each request and redirect: only `http`/`https` are allowed, userinfo/empty hosts are rejected, non-public targets fail closed unless explicitly approved through the runtime permission queue, and permission input is limited to URL/host/reason.
 
 ## Permission Queue
 - Runtime V2 now emits `runtime:permission_request` for non-read-only trusted tools.

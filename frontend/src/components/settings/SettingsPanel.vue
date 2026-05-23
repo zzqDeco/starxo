@@ -1,12 +1,15 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { Close, Terminal, ShieldCheckmark, Cloud, Apps } from '@vicons/ionicons5'
+import { Close, Terminal, ShieldCheckmark, Cloud, Apps, Search, CodeSlash } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import SSHConfigForm from './SSHConfig.vue'
 import SandboxConfigForm from './SandboxConfig.vue'
 import LLMConfigForm from './LLMConfig.vue'
+import WebSearchConfigForm from './WebSearchConfig.vue'
+import LSPConfigForm from './LSPConfig.vue'
 import MCPConfigForm from './MCPConfig.vue'
+import RuntimePermissionsPanel from './RuntimePermissionsPanel.vue'
 import { useI18n } from 'vue-i18n'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
@@ -32,6 +35,9 @@ const tabs = computed(() => [
   { name: 'ssh', label: t('settings.ssh.tab'), icon: Terminal },
   { name: 'sandbox', label: t('settings.sandbox.tab'), icon: ShieldCheckmark },
   { name: 'llm', label: t('settings.llm.tab'), icon: Cloud },
+  { name: 'websearch', label: t('settings.webSearch.tab'), icon: Search },
+  { name: 'lsp', label: t('settings.lsp.tab'), icon: CodeSlash },
+  { name: 'permissions', label: t('permissions.tab'), icon: ShieldCheckmark },
   { name: 'mcp', label: t('settings.mcp.tab'), icon: Apps },
 ])
 
@@ -123,6 +129,9 @@ onBeforeUnmount(() => {
               <SSHConfigForm v-if="activeTab === 'ssh'" key="ssh" />
               <SandboxConfigForm v-else-if="activeTab === 'sandbox'" key="sandbox" />
               <LLMConfigForm v-else-if="activeTab === 'llm'" key="llm" />
+              <WebSearchConfigForm v-else-if="activeTab === 'websearch'" key="websearch" />
+              <LSPConfigForm v-else-if="activeTab === 'lsp'" key="lsp" />
+              <RuntimePermissionsPanel v-else-if="activeTab === 'permissions'" key="permissions" />
               <MCPConfigForm v-else-if="activeTab === 'mcp'" key="mcp" />
             </Transition>
           </section>
@@ -157,20 +166,21 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(10px);
   padding: var(--space-lg);
 }
 
 .settings-dialog {
   position: relative;
   z-index: 2001;
-  width: min(720px, 92vw);
-  height: min(620px, 85vh);
-  background: var(--bg-surface);
+  width: min(900px, 92vw);
+  height: min(680px, 85vh);
+  background: var(--platform-bg-content);
+  backdrop-filter: blur(26px) saturate(1.12);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
-  box-shadow: var(--elev-3);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -180,19 +190,19 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md) var(--space-xl);
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
 .settings-heading {
   margin: 0;
   font-family: var(--font-brand);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .settings-body {
@@ -202,10 +212,10 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav {
-  width: 180px;
+  width: 190px;
   flex-shrink: 0;
-  padding: var(--space-md) var(--space-sm);
-  background: var(--bg-deepest);
+  padding: 12px 8px;
+  background: var(--platform-bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
@@ -217,11 +227,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
+  padding: 7px 9px;
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: var(--radius-sm);
+  border-left: 0;
+  border-radius: 7px;
   color: var(--text-muted);
   font-family: var(--font-sans);
   font-size: var(--fs-sm);
@@ -232,7 +242,7 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav-item:hover {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
@@ -242,9 +252,10 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav-item.active {
-  background: var(--bg-elevated);
-  color: var(--accent-cyan);
-  border-left-color: var(--accent-cyan);
+  background: var(--platform-bg-active);
+  color: var(--text-primary);
+  border-left-color: transparent;
+  box-shadow: none;
 }
 
 .nav-label {
@@ -254,7 +265,7 @@ onBeforeUnmount(() => {
 .settings-pane {
   flex: 1;
   min-width: 0;
-  padding: var(--space-xl);
+  padding: 20px 24px;
   overflow-y: auto;
 }
 
@@ -262,9 +273,9 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-md) var(--space-xl);
+  padding: 12px 16px;
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--platform-bg-toolbar);
   flex-shrink: 0;
 }
 
@@ -302,7 +313,7 @@ onBeforeUnmount(() => {
 
 .settings-modal-enter-from .settings-dialog,
 .settings-modal-leave-to .settings-dialog {
-  transform: scale(0.96);
+  transform: translateY(10px);
   opacity: 0;
 }
 
@@ -326,7 +337,8 @@ onBeforeUnmount(() => {
   }
   .settings-nav-item.active {
     border-left: none;
-    border-bottom-color: var(--accent-cyan);
+    border-bottom-color: color-mix(in srgb, var(--platform-accent) 50%, transparent);
+    box-shadow: none;
   }
 }
 </style>

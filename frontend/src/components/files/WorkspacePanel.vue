@@ -6,10 +6,13 @@ import type { FileInfo, WorkspaceInfo } from '@/types/config'
 import SplitHandle from '@/components/layout/SplitHandle.vue'
 import FileTransfer from './FileTransfer.vue'
 import CodePreview from './CodePreview.vue'
+import WorktreeReviewPanel from './WorktreeReviewPanel.vue'
 import { CleanupSandboxTmp, DownloadFile, GetWorkspaceInfo, ListWorkspaceFiles, ReadFilePreview } from '../../../wailsjs/go/service/FileService'
 import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { useWailsEvent } from '@/composables/useWailsEvent'
+import { useSessionStore } from '@/stores/sessionStore'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -17,6 +20,14 @@ interface WorkspaceTreeNode extends TreeOption {
   path?: string
   isLeaf?: boolean
   children?: WorkspaceTreeNode[]
+}
+
+interface WorkspaceChangedEvent {
+  sessionId?: string
+  containerID?: string
+  path?: string
+  source?: string
+  action?: string
 }
 
 const files = ref<FileInfo[]>([])
@@ -29,8 +40,14 @@ const treeWidth = ref(220)
 const showTransfer = ref(false)
 const { t } = useI18n()
 const feedback = useUiFeedback()
+const sessionStore = useSessionStore()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
+const currentWorkspaceContainerID = ref('')
 const cleaningTmp = ref(false)
+let refreshRequestID = 0
+let previewRequestID = 0
+let workspaceRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let pendingPreviewReloadPath = ''
 
 const selectedFile = computed(() => files.value.find(f => f.path === selectedPath.value) || null)
 const workspacePath = computed(() => workspaceInfo.value?.workspacePath || '')
@@ -115,16 +132,21 @@ function buildTree(fileList: FileInfo[]): WorkspaceTreeNode[] {
 const treeData = computed<WorkspaceTreeNode[]>(() => buildTree(filteredFiles.value))
 
 async function refreshFiles() {
+  const requestID = ++refreshRequestID
   loading.value = true
   try {
-    await refreshWorkspaceInfo()
-    if (!workspaceInfo.value?.active) {
-      files.value = []
-      selectedPath.value = ''
-      previewContent.value = ''
+    const info = await GetWorkspaceInfo() as WorkspaceInfo
+    if (requestID !== refreshRequestID) return
+    workspaceInfo.value = info
+    if (!info?.active) {
+      clearWorkspaceState(false)
       return
     }
+    if (info.activeContainerID) {
+      currentWorkspaceContainerID.value = info.activeContainerID
+    }
     const result = await ListWorkspaceFiles()
+    if (requestID !== refreshRequestID) return
     files.value = (result as unknown as FileInfo[]) || []
 
     if (selectedPath.value && !files.value.find(f => f.path === selectedPath.value)) {
@@ -133,18 +155,76 @@ async function refreshFiles() {
     }
   } catch (e) {
     console.warn('Failed to list files:', e)
+    if (requestID === refreshRequestID) {
+      workspaceInfo.value = null
+      files.value = []
+      selectedPath.value = ''
+      previewContent.value = ''
+    }
   } finally {
-    loading.value = false
+    if (requestID === refreshRequestID) {
+      loading.value = false
+    }
   }
 }
 
-async function refreshWorkspaceInfo() {
-  try {
-    workspaceInfo.value = await GetWorkspaceInfo() as WorkspaceInfo
-  } catch (e) {
-    console.warn('Failed to inspect workspace:', e)
-    workspaceInfo.value = null
+function pathMatchesSelected(changedPath?: string) {
+  if (!selectedPath.value) return false
+  if (!changedPath) return true
+  const selected = selectedPath.value
+  if (changedPath === selected) return true
+  const displayedChanged = displayPath(changedPath)
+  const displayedSelected = displayPath(selected)
+  return displayedChanged === displayedSelected || selected.endsWith(`/${changedPath.replace(/^\/+/, '')}`)
+}
+
+function shouldHandleWorkspaceChanged(data?: WorkspaceChangedEvent) {
+  if (data?.sessionId && sessionStore.activeSessionId && data.sessionId !== sessionStore.activeSessionId) {
+    return false
   }
+  if (data?.containerID && currentWorkspaceContainerID.value && data.containerID !== currentWorkspaceContainerID.value) {
+    return false
+  }
+  return true
+}
+
+function scheduleWorkspaceRefresh(data?: WorkspaceChangedEvent) {
+  if (!shouldHandleWorkspaceChanged(data)) return
+  if (pathMatchesSelected(data?.path)) {
+    pendingPreviewReloadPath = selectedPath.value
+  }
+  if (workspaceRefreshTimer) {
+    clearTimeout(workspaceRefreshTimer)
+  }
+  workspaceRefreshTimer = setTimeout(async () => {
+    workspaceRefreshTimer = null
+    const previewPath = pendingPreviewReloadPath
+    pendingPreviewReloadPath = ''
+    await refreshFiles()
+    if (previewPath && selectedPath.value === previewPath) {
+      await loadPreview(previewPath)
+    }
+  }, 180)
+}
+
+function clearWorkspaceState(invalidateRequests = true) {
+  if (invalidateRequests) {
+    refreshRequestID++
+  }
+  if (workspaceRefreshTimer) {
+    clearTimeout(workspaceRefreshTimer)
+    workspaceRefreshTimer = null
+  }
+  pendingPreviewReloadPath = ''
+  previewRequestID++
+  workspaceInfo.value = null
+  currentWorkspaceContainerID.value = ''
+  files.value = []
+  selectedPath.value = ''
+  previewContent.value = ''
+  query.value = ''
+  loading.value = false
+  previewLoading.value = false
 }
 
 async function handleDownload() {
@@ -157,16 +237,21 @@ async function handleDownload() {
 }
 
 async function loadPreview(path: string) {
+  const requestID = ++previewRequestID
   previewLoading.value = true
   try {
     const content = await ReadFilePreview(path)
-    if (selectedPath.value === path) {
+    if (requestID === previewRequestID && selectedPath.value === path) {
       previewContent.value = content || ''
     }
   } catch {
-    previewContent.value = ''
+    if (requestID === previewRequestID) {
+      previewContent.value = ''
+    }
   } finally {
-    previewLoading.value = false
+    if (requestID === previewRequestID) {
+      previewLoading.value = false
+    }
   }
 }
 
@@ -230,6 +315,40 @@ async function openPath(path: string) {
 
 let stopWorkspaceBridge: (() => void) | null = null
 
+useWailsEvent('container:ready', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
+  refreshFiles()
+})
+
+useWailsEvent('container:activated', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
+  refreshFiles()
+})
+
+useWailsEvent('session:switched', (data: { containerID?: string }) => {
+  currentWorkspaceContainerID.value = data?.containerID || ''
+  refreshFiles()
+})
+
+useWailsEvent('container:deactivated', () => {
+  clearWorkspaceState()
+})
+
+useWailsEvent('container:destroyed', (data: { containerID?: string }) => {
+  const destroyedID = data?.containerID
+  if (destroyedID && destroyedID === currentWorkspaceContainerID.value) {
+    clearWorkspaceState()
+  }
+})
+
+useWailsEvent('ssh:disconnected', () => {
+  clearWorkspaceState()
+})
+
+useWailsEvent('workspace:changed', (data: WorkspaceChangedEvent) => {
+  scheduleWorkspaceRefresh(data)
+})
+
 onMounted(async () => {
   await refreshFiles()
   const pending = consumePendingWorkspacePath()
@@ -242,6 +361,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (workspaceRefreshTimer) {
+    clearTimeout(workspaceRefreshTimer)
+    workspaceRefreshTimer = null
+  }
+  pendingPreviewReloadPath = ''
   stopWorkspaceBridge?.()
 })
 </script>
@@ -309,6 +433,8 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <WorktreeReviewPanel @changed="refreshFiles" />
+
     <div class="workspace-body">
       <div class="tree-pane" :style="{ width: treeWidth + 'px' }">
         <div class="tree-toolbar">
@@ -373,40 +499,41 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--bg-surface);
+  background: var(--platform-bg-elevated);
+  container-type: inline-size;
 }
 
 .workspace-header {
-  height: 42px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid var(--border-subtle);
-  padding: 0 12px;
+  padding: 0 10px 0 12px;
   flex-shrink: 0;
 }
 
 .workspace-title {
   font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-faint);
 }
 
 .workspace-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .workspace-meta {
   display: grid;
-  grid-template-columns: minmax(120px, 1.3fr) repeat(2, minmax(70px, 0.8fr)) minmax(160px, 2fr) repeat(2, minmax(60px, 0.6fr));
-  gap: 8px;
-  padding: 8px 12px;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(70px, 0.6fr) minmax(90px, 0.8fr) minmax(180px, 1.8fr);
+  gap: 0;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
   flex-shrink: 0;
 }
 
@@ -415,20 +542,31 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 0 8px;
+  border-left: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
+}
+
+.meta-item:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.meta-item:nth-last-child(-n + 2) {
+  display: none;
 }
 
 .meta-item span {
   color: var(--text-faint);
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .meta-item strong {
   min-width: 0;
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -451,11 +589,11 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   border-right: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--platform-bg-sidebar) 86%, transparent);
 }
 
 .tree-toolbar {
-  padding: 8px;
+  padding: 7px 8px;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
@@ -464,7 +602,7 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 4px;
+  padding: 4px 5px;
 }
 
 .workspace-tree {
@@ -478,25 +616,19 @@ onUnmounted(() => {
 }
 
 .workspace-tree :deep(.n-tree-node-content:hover) {
-  background: var(--bg-hover);
+  background: var(--platform-bg-hover);
   color: var(--text-primary);
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content) {
   position: relative;
-  background: var(--bg-elevated);
-  color: var(--accent-cyan);
+  background: var(--platform-bg-active);
+  color: var(--text-primary);
+  box-shadow: none;
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content::before) {
-  content: "";
-  position: absolute;
-  left: -2px;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
-  background: var(--accent-cyan);
-  border-radius: 1px;
+  display: none;
 }
 
 .tree-empty {
@@ -512,6 +644,49 @@ onUnmounted(() => {
 @media (max-width: 900px) {
   .workspace-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 640px) {
+  .workspace-header {
+    height: auto;
+    min-height: 42px;
+    align-items: flex-start;
+    padding: 8px 10px;
+  }
+
+  .workspace-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .workspace-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .meta-item.path {
+    grid-column: 1 / -1;
+  }
+
+  .workspace-body {
+    flex-direction: column;
+  }
+
+  .tree-pane {
+    width: 100% !important;
+    height: min(42%, 260px);
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .workspace-body :deep(.split-handle) {
+    display: none;
+  }
+
+  .preview-pane {
+    min-height: 0;
   }
 }
 </style>

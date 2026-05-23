@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
@@ -49,11 +52,78 @@ type webSearchOutput struct {
 	Results  []string `json:"results"`
 }
 
-func newRuntimeWebCatalogEntries(cfg config.WebSearchConfig) ([]tools.CatalogEntry, error) {
+type runtimeWebHostResolver func(ctx context.Context, host string) ([]net.IPAddr, error)
+
+type runtimeWebEndpointGuard struct {
+	permissionProvider tools.ToolExecutionPermissionProvider
+	resolveIPAddrs     runtimeWebHostResolver
+}
+
+type runtimeWebRequestGuard struct {
+	base          *runtimeWebEndpointGuard
+	toolName      string
+	permissionCtx context.Context
+	permissionMu  *sync.Mutex
+	approved      map[string]struct{}
+}
+
+type runtimeWebEndpointDecision struct {
+	URL     string
+	Host    string
+	Port    string
+	Address string
+	Reason  string
+}
+
+type runtimeWebEndpointPermissionInput struct {
+	URL    string `json:"url"`
+	Host   string `json:"host"`
+	Reason string `json:"reason"`
+}
+
+var runtimeWebMetadataAddr = netip.MustParseAddr("169.254.169.254")
+
+func newRuntimeWebEndpointGuard(permissionProvider tools.ToolExecutionPermissionProvider) *runtimeWebEndpointGuard {
+	resolver := net.DefaultResolver
+	return &runtimeWebEndpointGuard{
+		permissionProvider: permissionProvider,
+		resolveIPAddrs: func(ctx context.Context, host string) ([]net.IPAddr, error) {
+			return resolver.LookupIPAddr(ctx, host)
+		},
+	}
+}
+
+func (g *runtimeWebEndpointGuard) requestGuard(toolName string) *runtimeWebRequestGuard {
+	if g == nil {
+		g = newRuntimeWebEndpointGuard(nil)
+	}
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		toolName = tools.RuntimeToolWebFetch
+	}
+	return &runtimeWebRequestGuard{
+		base:         g,
+		toolName:     toolName,
+		permissionMu: &sync.Mutex{},
+		approved:     make(map[string]struct{}),
+	}
+}
+
+func (g *runtimeWebRequestGuard) withPermissionContext(ctx context.Context) *runtimeWebRequestGuard {
+	if g == nil {
+		return g
+	}
+	next := *g
+	next.permissionCtx = ctx
+	return &next
+}
+
+func newRuntimeWebCatalogEntries(cfg config.WebSearchConfig, permissionProvider tools.ToolExecutionPermissionProvider) ([]tools.CatalogEntry, error) {
+	guard := newRuntimeWebEndpointGuard(permissionProvider)
 	fetch, err := toolutils.InferTool(tools.RuntimeToolWebFetch,
 		"Fetch a URL with HTTP GET and return compact text.",
 		func(ctx context.Context, input webFetchInput) (webFetchOutput, error) {
-			return runWebFetch(ctx, input)
+			return runWebFetchWithGuard(ctx, input, guard)
 		})
 	if err != nil {
 		return nil, err
@@ -61,7 +131,7 @@ func newRuntimeWebCatalogEntries(cfg config.WebSearchConfig) ([]tools.CatalogEnt
 	search, err := toolutils.InferTool(tools.RuntimeToolWebSearch,
 		"Search the web using the configured WebSearch provider and return compact results.",
 		func(ctx context.Context, input webSearchInput) (webSearchOutput, error) {
-			return runWebSearch(ctx, cfg, input)
+			return runWebSearchWithGuard(ctx, cfg, input, guard)
 		})
 	if err != nil {
 		return nil, err
@@ -73,6 +143,14 @@ func newRuntimeWebCatalogEntries(cfg config.WebSearchConfig) ([]tools.CatalogEnt
 }
 
 func runWebFetch(ctx context.Context, input webFetchInput) (webFetchOutput, error) {
+	return runWebFetchWithGuard(ctx, input, nil)
+}
+
+func runWebFetchWithGuard(ctx context.Context, input webFetchInput, guard *runtimeWebEndpointGuard) (webFetchOutput, error) {
+	return runWebFetchWithGuardForTool(ctx, input, guard, tools.RuntimeToolWebFetch)
+}
+
+func runWebFetchWithGuardForTool(ctx context.Context, input webFetchInput, guard *runtimeWebEndpointGuard, toolName string) (webFetchOutput, error) {
 	if strings.TrimSpace(input.URL) == "" {
 		return webFetchOutput{}, fmt.Errorf("url is required")
 	}
@@ -84,6 +162,10 @@ func runWebFetch(ctx context.Context, input webFetchInput) (webFetchOutput, erro
 	if timeout <= 0 {
 		timeout = 20 * time.Second
 	}
+	requestGuard := guard.requestGuard(toolName).withPermissionContext(ctx)
+	if err := requestGuard.ensureURLAllowed(ctx, input.URL); err != nil {
+		return webFetchOutput{}, err
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, input.URL, nil)
@@ -91,7 +173,7 @@ func runWebFetch(ctx context.Context, input webFetchInput) (webFetchOutput, erro
 		return webFetchOutput{}, err
 	}
 	req.Header.Set("User-Agent", "Starxo/RuntimeV2")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := requestGuard.httpClient().Do(req)
 	if err != nil {
 		return webFetchOutput{}, err
 	}
@@ -113,6 +195,10 @@ func runWebFetch(ctx context.Context, input webFetchInput) (webFetchOutput, erro
 }
 
 func runWebSearch(ctx context.Context, cfg config.WebSearchConfig, input webSearchInput) (webSearchOutput, error) {
+	return runWebSearchWithGuard(ctx, cfg, input, nil)
+}
+
+func runWebSearchWithGuard(ctx context.Context, cfg config.WebSearchConfig, input webSearchInput, guard *runtimeWebEndpointGuard) (webSearchOutput, error) {
 	if strings.TrimSpace(input.Query) == "" {
 		return webSearchOutput{}, fmt.Errorf("query is required")
 	}
@@ -131,24 +217,24 @@ func runWebSearch(ctx context.Context, cfg config.WebSearchConfig, input webSear
 		return webSearchOutput{}, fmt.Errorf("web search provider %q is disabled", providerName)
 	}
 	if ok {
-		return runConfiguredWebSearch(ctx, provider, input)
+		return runConfiguredWebSearch(ctx, provider, input, guard)
 	}
 	if strings.EqualFold(providerName, "tinyfish") {
-		return runConfiguredWebSearch(ctx, config.WebSearchProviderConfig{Name: "tinyfish", Type: "tinyfish"}, input)
+		return runConfiguredWebSearch(ctx, config.WebSearchProviderConfig{Name: "tinyfish", Type: "tinyfish"}, input, guard)
 	}
 	if !ok && !strings.EqualFold(providerName, "duckduckgo") {
 		return webSearchOutput{}, fmt.Errorf("web search provider %q is not configured", providerName)
 	}
-	return runDuckDuckGoWebSearch(ctx, input)
+	return runDuckDuckGoWebSearch(ctx, input, guard)
 }
 
-func runDuckDuckGoWebSearch(ctx context.Context, input webSearchInput) (webSearchOutput, error) {
+func runDuckDuckGoWebSearch(ctx context.Context, input webSearchInput, guard *runtimeWebEndpointGuard) (webSearchOutput, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 8
 	}
 	searchURL := tools.WebSearchURL(input.Query)
-	fetched, err := runWebFetch(ctx, webFetchInput{URL: searchURL, Limit: 60000, Timeout: 20000})
+	fetched, err := runWebFetchWithGuardForTool(ctx, webFetchInput{URL: searchURL, Limit: 60000, Timeout: 20000}, guard, tools.RuntimeToolWebSearch)
 	if err != nil {
 		return webSearchOutput{}, err
 	}
@@ -176,16 +262,16 @@ func resolveWebSearchProvider(cfg config.WebSearchConfig, name string) (config.W
 	return config.WebSearchProviderConfig{}, false
 }
 
-func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProviderConfig, input webSearchInput) (webSearchOutput, error) {
+func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProviderConfig, input webSearchInput, guard *runtimeWebEndpointGuard) (webSearchOutput, error) {
 	providerType := strings.ToLower(strings.TrimSpace(provider.Type))
 	if providerType == "" {
 		providerType = "http"
 	}
 	if providerType == "duckduckgo" {
-		return runDuckDuckGoWebSearch(ctx, input)
+		return runDuckDuckGoWebSearch(ctx, input, guard)
 	}
 	if providerType == "tinyfish" {
-		return runTinyFishWebSearch(ctx, provider, input)
+		return runTinyFishWebSearch(ctx, provider, input, guard)
 	}
 	if providerType != "http" {
 		return webSearchOutput{}, fmt.Errorf("unsupported web search provider type %q", provider.Type)
@@ -225,6 +311,10 @@ func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProvid
 		endpoint = appendWebSearchQuery(endpoint, provider, input.Query, limit)
 	}
 
+	requestGuard := guard.requestGuard(tools.RuntimeToolWebSearch).withPermissionContext(ctx)
+	if err := requestGuard.ensureURLAllowed(ctx, endpoint); err != nil {
+		return webSearchOutput{}, err
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, method, endpoint, body)
@@ -240,7 +330,7 @@ func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProvid
 			req.Header.Set(k, expandWebSearchTemplate(v, input.Query, limit))
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := requestGuard.httpClient().Do(req)
 	if err != nil {
 		return webSearchOutput{}, err
 	}
@@ -268,7 +358,7 @@ func runConfiguredWebSearch(ctx context.Context, provider config.WebSearchProvid
 	}, nil
 }
 
-func runTinyFishWebSearch(ctx context.Context, provider config.WebSearchProviderConfig, input webSearchInput) (webSearchOutput, error) {
+func runTinyFishWebSearch(ctx context.Context, provider config.WebSearchProviderConfig, input webSearchInput, guard *runtimeWebEndpointGuard) (webSearchOutput, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = provider.MaxResults
@@ -311,22 +401,14 @@ func runTinyFishWebSearch(ctx context.Context, provider config.WebSearchProvider
 	if timeout <= 0 {
 		timeout = 20 * time.Second
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return webSearchOutput{}, err
-	}
-	req.Header.Set("User-Agent", "Starxo/RuntimeV2")
 	hasAPIKeyHeader := false
-	for k, v := range provider.Headers {
+	for k := range provider.Headers {
 		if strings.TrimSpace(k) == "" {
 			continue
 		}
 		if strings.EqualFold(k, "X-API-Key") {
 			hasAPIKeyHeader = true
 		}
-		req.Header.Set(k, expandWebSearchTemplate(v, input.Query, limit))
 	}
 	if !hasAPIKeyHeader {
 		apiKeyEnv := strings.TrimSpace(provider.APIKeyEnv)
@@ -337,10 +419,33 @@ func runTinyFishWebSearch(ctx context.Context, provider config.WebSearchProvider
 		if apiKey == "" {
 			return webSearchOutput{}, fmt.Errorf("tinyfish search requires %s to be set or X-API-Key to be configured", apiKeyEnv)
 		}
-		req.Header.Set("X-API-Key", apiKey)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	requestGuard := guard.requestGuard(tools.RuntimeToolWebSearch).withPermissionContext(ctx)
+	if err := requestGuard.ensureURLAllowed(ctx, u.String()); err != nil {
+		return webSearchOutput{}, err
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return webSearchOutput{}, err
+	}
+	req.Header.Set("User-Agent", "Starxo/RuntimeV2")
+	for k, v := range provider.Headers {
+		if strings.TrimSpace(k) != "" {
+			req.Header.Set(k, expandWebSearchTemplate(v, input.Query, limit))
+		}
+	}
+	if !hasAPIKeyHeader {
+		apiKeyEnv := strings.TrimSpace(provider.APIKeyEnv)
+		if apiKeyEnv == "" {
+			apiKeyEnv = "TINYFISH_API_KEY"
+		}
+		req.Header.Set("X-API-Key", strings.TrimSpace(os.Getenv(apiKeyEnv)))
+	}
+
+	resp, err := requestGuard.httpClient().Do(req)
 	if err != nil {
 		return webSearchOutput{}, err
 	}
@@ -384,6 +489,404 @@ func runTinyFishWebSearch(ctx context.Context, provider config.WebSearchProvider
 		URL:      u.String(),
 		Results:  results,
 	}, nil
+}
+
+func (g *runtimeWebRequestGuard) httpClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	transport.DialContext = func(ctx context.Context, network string, address string) (net.Conn, error) {
+		return g.dialContext(ctx, dialer, network, address)
+	}
+	return &http.Client{
+		Transport: runtimeWebRequestTransport{base: transport},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return g.ensureURLAllowed(g.permissionContext(req.Context()), req.URL.String())
+		},
+	}
+}
+
+type runtimeWebRequestURLContextKey struct{}
+
+type runtimeWebRequestTransport struct {
+	base http.RoundTripper
+}
+
+func (t runtimeWebRequestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	ctx := context.WithValue(req.Context(), runtimeWebRequestURLContextKey{}, req.URL.String())
+	return base.RoundTrip(req.WithContext(ctx))
+}
+
+func (g *runtimeWebRequestGuard) permissionContext(fallback context.Context) context.Context {
+	if g != nil && g.permissionCtx != nil {
+		return g.permissionCtx
+	}
+	return fallback
+}
+
+func (g *runtimeWebRequestGuard) ensureURLAllowed(ctx context.Context, rawURL string) error {
+	if g == nil || g.base == nil {
+		g = (&runtimeWebEndpointGuard{}).requestGuard(tools.RuntimeToolWebFetch)
+	}
+	decision, err := g.base.inspectURL(ctx, rawURL)
+	if err != nil {
+		return err
+	}
+	if decision.Reason == "" {
+		return nil
+	}
+	return g.ensureDecisionAllowed(ctx, decision)
+}
+
+func (g *runtimeWebRequestGuard) dialContext(ctx context.Context, dialer *net.Dialer, network string, address string) (net.Conn, error) {
+	if g == nil || g.base == nil {
+		g = (&runtimeWebEndpointGuard{}).requestGuard(tools.RuntimeToolWebFetch)
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("parse web dial address %q: %w", address, err)
+	}
+	if strings.ContainsAny(host, "\x00\r\n\t ") {
+		return nil, fmt.Errorf("web dial host %q is invalid", host)
+	}
+	resolved, err := g.base.resolveHostAddrs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(resolved) == 0 {
+		return nil, fmt.Errorf("resolve web dial host %q: no usable addresses found", host)
+	}
+
+	var lastErr error
+	for _, candidate := range resolved {
+		if reason := runtimeWebNonPublicAddrReason(candidate.addr); reason != "" {
+			decision := runtimeWebEndpointDecision{
+				URL:     runtimeWebRequestURLFromContext(ctx, address),
+				Host:    host,
+				Port:    port,
+				Address: candidate.addr.String(),
+				Reason:  "dial target is " + reason,
+			}
+			if err := g.ensureDecisionAllowed(g.permissionContext(ctx), decision); err != nil {
+				return nil, err
+			}
+		}
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(candidate.dialHost(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("dial validated web host %q: %w", host, lastErr)
+	}
+	return nil, fmt.Errorf("dial validated web host %q: no address was dialed", host)
+}
+
+func runtimeWebRequestURLFromContext(ctx context.Context, address string) string {
+	if ctx != nil {
+		if rawURL, ok := ctx.Value(runtimeWebRequestURLContextKey{}).(string); ok && strings.TrimSpace(rawURL) != "" {
+			return rawURL
+		}
+	}
+	return "tcp://" + address
+}
+
+func (g *runtimeWebRequestGuard) ensureDecisionAllowed(ctx context.Context, decision runtimeWebEndpointDecision) error {
+	if decision.Reason == "" {
+		return nil
+	}
+	if g.isDecisionApproved(decision) {
+		return nil
+	}
+	if err := g.requestNonPublicPermission(ctx, decision); err != nil {
+		return err
+	}
+	g.markDecisionApproved(decision)
+	return nil
+}
+
+func (g *runtimeWebRequestGuard) isDecisionApproved(decision runtimeWebEndpointDecision) bool {
+	if g == nil || g.permissionMu == nil || g.approved == nil {
+		return false
+	}
+	key := runtimeWebDecisionApprovalKey(decision.Host, decision.Port, decision.Address)
+	wildcard := runtimeWebDecisionApprovalKey(decision.Host, decision.Port, "*")
+	g.permissionMu.Lock()
+	defer g.permissionMu.Unlock()
+	if _, ok := g.approved[key]; ok {
+		return true
+	}
+	_, ok := g.approved[wildcard]
+	return ok
+}
+
+func (g *runtimeWebRequestGuard) markDecisionApproved(decision runtimeWebEndpointDecision) {
+	if g == nil || g.permissionMu == nil || g.approved == nil {
+		return
+	}
+	address := strings.TrimSpace(decision.Address)
+	if address == "" {
+		address = "*"
+	}
+	key := runtimeWebDecisionApprovalKey(decision.Host, decision.Port, address)
+	g.permissionMu.Lock()
+	defer g.permissionMu.Unlock()
+	g.approved[key] = struct{}{}
+}
+
+func runtimeWebDecisionApprovalKey(host string, port string, address string) string {
+	host = strings.TrimRight(strings.ToLower(strings.TrimSpace(host)), ".")
+	port = strings.TrimSpace(port)
+	address = strings.ToLower(strings.TrimSpace(address))
+	return host + "|" + port + "|" + address
+}
+
+func (g *runtimeWebRequestGuard) requestNonPublicPermission(ctx context.Context, decision runtimeWebEndpointDecision) error {
+	provider := g.base.permissionProvider
+	if provider == nil {
+		return fmt.Errorf("web request to non-public host %q blocked: %s; permission provider is unavailable", decision.Host, decision.Reason)
+	}
+	payload, err := json.Marshal(runtimeWebEndpointPermissionInput{
+		URL:    sanitizeRuntimeWebPermissionURL(decision.URL),
+		Host:   decision.Host,
+		Reason: decision.Reason,
+	})
+	if err != nil {
+		return err
+	}
+	resolution, err := provider.RequestToolPermission(ctx, runtimeWebEndpointPermissionEntry(g.toolName), string(payload))
+	if err != nil {
+		return fmt.Errorf("web request to non-public host %q blocked: permission request failed: %w", decision.Host, err)
+	}
+	switch strings.TrimSpace(resolution.Decision) {
+	case tools.ToolPermissionDecisionAllowOnce, tools.ToolPermissionDecisionAllowSession:
+		return nil
+	case tools.ToolPermissionDecisionDeny:
+		return fmt.Errorf("web request to non-public host %q was denied by the user", decision.Host)
+	case "":
+		return fmt.Errorf("web request to non-public host %q blocked: permission request returned an empty decision", decision.Host)
+	default:
+		return fmt.Errorf("web request to non-public host %q blocked: unsupported permission decision %q", decision.Host, resolution.Decision)
+	}
+}
+
+func (g *runtimeWebEndpointGuard) inspectURL(ctx context.Context, rawURL string) (runtimeWebEndpointDecision, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return runtimeWebEndpointDecision{}, fmt.Errorf("url is required")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return runtimeWebEndpointDecision{}, err
+	}
+	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return runtimeWebEndpointDecision{}, fmt.Errorf("web URL scheme %q is not allowed; only http and https are allowed", u.Scheme)
+	}
+	if u.User != nil {
+		return runtimeWebEndpointDecision{}, fmt.Errorf("web URL userinfo is not allowed")
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if strings.TrimSpace(u.Host) == "" || host == "" {
+		return runtimeWebEndpointDecision{}, fmt.Errorf("web URL host is required")
+	}
+	if strings.ContainsAny(host, "\x00\r\n\t ") {
+		return runtimeWebEndpointDecision{}, fmt.Errorf("web URL host %q is invalid", host)
+	}
+
+	decision := runtimeWebEndpointDecision{URL: rawURL, Host: host, Port: runtimeWebURLPort(u)}
+	if isRuntimeWebLocalhostName(host) {
+		decision.Reason = "host is localhost"
+		return decision, nil
+	}
+	if addr, ok := parseRuntimeWebHostAddr(host); ok {
+		if reason := runtimeWebNonPublicAddrReason(addr); reason != "" {
+			decision.Reason = "host is " + reason
+			decision.Address = addr.String()
+		}
+		return decision, nil
+	}
+
+	addrs, err := g.resolveHostAddrs(ctx, host)
+	if err != nil {
+		return runtimeWebEndpointDecision{}, err
+	}
+	for _, resolved := range addrs {
+		if reason := runtimeWebNonPublicAddrReason(resolved.addr); reason != "" {
+			decision.Reason = "host resolves to " + reason
+			decision.Address = resolved.addr.String()
+			return decision, nil
+		}
+	}
+	return decision, nil
+}
+
+type runtimeWebResolvedAddr struct {
+	addr netip.Addr
+	zone string
+}
+
+func (a runtimeWebResolvedAddr) dialHost() string {
+	host := a.addr.String()
+	if strings.TrimSpace(a.zone) != "" {
+		host += "%" + strings.TrimSpace(a.zone)
+	}
+	return host
+}
+
+func (g *runtimeWebEndpointGuard) resolveHostAddrs(ctx context.Context, host string) ([]runtimeWebResolvedAddr, error) {
+	if addr, ok := parseRuntimeWebHostAddr(host); ok {
+		return []runtimeWebResolvedAddr{{addr: addr, zone: runtimeWebHostZone(host)}}, nil
+	}
+	resolver := g.resolveIPAddrs
+	if resolver == nil {
+		resolver = net.DefaultResolver.LookupIPAddr
+	}
+	addrs, err := resolver(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve web URL host %q: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("resolve web URL host %q: no addresses found", host)
+	}
+	resolved := make([]runtimeWebResolvedAddr, 0, len(addrs))
+	for _, ipAddr := range addrs {
+		addr, ok := netip.AddrFromSlice(ipAddr.IP)
+		if !ok {
+			continue
+		}
+		resolved = append(resolved, runtimeWebResolvedAddr{addr: addr.Unmap(), zone: ipAddr.Zone})
+	}
+	if len(resolved) == 0 {
+		return nil, fmt.Errorf("resolve web URL host %q: no usable addresses found", host)
+	}
+	return resolved, nil
+}
+
+func runtimeWebURLPort(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	if port := strings.TrimSpace(u.Port()); port != "" {
+		return port
+	}
+	switch strings.ToLower(strings.TrimSpace(u.Scheme)) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
+
+func runtimeWebEndpointPermissionEntry(toolName string) tools.CatalogEntry {
+	title := "Web Fetch"
+	description := "Allow WebFetch to contact a non-public web endpoint."
+	if toolName == tools.RuntimeToolWebSearch {
+		title = "Web Search"
+		description = "Allow WebSearch to contact a non-public provider endpoint."
+	}
+	return tools.CatalogEntry{
+		CanonicalName: toolName,
+		Title:         title,
+		Description:   description,
+		Source:        tools.ToolSourceRuntime,
+		ToolClass:     tools.ToolClassRuntimeExec,
+		PermissionSpec: tools.PermissionSpec{
+			AllowExecute: true,
+		},
+	}
+}
+
+func parseRuntimeWebHostAddr(host string) (netip.Addr, bool) {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" {
+		return netip.Addr{}, false
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		if zoneIndex := strings.LastIndex(host, "%"); zoneIndex > 0 {
+			addr, err = netip.ParseAddr(host[:zoneIndex])
+		}
+	}
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return addr.Unmap(), true
+}
+
+func runtimeWebHostZone(host string) string {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if zoneIndex := strings.LastIndex(host, "%"); zoneIndex > 0 {
+		return host[zoneIndex+1:]
+	}
+	return ""
+}
+
+func isRuntimeWebLocalhostName(host string) bool {
+	normalized := strings.TrimRight(strings.ToLower(strings.TrimSpace(host)), ".")
+	return normalized == "localhost" || strings.HasSuffix(normalized, ".localhost")
+}
+
+func runtimeWebNonPublicAddrReason(addr netip.Addr) string {
+	addr = addr.Unmap()
+	switch {
+	case addr == runtimeWebMetadataAddr:
+		return "cloud metadata address 169.254.169.254"
+	case addr.IsUnspecified():
+		return "unspecified address " + addr.String()
+	case addr.IsLoopback():
+		return "loopback address " + addr.String()
+	case addr.IsPrivate():
+		return "private address " + addr.String()
+	case addr.IsLinkLocalUnicast():
+		return "link-local address " + addr.String()
+	case addr.IsLinkLocalMulticast():
+		return "link-local multicast address " + addr.String()
+	case addr.IsMulticast():
+		return "multicast address " + addr.String()
+	default:
+		return ""
+	}
+}
+
+func sanitizeRuntimeWebPermissionURL(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return strings.TrimSpace(rawURL)
+	}
+	u.User = nil
+	u.Fragment = ""
+	if u.RawQuery != "" {
+		values := u.Query()
+		for key, value := range values {
+			if !isSensitiveRuntimeWebQueryKey(key) {
+				continue
+			}
+			for i := range value {
+				value[i] = "[redacted]"
+			}
+			values[key] = value
+		}
+		u.RawQuery = values.Encode()
+	}
+	return u.String()
+}
+
+func isSensitiveRuntimeWebQueryKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.NewReplacer("_", "", "-", "", ".", "").Replace(normalized)
+	for _, marker := range []string{"apikey", "token", "secret", "password", "passwd", "credential", "authorization"} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return normalized == "auth" || strings.HasSuffix(normalized, "auth") || normalized == "key" || strings.HasSuffix(normalized, "key")
 }
 
 func appendWebSearchQuery(endpoint string, provider config.WebSearchProviderConfig, query string, limit int) string {

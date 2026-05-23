@@ -15,7 +15,7 @@
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: Wails 事件（session:switched, ssh:progress, ssh:connected, ssh:disconnected, container:progress, container:ready, container:activated, container:deactivated, agent:timeline, agent:done, agent:error, agent:interrupt, agent:mode_changed, agent:run_state, runtime:permission_request, runtime:permission_canceled）
+- 输入来源: Wails 事件（session:switched, ssh:progress, ssh:connected, ssh:disconnected, container:progress, container:ready, container:activated, container:deactivated, agent:timeline, agent:done, agent:error, agent:interrupt, agent:mode_changed, agent:run_state, runtime:permission_request, runtime:permission_resolved, runtime:permission_canceled）
 - 输出结果: 渲染 NConfigProvider 包裹的 MainLayout 组件；将 Wails 事件数据分发到对应 Store
 
 ## 4. 关键实现细节
@@ -43,12 +43,15 @@
   - `agent:interrupt` -> **过滤 sessionId**，仅处理活跃会话中断
   - `agent:mode_changed` -> **过滤 sessionId**，仅处理活跃会话模式变更
   - `agent:run_state` -> 写入 `chatStore.sessionRunStates`；若属于活跃会话，同步 mode 和 generating 状态
-  - `runtime:permission_request` -> **过滤 sessionId**，展示工具审批弹窗
-  - `runtime:permission_canceled` -> 当前请求被后端取消时关闭审批弹窗
+  - `runtime:permission_request` -> 进入全局 permission queue；只展示当前活跃会话的队首请求
+  - `runtime:permission_resolved` -> 从 permission queue 移除已处理请求
+  - `runtime:permission_canceled` -> 从 permission queue 移除已取消请求
 - **Runtime permission modal**:
+  - 启动和切会话时调用 `ListToolPermissionRequests("")` 补拉 pending queue，避免刷新后丢失等待中的审批
   - 展示 tool name、source、tool class、risk 和 JSON input
   - 操作按钮固定为“拒绝 / 允许一次 / 本会话允许”
   - 调用 `ChatService.DenyToolPermission(...)` 或 `ChatService.ApproveToolPermission(...)`
+  - 多个当前会话请求排队展示，并在标题显示队列位置
 - **会话恢复 (`restoreActiveMessages`)**:
   - 优先通过 `sessionStore.loadSessionData()` 从后端 `session_data.json` 加载统一的 display 数据
   - 如有 `streaming` 中途状态，追加 `[streaming interrupted]` 标记的不完整消息
@@ -56,13 +59,14 @@
   - 后备逻辑: 若 `loadSessionData` 返回空，则尝试旧版 `loadChatDisplay` + `loadActiveMessages`
 - **前端不再保存 display 数据**: `agent:done` 处理器中移除了 `saveChatDisplay` 调用，前端变为纯读取消费者
 - **主题覆盖**:
-  - primary/cyan、背景层级、边框、文本层级与 `style.css` 深色工作台 token 同步
-  - Naive UI 卡片/弹窗圆角收敛到 8-10px，匹配工具型界面密度
+  - primary、背景层级、边框、文本层级与 `style.css` platform token 同步
+  - Naive UI 卡片/弹窗圆角收敛到 7-12px，按钮去除水波纹和重阴影，匹配 macOS 工具型界面密度
+  - 主题视觉参考 Finder/System Settings/Notes/Xcode/VS Code/Chrome：中性面板、低饱和蓝、轻分割线和单 toolbar 平面
 
 ## 5. 依赖关系
 - 内部依赖: MainLayout.vue、settingsStore、connectionStore、chatStore、sessionStore、containerStore、types (Session, Message, TurnEvent, InterruptEvent, ModeChangedEvent)
 - 外部依赖: naive-ui、vue、wailsjs/runtime
-- Wails 绑定: `wailsjs/go/service/SessionService` (LoadSessionData), `wailsjs/go/service/ChatService` (GetMode, ApproveToolPermission, DenyToolPermission)
+- Wails 绑定: `wailsjs/go/service/SessionService` (LoadSessionData), `wailsjs/go/service/ChatService` (GetMode, ListToolPermissionRequests, ApproveToolPermission, DenyToolPermission)
 
 ## 6. 变更影响面
 - `isActiveSession()` 过滤逻辑确保后台会话事件不影响前端显示，是 per-session 并发安全的前端核心保障

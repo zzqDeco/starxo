@@ -17,6 +17,7 @@
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
+- 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、后台任务、文件 read state、diff summary、todos、plan 和 worktree state。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
 - 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
@@ -24,12 +25,12 @@
 ## 3. 输入与输出
 - 输入来源:
   - Wails 绑定调用：`SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`SetMode`、`BuildRunners`
-  - Runtime V2 绑定调用：`ListRuntimeTasks`、`ReadRuntimeTaskOutput`、`StopRuntimeTask`、`ApproveToolPermission`、`DenyToolPermission`
+  - Runtime V2 绑定调用：`ListRuntimeTasks`、`ReadRuntimeTaskOutput`、`StopRuntimeTask`、`ApproveToolPermission`、`DenyToolPermission`、`GetRuntimeWorktreeState`、`ReviewRuntimeWorktree`、`MergeRuntimeWorktree`、`ExitRuntimeWorktree`
   - 依赖注入：`config.Store`、`sandbox.SandboxManager`、`SessionService`
   - 运行时上下文：`contextWithSessionID(...)` 注入的 `sessionID`
 - 输出结果:
   - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`、`agent:run_state`
-  - Runtime V2 事件：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`
+  - Runtime V2 事件：`runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped`、`runtime:permission_resolved`、`runtime:worktree_changed`
   - Permission 事件：`runtime:permission_request`、`runtime:permission_canceled`
   - 一致性快照：`ExportSessionSnapshot(sessionID)`
   - discovery 状态操作：`RestoreSessionData`、`AddDiscoveredTool`、`ReplaceDiscoveredTools`、`PruneDiscoveredToolsForSave`
@@ -42,6 +43,9 @@
   - `discoveredTools map[string]model.DiscoveredToolRecord`
   - `deferredAnnouncementState`
   - `mcpInstructionsDeltaState`
+  - `runtimeContextCompact`
+  - `fileReadState`
+  - `diffSummaries`
   - `mode`
   - `planDocument`
   - `pendingPlanApproval`
@@ -70,6 +74,7 @@
   - `emitRunState()` 在无 Wails events context（例如 Go 单测）时短路，避免 Wails runtime 对普通 context 触发 fatal
 - `ClearHistory()`：
   - 清空消息/显示/streaming/deferred state 与 plan state
+  - 清空当前 active session 对应的 todo bucket，不影响其他后台 session 的 todo 状态
   - 不重置当前 mode
   - 解锁后 best-effort 调度 async save
   - 不删除、不重写 workspace 里的 `plan.md`
@@ -145,6 +150,11 @@
   - 按 sessionID 记录 active worktree
   - 后续 Runtime V2 file/search/edit/shell 工具通过 context sessionID 解析当前 workspace
   - worktree 状态不依赖全局 active session，支持多会话并行
+  - 桌面端可通过 ChatService 的 worktree UI API 审阅、合并或退出当前 session worktree
+  - `WorktreeDiff` timeline 结果会在字段级截断后重新序列化，避免对整段 JSON 字符串做硬截断导致前端结构化 diff 展示失效
+  - `Write` / `Edit` timeline 结果同样会对 patch 字段做 JSON-safe 截断，保证前端结构化 diff UI 可解析
+  - runtime tool 产生 workspace side effect 时发出 `workspace:changed`：覆盖 `Bash`、`Write`、`Edit`、`LSPEdit`、`NotebookEdit` 和 worktree 切换/merge，前端可自动刷新文件树与预览
+  - workspace change path 只来自可解析的结构化结果；无法解析的 mutating result 不触发刷新。`LSPEdit` 多文件结果使用 broad refresh，避免只刷新首个文件。
 - Runtime LSP manager：
   - 按 `sessionID + workspacePath + language` 复用远端常驻进程
   - `UpdateSandbox` / `InvalidateRunner` 会关闭所有 LSP server，避免跨 SSH/sandbox 配置复用旧进程
@@ -154,6 +164,12 @@
   - 非 read-only trusted 工具执行前调用 `deferredMCPProvider.RequestToolPermission`
   - `allow_session` grant 写入 `SessionRun.permissionGrants` 并随 snapshot 持久化
   - 无 Wails UI context 时 fail-closed，避免危险工具在 headless 场景静默执行
+- Runtime context compact：
+  - 每次新 run 前通过 `prepareMessagesForRun(...)` 刷新 compact state
+  - `Read`/`Write`/`Edit` tool result 会被解析为 file read state / diff summary
+  - `ExportSessionSnapshot(...)` 保存当前 session 的 compact state 到 `SessionData.RuntimeContextCompact`
+  - `RestoreSessionData(...)` 会恢复 compact state、task snapshots、session-scoped todo state 和 active worktree routing
+  - 运行中的 task 只恢复为可见 snapshot；reload 后不会假装原进程仍附着
 - deferred synthetic message 的 phase-2 注入规则：
   - 先注入 deferred tools delta，再按需注入 MCP instructions delta
   - synthetic message 使用 `schema.UserMessage`

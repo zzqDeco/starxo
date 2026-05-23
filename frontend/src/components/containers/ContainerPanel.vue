@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NTag, NProgress, NInput } from 'naive-ui'
+import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NProgress, NInput } from 'naive-ui'
 import { Refresh, Play, Stop, Trash, Server, Add, RadioButtonOn, RadioButtonOff, Close } from '@vicons/ionicons5'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useContainerStore } from '@/stores/containerStore'
@@ -68,16 +68,6 @@ onBeforeUnmount(() => {
   if (typeof document !== 'undefined') document.body.style.overflow = ''
 })
 
-function statusType(status: string): 'success' | 'warning' | 'error' | 'default' {
-  switch (status) {
-    case 'running': return 'success'
-    case 'stopped': return 'warning'
-    case 'destroyed': return 'error'
-    case 'unavailable': return 'default'
-    default: return 'default'
-  }
-}
-
 function statusLabel(status: string): string {
   switch (status) {
     case 'running': return t('containers.running')
@@ -90,6 +80,16 @@ function statusLabel(status: string): string {
 
 function isActive(container: ContainerInfo): boolean {
   return containerStore.activeContainerID === container.id
+}
+
+function statusClass(status: string): string {
+  switch (status) {
+    case 'running': return 'is-running'
+    case 'stopped': return 'is-stopped'
+    case 'destroyed': return 'is-destroyed'
+    case 'unavailable': return 'is-unavailable'
+    default: return 'is-unknown'
+  }
 }
 
 function formatTime(ts: number): string {
@@ -188,7 +188,8 @@ function sessionTitle(sessionID: string): string {
       <div class="header-actions">
         <NButton
           size="tiny"
-          type="primary"
+          type="default"
+          class="create-sandbox-btn"
           :disabled="!connectionStore.sshConnected || panelBusy"
           :loading="containerStore.creatingContainer"
           @click="createContainer"
@@ -230,8 +231,11 @@ function sessionTitle(sessionID: string): string {
           <div class="card-header">
             <NIcon size="16" class="card-icon"><Server /></NIcon>
             <span class="card-name">{{ c.name || c.id.substring(0, 8) }}</span>
-            <NTag :type="statusType(c.status)" size="small" round>{{ statusLabel(c.status) }}</NTag>
-            <NTag v-if="isActive(c)" type="info" size="small" round>{{ t('containers.active') }}</NTag>
+            <span :class="['status-badge', statusClass(c.status)]">
+              <span class="status-dot" aria-hidden="true"></span>
+              {{ statusLabel(c.status) }}
+            </span>
+            <span v-if="isActive(c)" class="status-badge is-active">{{ t('containers.active') }}</span>
           </div>
           <div class="card-details">
             <span class="detail-item">{{ c.runtime || c.image }}</span>
@@ -242,7 +246,7 @@ function sessionTitle(sessionID: string): string {
             <!-- Activate / Deactivate -->
             <NButton
               v-if="!isActive(c) && c.status === 'running' && connectionStore.sshConnected"
-              quaternary size="tiny" type="info"
+              quaternary size="tiny" class="card-action activate-action"
               @click="activateContainer(c.id)" :loading="containerStore.isActionPending(`activate:${c.id}`)" :disabled="panelBusy"
             >
               <template #icon><NIcon size="14"><RadioButtonOn /></NIcon></template>
@@ -250,27 +254,27 @@ function sessionTitle(sessionID: string): string {
             </NButton>
             <NButton
               v-if="isActive(c)"
-              quaternary size="tiny"
+              quaternary size="tiny" class="card-action"
               @click="deactivateContainer()" :loading="containerStore.isActionPending('deactivate')" :disabled="panelBusy"
             >
               <template #icon><NIcon size="14"><RadioButtonOff /></NIcon></template>
               {{ t('containers.deactivate') }}
             </NButton>
-            <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="startContainer(c.id)" :loading="containerStore.isActionPending(`start:${c.id}`)" :disabled="panelBusy">
+            <NButton v-if="c.status === 'stopped'" quaternary size="tiny" class="card-action" @click="startContainer(c.id)" :loading="containerStore.isActionPending(`start:${c.id}`)" :disabled="panelBusy">
               <template #icon><NIcon size="14"><Play /></NIcon></template>
               {{ t('containers.start') }}
             </NButton>
-            <NButton v-if="c.status === 'running' && !isActive(c)" quaternary size="tiny" type="warning" @click="stopContainer(c.id)" :loading="containerStore.isActionPending(`stop:${c.id}`)" :disabled="panelBusy">
+            <NButton v-if="c.status === 'running' && !isActive(c)" quaternary size="tiny" class="card-action" @click="stopContainer(c.id)" :loading="containerStore.isActionPending(`stop:${c.id}`)" :disabled="panelBusy">
               <template #icon><NIcon size="14"><Stop /></NIcon></template>
               {{ t('containers.stop') }}
             </NButton>
-            <NButton quaternary size="tiny" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
+            <NButton quaternary size="tiny" class="card-action icon-action" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
               <template #icon><NIcon size="14"><Refresh /></NIcon></template>
             </NButton>
             <NButton
               quaternary
               size="tiny"
-              type="error"
+              class="card-action danger-action"
               :loading="containerStore.isActionPending(`destroy:${c.id}`)"
               :disabled="panelBusy"
               @click="openDestroy(c)"
@@ -294,7 +298,10 @@ function sessionTitle(sessionID: string): string {
               <div class="card-header">
                 <NIcon size="16" class="card-icon"><Server /></NIcon>
                 <span class="card-name">{{ c.name || c.id.substring(0, 8) }}</span>
-                <NTag :type="statusType(c.status)" size="small" round>{{ statusLabel(c.status) }}</NTag>
+                <span :class="['status-badge', statusClass(c.status)]">
+                  <span class="status-dot" aria-hidden="true"></span>
+                  {{ statusLabel(c.status) }}
+                </span>
               </div>
               <div class="card-details">
             <span class="detail-item">{{ c.runtime || c.image }}</span>
@@ -304,24 +311,24 @@ function sessionTitle(sessionID: string): string {
               <div class="card-actions">
                 <NButton
                   v-if="c.status === 'running' && connectionStore.sshConnected"
-                  quaternary size="tiny" type="info"
+                  quaternary size="tiny" class="card-action activate-action"
                   @click="activateContainer(c.id)" :loading="containerStore.isActionPending(`activate:${c.id}`)" :disabled="panelBusy"
                 >
                   <template #icon><NIcon size="14"><RadioButtonOn /></NIcon></template>
                   {{ t('containers.activate') }}
                 </NButton>
-                <NButton v-if="c.status === 'stopped'" quaternary size="tiny" type="success" @click="startContainer(c.id)" :loading="containerStore.isActionPending(`start:${c.id}`)" :disabled="panelBusy">
+                <NButton v-if="c.status === 'stopped'" quaternary size="tiny" class="card-action" @click="startContainer(c.id)" :loading="containerStore.isActionPending(`start:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Play /></NIcon></template>
                   {{ t('containers.start') }}
                 </NButton>
-                <NButton v-if="c.status === 'running'" quaternary size="tiny" type="warning" @click="stopContainer(c.id)" :loading="containerStore.isActionPending(`stop:${c.id}`)" :disabled="panelBusy">
+                <NButton v-if="c.status === 'running'" quaternary size="tiny" class="card-action" @click="stopContainer(c.id)" :loading="containerStore.isActionPending(`stop:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Stop /></NIcon></template>
                   {{ t('containers.stop') }}
                 </NButton>
-                <NButton quaternary size="tiny" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
+                <NButton quaternary size="tiny" class="card-action icon-action" @click="refreshStatus(c.id)" :loading="containerStore.isActionPending(`refresh:${c.id}`)" :disabled="panelBusy">
                   <template #icon><NIcon size="14"><Refresh /></NIcon></template>
                 </NButton>
-                <NButton quaternary size="tiny" type="error" :loading="containerStore.isActionPending(`destroy:${c.id}`)" :disabled="panelBusy" @click="openDestroy(c)">
+                <NButton quaternary size="tiny" class="card-action danger-action" :loading="containerStore.isActionPending(`destroy:${c.id}`)" :disabled="panelBusy" @click="openDestroy(c)">
                   <template #icon><NIcon size="14"><Trash /></NIcon></template>
                   {{ t('containers.destroy') }}
                 </NButton>
@@ -403,7 +410,7 @@ function sessionTitle(sessionID: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
@@ -414,12 +421,29 @@ function sessionTitle(sessionID: string): string {
   gap: 6px;
 }
 
+.create-sandbox-btn {
+  --n-color: transparent !important;
+  --n-color-hover: var(--platform-bg-hover) !important;
+  --n-color-pressed: var(--platform-bg-active) !important;
+  --n-color-focus: var(--platform-bg-hover) !important;
+  --n-border: 1px solid var(--border-subtle) !important;
+  --n-border-hover: 1px solid var(--border-strong) !important;
+  --n-border-pressed: 1px solid var(--border-strong) !important;
+  --n-border-focus: 1px solid var(--border-strong) !important;
+  --n-text-color: var(--text-primary) !important;
+  --n-text-color-hover: var(--text-primary) !important;
+  --n-text-color-pressed: var(--text-primary) !important;
+  --n-text-color-focus: var(--text-primary) !important;
+  --n-ripple-color: transparent !important;
+  font-weight: var(--fw-medium);
+}
+
 .panel-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .creation-progress {
@@ -431,27 +455,26 @@ function sessionTitle(sessionID: string): string {
 .progress-step {
   display: block;
   font-size: 11px;
-  color: var(--accent-amber);
-  font-style: italic;
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 8px;
 }
 
 .section {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .section-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 0 4px;
   margin-bottom: 8px;
 }
@@ -466,24 +489,17 @@ function sessionTitle(sessionID: string): string {
 
 .container-card {
   position: relative;
-  background: var(--bg-deepest);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 10px 12px 10px 15px;
-  margin-bottom: 8px;
-  transition: border-color var(--transition-ui), transform var(--transition-ui);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom-color: var(--border-subtle);
+  border-radius: 0;
+  padding: 8px 6px;
+  margin-bottom: 0;
+  transition: background var(--transition-ui), border-color var(--transition-ui);
 }
 
 .container-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--text-faint);
-  transition: background var(--transition-ui);
+  display: none;
 }
 
 .container-card.status-running::before { background: var(--accent-emerald); }
@@ -493,30 +509,33 @@ function sessionTitle(sessionID: string): string {
 .container-card.status-unavailable::before { background: var(--text-faint); }
 
 .container-card:hover {
-  border-color: var(--accent-cyan-dim);
-  transform: translateY(-1px);
+  border-color: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  background: var(--platform-bg-hover);
 }
 
 .container-card.active {
-  border-color: var(--accent-cyan);
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.06) 0%, var(--bg-deepest) 100%);
+  border-color: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  background: var(--platform-bg-active);
+  box-shadow: none;
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 7px;
+  margin-bottom: 5px;
 }
 
 .card-icon {
-  color: var(--accent-cyan);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .card-name {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
   flex: 1;
   overflow: hidden;
@@ -527,18 +546,18 @@ function sessionTitle(sessionID: string): string {
 .card-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 7px;
+  margin-bottom: 7px;
 }
 
 .detail-item {
   font-size: 11px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 
 .detail-session {
-  color: var(--accent-cyan);
+  color: var(--text-muted);
 }
 
 .detail-time {
@@ -549,6 +568,82 @@ function sessionTitle(sessionID: string): string {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.35;
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.status-badge.is-running {
+  color: var(--text-muted);
+}
+
+.status-badge.is-stopped {
+  color: var(--text-muted);
+}
+
+.status-badge.is-destroyed {
+  color: var(--text-muted);
+}
+
+.status-badge.is-active {
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.status-badge.is-running .status-dot {
+  background: color-mix(in srgb, var(--platform-success) 70%, var(--text-muted));
+}
+
+.status-badge.is-stopped .status-dot {
+  background: color-mix(in srgb, var(--platform-warning) 70%, var(--text-muted));
+}
+
+.status-badge.is-destroyed .status-dot {
+  background: color-mix(in srgb, var(--platform-danger) 76%, var(--text-muted));
+}
+
+.card-action {
+  color: var(--text-muted) !important;
+}
+
+.card-action:hover {
+  color: var(--text-primary) !important;
+}
+
+.activate-action {
+  color: color-mix(in srgb, var(--platform-accent) 70%, var(--text-muted)) !important;
+}
+
+.danger-action {
+  color: var(--text-muted) !important;
+}
+
+.danger-action:hover {
+  color: var(--platform-danger) !important;
+}
+
+.icon-action {
+  min-width: 24px;
 }
 
 .empty-state {

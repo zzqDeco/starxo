@@ -28,6 +28,8 @@ export function GetStatus():Promise<service.SandboxStatusDTO>;
 
 export function Manager():Promise<sandbox.SandboxManager>;
 
+export function RunTerminalCommand(arg1:string):Promise<service.TerminalCommandResult>;
+
 export function SetContext(arg1:context.Context):Promise<void>;
 
 export function SetOnConnect(arg1:any):Promise<void>;

@@ -12,10 +12,14 @@ import (
 )
 
 type fakeRuntimeOperator struct {
-	files map[string]string
+	files        map[string]string
+	readFileHits int
+	previewHits  int
+	previewMax   int
 }
 
 func (o *fakeRuntimeOperator) ReadFile(ctx context.Context, path string) (string, error) {
+	o.readFileHits++
 	if o.files == nil {
 		o.files = make(map[string]string)
 	}
@@ -24,6 +28,31 @@ func (o *fakeRuntimeOperator) ReadFile(ctx context.Context, path string) (string
 		return "", fmt.Errorf("not found")
 	}
 	return content, nil
+}
+
+func (o *fakeRuntimeOperator) ReadFilePreview(ctx context.Context, path string, maxBytes int) (string, int64, int, bool, bool, error) {
+	o.previewHits++
+	o.previewMax = maxBytes
+	if o.files == nil {
+		o.files = make(map[string]string)
+	}
+	content, ok := o.files[path]
+	if !ok {
+		return "", 0, 0, false, false, nil
+	}
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	preview := content
+	truncated := false
+	if maxBytes == 0 && len(content) > 0 {
+		preview = ""
+		truncated = true
+	} else if maxBytes > 0 && len(content) > maxBytes {
+		preview = content[:maxBytes]
+		truncated = true
+	}
+	return preview, int64(len(content)), len(splitLines(content)), true, truncated, nil
 }
 
 func (o *fakeRuntimeOperator) WriteFile(ctx context.Context, path string, content string) error {
@@ -69,6 +98,14 @@ func (m fakeWorkspaceManager) EnterWorktree(ctx context.Context, op commandline.
 
 func (m fakeWorkspaceManager) ExitWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace, action string, discardChanges bool) (WorktreeOutput, error) {
 	return WorktreeOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeWorkspaceManager) DiffWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, includePatch bool, maxBytes int) (WorktreeDiffOutput, error) {
+	return WorktreeDiffOutput{}, fmt.Errorf("not implemented")
+}
+
+func (m fakeWorkspaceManager) MergeWorktree(ctx context.Context, op commandline.Operator, defaultWorkspace string, commitMessage string, removeWorktree bool) (WorktreeMergeOutput, error) {
+	return WorktreeMergeOutput{}, fmt.Errorf("not implemented")
 }
 
 func (m *fakeRuntimeTaskManager) StartShellTask(ctx context.Context, sessionID, command, description string, runner RuntimeTaskRunner) (RuntimeTaskRef, error) {
@@ -122,6 +159,20 @@ func TestRuntimeCoreCatalogEntriesExposeAliasesAndPlanGate(t *testing.T) {
 		RuntimeToolRead,
 		RuntimeToolTaskOutput,
 	})
+	assertCatalogNames(t, state.SearchablePoolForMode, []string{
+		RuntimeToolWorktreeDiff,
+	})
+
+	byName := map[string]CatalogEntry{}
+	for _, entry := range entries {
+		byName[entry.CanonicalName] = entry
+	}
+	if diff := byName[RuntimeToolWorktreeDiff]; !diff.ShouldDefer || !diff.ReadOnlyTrusted {
+		t.Fatalf("expected WorktreeDiff to be read-only deferred, got %#v", diff)
+	}
+	if merge := byName[RuntimeToolWorktreeMerge]; !merge.ShouldDefer || merge.ReadOnlyTrusted {
+		t.Fatalf("expected WorktreeMerge to require write permission, got %#v", merge)
+	}
 }
 
 func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {
@@ -159,6 +210,179 @@ func TestRuntimeEditToolUpdatesFileAndPatch(t *testing.T) {
 	}
 }
 
+func TestRuntimeEditToolReservesReplacementPreview(t *testing.T) {
+	oldText := strings.Repeat("old-value-", 3000)
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/main.txt": oldText}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var edit CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolEdit {
+			edit = entry
+			break
+		}
+	}
+	invokable, ok := edit.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("edit tool is not invokable: %T", edit.Tool)
+	}
+	payload, _ := json.Marshal(EditInput{FilePath: "main.txt", OldString: oldText, NewString: "new-value\n"})
+	result, err := invokable.InvokableRun(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("edit tool run: %v", err)
+	}
+	var out EditOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("expected JSON edit result: %v\n%s", err, result)
+	}
+	if !out.Truncated {
+		t.Fatalf("expected truncated edit preview for large replacement: %#v", out)
+	}
+	if !strings.Contains(out.Patch, "+new-value") {
+		t.Fatalf("expected edit patch to reserve replacement text, got %q", out.Patch)
+	}
+}
+
+func TestRuntimeWriteToolReturnsStructuredPatchForOverwrite(t *testing.T) {
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/main.go": "old\nvalue\n"}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var write CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolWrite {
+			write = entry
+			break
+		}
+	}
+	if write.Tool == nil {
+		t.Fatalf("write tool not found")
+	}
+	invokable, ok := write.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("write tool is not invokable: %T", write.Tool)
+	}
+	payload, _ := json.Marshal(WriteInput{FilePath: "main.go", Content: "new\nvalue\nextra\n"})
+	result, err := invokable.InvokableRun(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("write tool run: %v", err)
+	}
+	if got := op.files["/workspace/main.go"]; got != "new\nvalue\nextra\n" {
+		t.Fatalf("expected overwritten file, got %q", got)
+	}
+	var out WriteOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("expected JSON write result: %v\n%s", err, result)
+	}
+	if out.Created || out.LinesAdded != 3 || out.LinesRemoved != 2 {
+		t.Fatalf("unexpected write diff metadata: %#v", out)
+	}
+	if !strings.Contains(out.Patch, "-old") || !strings.Contains(out.Patch, "+new") {
+		t.Fatalf("expected write patch, got %#v", out)
+	}
+}
+
+func TestRuntimeWriteToolUsesBoundedPreviewForExistingFile(t *testing.T) {
+	oldContent := strings.Repeat("old line\n", 50000)
+	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/large.log": oldContent}}
+	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, nil)
+	if err != nil {
+		t.Fatalf("runtime core entries: %v", err)
+	}
+	var write CatalogEntry
+	for _, entry := range entries {
+		if entry.CanonicalName == RuntimeToolWrite {
+			write = entry
+			break
+		}
+	}
+	invokable, ok := write.Tool.(interface {
+		InvokableRun(context.Context, string, ...tool.Option) (string, error)
+	})
+	if !ok {
+		t.Fatalf("write tool is not invokable: %T", write.Tool)
+	}
+	payload, _ := json.Marshal(WriteInput{FilePath: "large.log", Content: "replacement\n"})
+	result, err := invokable.InvokableRun(context.Background(), string(payload))
+	if err != nil {
+		t.Fatalf("write tool run: %v", err)
+	}
+	if op.readFileHits != 0 {
+		t.Fatalf("expected write to avoid full ReadFile, got %d calls", op.readFileHits)
+	}
+	if op.previewHits != 1 {
+		t.Fatalf("expected one bounded preview call, got %d", op.previewHits)
+	}
+	if op.previewMax != runtimeWriteOldPreviewLimit {
+		t.Fatalf("expected old-file preview budget %d, got %d", runtimeWriteOldPreviewLimit, op.previewMax)
+	}
+	var out WriteOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("expected JSON write result: %v\n%s", err, result)
+	}
+	if !out.Truncated {
+		t.Fatalf("expected truncated write preview for large old file: %#v", out)
+	}
+	if out.LinesRemoved != 50000 {
+		t.Fatalf("expected full old line count from metadata, got %d", out.LinesRemoved)
+	}
+	if len(out.Patch) > runtimeToolPatchLimit {
+		t.Fatalf("expected bounded patch, got %d bytes", len(out.Patch))
+	}
+	if !strings.Contains(out.Patch, "+replacement") {
+		t.Fatalf("expected write patch to reserve budget for new content, got %q", out.Patch)
+	}
+}
+
+func TestBuildSimplePatchLimitedBoundsPreview(t *testing.T) {
+	patch, truncated := buildSimplePatchLimited(strings.Repeat("old line\n", 1000), strings.Repeat("new line\n", 1000), 512)
+	if !truncated {
+		t.Fatalf("expected patch to be truncated")
+	}
+	if len(patch) > 512 {
+		t.Fatalf("expected bounded patch, got %d bytes", len(patch))
+	}
+	if !strings.Contains(patch, "patch truncated") {
+		t.Fatalf("expected truncation marker, got %q", patch)
+	}
+}
+
+func TestBuildSimplePatchLimitedKeepsLongLinePrefix(t *testing.T) {
+	patch, truncated := buildSimplePatchLimited("", strings.Repeat("x", 1000), 128)
+	if !truncated {
+		t.Fatalf("expected patch to be truncated")
+	}
+	if len(patch) > 128 {
+		t.Fatalf("expected bounded patch, got %d bytes", len(patch))
+	}
+	if !strings.Contains(patch, "+xxx") {
+		t.Fatalf("expected long line prefix to remain visible, got %q", patch)
+	}
+	if !strings.Contains(patch, "patch truncated") {
+		t.Fatalf("expected truncation marker, got %q", patch)
+	}
+}
+
+func TestBuildReplacementPatchLimitedReservesNewContentBudget(t *testing.T) {
+	patch, truncated := buildReplacementPatchLimited(strings.Repeat("removed\n", 10000), "replacement\n", 512)
+	if !truncated {
+		t.Fatalf("expected patch to be truncated")
+	}
+	if len(patch) > 512 {
+		t.Fatalf("expected bounded patch, got %d bytes", len(patch))
+	}
+	if !strings.Contains(patch, "+replacement") {
+		t.Fatalf("expected new content to remain visible, got %q", patch)
+	}
+}
+
 func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
 	op := &fakeRuntimeOperator{files: map[string]string{"/workspace/.starxo/worktrees/feat/main.go": "package main\n"}}
 	entries, err := NewRuntimeCoreCatalogEntries(op, "/workspace", nil, fakeWorkspaceManager{workspace: "/workspace/.starxo/worktrees/feat"})
@@ -187,6 +411,56 @@ func TestRuntimeReadToolUsesCurrentWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFilePathUsesActiveWorktreeBoundary(t *testing.T) {
+	manager := fakeWorkspaceManager{workspace: "/repo/.starxo/worktrees/feat"}
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "relative", path: "main.go", want: "/repo/.starxo/worktrees/feat/main.go"},
+		{name: "workspace alias", path: "/workspace/main.go", want: "/repo/.starxo/worktrees/feat/main.go"},
+		{name: "active absolute", path: "/repo/.starxo/worktrees/feat/main.go", want: "/repo/.starxo/worktrees/feat/main.go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := workspaceFilePath(ctx, tt.path, "/repo", manager)
+			if err != nil {
+				t.Fatalf("workspaceFilePath(%q): %v", tt.path, err)
+			}
+			if got != tt.want {
+				t.Fatalf("workspaceFilePath(%q) = %q; want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceFilePathRejectsParentAbsolutePathInWorktree(t *testing.T) {
+	manager := fakeWorkspaceManager{workspace: "/repo/.starxo/worktrees/feat"}
+
+	got, err := workspaceFilePath(context.Background(), "/repo/main.go", "/repo", manager)
+	if err == nil {
+		t.Fatalf("expected parent workspace path to be rejected, got %q", got)
+	}
+	if !strings.Contains(err.Error(), "/repo/.starxo/worktrees/feat") {
+		t.Fatalf("expected error to name active worktree boundary, got %v", err)
+	}
+}
+
+func TestWorkspaceFilePathAllowsActiveWorktreeAbsolutePathUnderWorkspaceRoot(t *testing.T) {
+	manager := fakeWorkspaceManager{workspace: "/workspace/.starxo/worktrees/feat"}
+
+	got, err := workspaceFilePath(context.Background(), "/workspace/.starxo/worktrees/feat/main.go", "/workspace", manager)
+	if err != nil {
+		t.Fatalf("workspaceFilePath active absolute: %v", err)
+	}
+	if want := "/workspace/.starxo/worktrees/feat/main.go"; got != want {
+		t.Fatalf("workspaceFilePath active absolute = %q; want %q", got, want)
+	}
+}
+
 func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
 	entries, err := NewRuntimeDeferredCatalogEntries(&fakeRuntimeOperator{}, "/workspace", nil, nil)
 	if err != nil {
@@ -202,7 +476,7 @@ func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
 			t.Fatalf("expected %s to opt into deferred loading", entry.CanonicalName)
 		}
 	}
-	for _, name := range []string{RuntimeToolLSP, RuntimeToolSkill, RuntimeToolNotebookEdit} {
+	for _, name := range []string{RuntimeToolLSP, RuntimeToolLSPEdit, RuntimeToolSkill, RuntimeToolNotebookEdit} {
 		if _, ok := got[name]; !ok {
 			t.Fatalf("missing deferred runtime tool %s", name)
 		}
@@ -213,8 +487,11 @@ func TestRuntimeDeferredEntriesMetadata(t *testing.T) {
 			t.Fatalf("expected %s to be read-only trusted, got %#v", name, entry)
 		}
 	}
-	if entry := got[RuntimeToolNotebookEdit]; entry.ReadOnlyHint || entry.ReadOnlyTrusted {
-		t.Fatalf("expected NotebookEdit to require write permission, got %#v", entry)
+	for _, name := range []string{RuntimeToolLSPEdit, RuntimeToolNotebookEdit} {
+		entry := got[name]
+		if entry.ReadOnlyHint || entry.ReadOnlyTrusted {
+			t.Fatalf("expected %s to require write permission, got %#v", name, entry)
+		}
 	}
 
 	webFetch := RuntimeWebFetchCatalogEntry(nil)

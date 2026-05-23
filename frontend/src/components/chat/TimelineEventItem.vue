@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NIcon, NButton } from 'naive-ui'
 import {
   Build, CheckmarkCircle, Reload, InformationCircle, AlertCircle,
-  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle, FolderOpen
+  DocumentText, Terminal, CodeSlash, People, ChevronForward, CloseCircle, FolderOpen, GitBranch, GitMerge
 } from '@vicons/ionicons5'
 import { useMarkdown } from '@/composables/useHelpers'
 import type { TurnEvent } from '@/types/message'
@@ -41,7 +41,7 @@ const isResultTruncated = computed(() =>
 )
 
 // ---------- Tool categorization ----------
-type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'other'
+type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'worktree' | 'search' | 'other'
 
 interface ToolDisplayInfo {
   category: ToolCategory
@@ -49,6 +49,7 @@ interface ToolDisplayInfo {
   action: string
   primary: string
   secondary?: string
+  rawPath?: string
 }
 
 function tryParseArgs(args?: string): any {
@@ -62,6 +63,17 @@ function truncStr(s: string, max: number): string {
 
 function firstLine(s: string): string {
   return s.split('\n')[0] || ''
+}
+
+function compactPath(path?: string): string {
+  if (!path) return '-'
+  const normalized = path.replace(/\\/g, '/')
+  const workspaceIndex = normalized.indexOf('/workspace/')
+  const display = workspaceIndex >= 0 ? normalized.slice(workspaceIndex + '/workspace/'.length) : normalized
+  if (display.length <= 68) return display
+  const parts = display.split('/').filter(Boolean)
+  if (parts.length <= 2) return truncStr(display, 68)
+  return `.../${parts.slice(-2).join('/')}`
 }
 
 function parseExitCode(result: string): number | null {
@@ -84,6 +96,11 @@ function jsonInline(v: unknown): string {
   }
 }
 
+function parseJSON<T = any>(value?: string): T | null {
+  if (!value) return null
+  try { return JSON.parse(value) as T } catch { return null }
+}
+
 function todoStats(todos: TodoItem[]): string {
   const total = todos.length
   if (total === 0) return ''
@@ -96,6 +113,17 @@ function todoStats(todos: TodoItem[]): string {
     else todo++
   }
   return `${done}/${doing}/${todo}`
+}
+
+function todoStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    pending: t('message.todoStatus.pending'),
+    in_progress: t('message.todoStatus.inProgress'),
+    done: t('message.todoStatus.done'),
+    failed: t('message.todoStatus.failed'),
+    blocked: t('message.todoStatus.blocked'),
+  }
+  return labels[status || ''] || t('common.unknown')
 }
 
 interface TodoItem {
@@ -128,54 +156,91 @@ const parsedTodos = computed<TodoItem[]>(() => {
   return []
 })
 
+const parsedToolResult = computed<Record<string, any> | null>(() => parseJSON<Record<string, any>>(props.event.toolResult))
+const isWorktreeTool = computed(() => ['EnterWorktree', 'ExitWorktree', 'WorktreeDiff', 'WorktreeMerge'].includes(props.event.toolName || ''))
+const isWriteTool = computed(() => ['Write', 'write_file'].includes(props.event.toolName || ''))
+const isEditTool = computed(() => ['Edit', 'str_replace_editor'].includes(props.event.toolName || ''))
+const isDiffResultTool = computed(() => isWriteTool.value || isEditTool.value)
+const worktreeStatusLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.status || '')))
+const worktreeStatLines = computed(() => nonEmptyLines(String(parsedToolResult.value?.diffStat || '')))
+const worktreePatch = computed(() => parsedToolResult.value?.diff || parsedToolResult.value?.untrackedDiff || '')
+const editPatch = computed(() => String(parsedToolResult.value?.patch || ''))
+const diffLinesSummary = computed(() => {
+  const added = Number(parsedToolResult.value?.linesAdded || 0)
+  const removed = Number(parsedToolResult.value?.linesRemoved || 0)
+  if (added === 0 && removed === 0) return ''
+  return `+${added} -${removed}`
+})
+
+function nonEmptyLines(value: string) {
+  return value.split('\n').filter((line) => line.trim() !== '')
+}
+
 const toolInfo = computed<ToolDisplayInfo>(() => {
   const name = props.event.toolName || ''
   const args = tryParseArgs(props.event.toolArgs)
   const result = props.event.toolResult || ''
   const exitCode = parseExitCode(result)
+  const parsed = parsedToolResult.value
 
-  if (name === 'read_file') {
+  if (name === 'Read' || name === 'read_file') {
+    const rawPath = args?.file_path || args?.path || '-'
     return {
       category: 'file',
       color: 'var(--agent-file-manager)',
       action: t('message.tool.read'),
-      primary: args?.path || '-',
+      primary: compactPath(rawPath),
       secondary: result ? `${result.length} ${t('message.tool.chars')}` : undefined,
+      rawPath,
     }
   }
 
-  if (name === 'write_file') {
+  if (name === 'Write' || name === 'write_file') {
+    const rawPath = parsed?.filePath || args?.file_path || args?.path || '-'
     return {
       category: 'file',
       color: 'var(--agent-file-manager)',
       action: t('message.tool.write'),
-      primary: args?.path || '-',
-      secondary: result ? t('message.tool.saved') : undefined,
+      primary: compactPath(rawPath),
+      secondary: parsed ? `${parsed.created ? t('message.tool.created') : t('message.tool.updated')} ${diffLinesSummary.value || ''}`.trim() : result ? t('message.tool.saved') : undefined,
+      rawPath,
     }
   }
 
-  if (name === 'list_files') {
+  if (name === 'Glob' || name === 'list_files') {
     return {
-      category: 'file',
+      category: name === 'Glob' ? 'search' : 'file',
       color: 'var(--agent-file-manager)',
-      action: t('message.tool.list'),
-      primary: args?.path || '/workspace',
+      action: name === 'Glob' ? t('message.tool.glob') : t('message.tool.list'),
+      primary: args?.path || args?.pattern || '/workspace',
       secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
     }
   }
 
-  if (name === 'str_replace_editor') {
+  if (name === 'Grep') {
+    return {
+      category: 'search',
+      color: 'var(--agent-file-manager)',
+      action: t('message.tool.grep'),
+      primary: args?.pattern || args?.query || '-',
+      secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
+    }
+  }
+
+  if (name === 'Edit' || name === 'str_replace_editor') {
     const cmd = args?.command || 'edit'
+    const rawPath = parsed?.filePath || args?.file_path || args?.path || '-'
     return {
       category: 'edit',
       color: 'var(--agent-code-writer)',
       action: t('message.tool.edit'),
-      primary: args?.path || '-',
-      secondary: cmd,
+      primary: compactPath(rawPath),
+      secondary: parsed ? `${parsed.replacements || 0} ${t('message.tool.replacements')} ${diffLinesSummary.value || ''}`.trim() : cmd,
+      rawPath,
     }
   }
 
-  if (name === 'shell_execute') {
+  if (name === 'Bash' || name === 'shell_execute') {
     return {
       category: 'shell',
       color: 'var(--agent-code-executor)',
@@ -195,13 +260,30 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
-  if (name === 'task') {
+  if (name === 'Agent' || name === 'task') {
     return {
       category: 'agent',
       color: 'var(--agent-orchestrator)',
       action: t('message.tool.delegate'),
-      primary: args?.subagent_type || 'sub-agent',
+      primary: args?.subagent_type || args?.subagentType || t('message.agent.subagent'),
       secondary: truncStr(args?.description || '', 60) || undefined,
+    }
+  }
+
+  if (name === 'ToolSearch' || name === 'WebSearch' || name === 'WebFetch' || name === 'TaskOutput' || name === 'TaskStop') {
+    const actionLabels: Record<string, string> = {
+      ToolSearch: t('message.tool.toolSearch'),
+      WebSearch: t('message.tool.webSearch'),
+      WebFetch: t('message.tool.webFetch'),
+      TaskOutput: t('message.tool.taskOutput'),
+      TaskStop: t('message.tool.taskStop'),
+    }
+    return {
+      category: name === 'WebSearch' || name === 'WebFetch' || name === 'ToolSearch' ? 'search' : 'other',
+      color: 'var(--agent-default)',
+      action: actionLabels[name],
+      primary: args?.query || args?.url || args?.task_id || args?.taskID || '-',
+      secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
     }
   }
 
@@ -218,7 +300,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   }
 
   if (name === 'update_todo') {
-    const detail = args ? `${args.id} -> ${args.status}` : '-'
+    const detail = args ? todoStatusLabel(args.status) : '-'
     return {
       category: 'todo',
       color: 'var(--agent-default)',
@@ -237,6 +319,36 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
         ? `${parsedTodos.value.length} ${t('message.tool.items')}`
         : '-',
       secondary: parsedTodos.value.length > 0 ? todoStats(parsedTodos.value) : undefined,
+    }
+  }
+
+  if (name === 'EnterWorktree' || name === 'ExitWorktree') {
+    return {
+      category: 'worktree',
+      color: 'var(--accent-cyan)',
+      action: name === 'EnterWorktree' ? t('message.tool.worktreeEnter') : t('message.tool.worktreeExit'),
+      primary: parsed?.worktreeBranch || parsed?.worktreePath || args?.name || args?.action || '-',
+      secondary: parsed?.action || undefined,
+    }
+  }
+
+  if (name === 'WorktreeDiff') {
+    return {
+      category: 'worktree',
+      color: 'var(--accent-cyan)',
+      action: t('message.tool.worktreeDiff'),
+      primary: parsed?.worktreeBranch || parsed?.worktreePath || '-',
+      secondary: parsed ? `${worktreeStatusLines.value.length} ${t('workspace.worktree.statusLines')} · ${worktreeStatLines.value.length} ${t('workspace.worktree.statLines')}` : undefined,
+    }
+  }
+
+  if (name === 'WorktreeMerge') {
+    return {
+      category: 'worktree',
+      color: 'var(--accent-emerald)',
+      action: t('message.tool.worktreeMerge'),
+      primary: parsed?.worktreeBranch || args?.commit_message || '-',
+      secondary: parsed?.removed ? t('message.tool.worktreeRemoved') : parsed?.action,
     }
   }
 
@@ -259,11 +371,11 @@ function agentColor(name: string): string {
 
 function agentLabel(name: string): string {
   const labels: Record<string, string> = {
-    'orchestrator': 'Orchestrator',
-    'code_writer': 'Code Writer',
-    'code_executor': 'Code Executor',
-    'file_manager': 'File Manager',
-    'coding_agent': 'Coding Agent'
+    'orchestrator': t('message.agent.orchestrator'),
+    'code_writer': t('message.agent.codeWriter'),
+    'code_executor': t('message.agent.codeExecutor'),
+    'file_manager': t('message.agent.fileManager'),
+    'coding_agent': t('message.agent.codingAgent')
   }
   return labels[name] || name
 }
@@ -295,9 +407,11 @@ const statusLabel = computed(() => {
 
 const canOpenWorkspacePath = computed(() => {
   const category = toolInfo.value.category
-  const path = toolInfo.value.primary || ''
+  const path = toolInfo.value.rawPath || ''
   return (category === 'file' || category === 'edit') && path.startsWith('/')
 })
+
+const openWorkspaceTarget = computed(() => toolInfo.value.rawPath || toolInfo.value.primary)
 </script>
 
 <template>
@@ -328,15 +442,17 @@ const canOpenWorkspacePath = computed(() => {
           @keydown.enter.prevent="toggleExpanded"
           @keydown.space.prevent="toggleExpanded"
         >
-          <NIcon size="13" :style="{ color: toolInfo.color }">
+          <NIcon size="13" class="tool-strip-icon">
             <DocumentText v-if="toolInfo.category === 'file'" />
             <CodeSlash v-else-if="toolInfo.category === 'edit'" />
             <Terminal v-else-if="toolInfo.category === 'shell'" />
             <People v-else-if="toolInfo.category === 'agent'" />
             <InformationCircle v-else-if="toolInfo.category === 'notify'" />
+            <GitMerge v-else-if="event.toolName === 'WorktreeMerge'" />
+            <GitBranch v-else-if="toolInfo.category === 'worktree'" />
             <Build v-else />
           </NIcon>
-          <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
+          <span class="tool-strip-action">{{ toolInfo.action }}</span>
           <span class="tool-strip-primary" :title="toolInfo.primary">{{ toolInfo.primary }}</span>
           <span v-if="toolInfo.secondary" class="tool-strip-secondary">{{ toolInfo.secondary }}</span>
           <button
@@ -344,7 +460,7 @@ const canOpenWorkspacePath = computed(() => {
             type="button"
             class="tool-open-path"
             :aria-label="t('workspace.openFile')"
-            @click.stop="openWorkspacePath(toolInfo.primary)"
+            @click.stop="openWorkspacePath(openWorkspaceTarget)"
           >
             <NIcon size="12"><FolderOpen /></NIcon>
           </button>
@@ -367,7 +483,48 @@ const canOpenWorkspacePath = computed(() => {
               <div class="tool-section-label">{{ t('message.arguments') }}</div>
               <pre class="tool-code" :class="{ 'tool-code-shell': toolInfo.category === 'shell' }">{{ formatArgs(event.toolArgs) }}</pre>
             </div>
-            <div v-if="event.toolResult" class="tool-section">
+            <div v-if="event.toolResult && isDiffResultTool && parsedToolResult" class="tool-section">
+              <div class="tool-section-label">{{ t('message.result') }}</div>
+              <div class="diff-result">
+                <div class="diff-result-meta">
+                  <span v-if="parsedToolResult.filePath" :title="parsedToolResult.filePath">{{ parsedToolResult.filePath }}</span>
+                  <span v-if="isWriteTool">{{ parsedToolResult.created ? t('message.tool.created') : t('message.tool.updated') }}</span>
+                  <span v-if="isEditTool">{{ parsedToolResult.replacements || 0 }} {{ t('message.tool.replacements') }}</span>
+                  <span v-if="diffLinesSummary">{{ diffLinesSummary }}</span>
+                  <span v-if="parsedToolResult.bytes">{{ parsedToolResult.bytes }} {{ t('message.tool.bytes') }}</span>
+                  <span v-if="parsedToolResult.truncated">{{ t('message.tool.truncated') }}</span>
+                </div>
+                <div v-if="editPatch" class="diff-result-block patch">
+                  <span>{{ t('message.tool.patch') }}</span>
+                  <pre>{{ editPatch }}</pre>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="event.toolResult && isWorktreeTool && parsedToolResult" class="tool-section">
+              <div class="tool-section-label">{{ t('message.result') }}</div>
+              <div class="worktree-result">
+                <div class="worktree-result-meta">
+                  <span v-if="parsedToolResult.worktreeBranch">{{ parsedToolResult.worktreeBranch }}</span>
+                  <span v-if="parsedToolResult.worktreePath" :title="parsedToolResult.worktreePath">{{ parsedToolResult.worktreePath }}</span>
+                  <span v-if="parsedToolResult.message">{{ parsedToolResult.message }}</span>
+                </div>
+                <div v-if="event.toolName === 'WorktreeDiff'" class="worktree-result-grid">
+                  <div class="worktree-result-block">
+                    <span>{{ t('workspace.worktree.status') }}</span>
+                    <pre>{{ parsedToolResult.status || t('workspace.worktree.noStatus') }}</pre>
+                  </div>
+                  <div class="worktree-result-block">
+                    <span>{{ t('workspace.worktree.diffStat') }}</span>
+                    <pre>{{ parsedToolResult.diffStat || t('workspace.worktree.noDiffStat') }}</pre>
+                  </div>
+                </div>
+                <div v-if="worktreePatch" class="worktree-result-block patch">
+                  <span>{{ t('workspace.worktree.patch') }}</span>
+                  <pre>{{ worktreePatch }}</pre>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="event.toolResult" class="tool-section">
               <div class="tool-section-label">{{ t('message.result') }}</div>
               <pre class="tool-code tool-result-code">{{ truncatedResult }}</pre>
               <NButton
@@ -392,9 +549,9 @@ const canOpenWorkspacePath = computed(() => {
     <template v-else-if="event.type === 'transfer'">
       <div class="event-transfer-inline">
         <span class="transfer-text">
-          <span :style="{ color: agentColor(event.agent) }">{{ agentLabel(event.agent) }}</span>
+          <span>{{ agentLabel(event.agent) }}</span>
           <NIcon size="12" class="transfer-arrow"><ChevronForward /></NIcon>
-          <span :style="{ color: agentColor(event.content) }">{{ agentLabel(event.content) }}</span>
+          <span>{{ agentLabel(event.content) }}</span>
         </span>
         <span v-if="event.toolArgs" class="transfer-desc">{{ event.toolArgs }}</span>
       </div>
@@ -419,7 +576,7 @@ const canOpenWorkspacePath = computed(() => {
     <!-- Reasoning: agent's intent explanation before tool calls -->
     <template v-else-if="event.type === 'reasoning'">
       <div class="event-reasoning">
-        <span class="reasoning-agent" :style="{ color: agentColor(event.agent) }">
+        <span class="reasoning-agent">
           {{ agentLabel(event.agent) }}
         </span>
         <span class="reasoning-text">{{ event.content }}</span>
@@ -434,7 +591,7 @@ const canOpenWorkspacePath = computed(() => {
           <span class="dot"></span>
           <span class="dot"></span>
         </span>
-        <span class="thinking-agent" :style="{ color: agentColor(event.agent) }">
+        <span class="thinking-agent">
           {{ agentLabel(event.agent) }}
         </span>
         <span class="thinking-label">{{ t('message.thinking') }}</span>
@@ -469,13 +626,32 @@ const canOpenWorkspacePath = computed(() => {
   letter-spacing: 0.3px;
 }
 
+:global(:root[data-platform="macos"] .event-agent-badge){
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  color: var(--text-faint) !important;
+}
+
 .event-message-content {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px 12px 12px 12px;
-  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0 6px;
   font-size: 13.5px;
-  line-height: 1.7;
+  line-height: 1.65;
+}
+
+:global(:root[data-platform="macos"] .event-message-content){
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0 6px;
+  line-height: 1.6;
 }
 
 .streaming-cursor {
@@ -510,13 +686,21 @@ const canOpenWorkspacePath = computed(() => {
   align-items: center;
   gap: 6px;
   min-height: 28px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   appearance: none;
   text-align: left;
+}
+
+:global(:root[data-platform="macos"] .tool-strip){
+  min-height: 26px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  background: transparent;
+  border-color: transparent;
 }
 
 .tool-strip.expandable {
@@ -524,43 +708,71 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-strip.expandable:hover {
-  border-color: color-mix(in srgb, var(--accent-cyan) 30%, var(--border-subtle));
-  background: var(--bg-hover);
+  border-color: transparent;
+  background: var(--platform-bg-hover);
 }
 
 .tool-strip-file {
-  border-left: 3px solid var(--agent-file-manager);
+  border-left: 0;
 }
 
 .tool-strip-edit {
-  border-left: 3px solid var(--agent-code-writer);
+  border-left: 0;
 }
 
 .tool-strip-shell {
-  border-left: 3px solid var(--agent-code-executor);
+  border-left: 0;
 }
 
 .tool-strip-agent {
-  border-left: 3px solid var(--agent-orchestrator);
+  border-left: 0;
 }
 
 .tool-strip-todo {
-  border-left: 3px solid var(--agent-default);
+  border-left: 0;
 }
 
 .tool-strip-notify {
-  border-left: 3px solid var(--agent-orchestrator);
+  border-left: 0;
+}
+
+.tool-strip-worktree {
+  border-left: 0;
 }
 
 .tool-strip-other {
-  border-left: 3px solid var(--text-muted);
+  border-left: 0;
+}
+
+:global(:root[data-platform="macos"] .tool-strip-file),
+:global(:root[data-platform="macos"] .tool-strip-edit),
+:global(:root[data-platform="macos"] .tool-strip-shell),
+:global(:root[data-platform="macos"] .tool-strip-agent),
+:global(:root[data-platform="macos"] .tool-strip-todo),
+:global(:root[data-platform="macos"] .tool-strip-notify),
+:global(:root[data-platform="macos"] .tool-strip-worktree),
+:global(:root[data-platform="macos"] .tool-strip-other){
+  border-left-width: 1px;
+  border-left-color: color-mix(in srgb, var(--border-strong) 52%, transparent);
+}
+
+.tool-strip-icon {
+  color: var(--text-muted);
 }
 
 .tool-strip-action {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  font-weight: 500;
+  font-family: var(--font-sans);
   flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+:global(:root[data-platform="macos"] .tool-strip-action){
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
 }
 
 .tool-strip-primary {
@@ -597,9 +809,9 @@ const canOpenWorkspacePath = computed(() => {
 
 .tool-open-path:hover,
 .tool-open-path:focus-visible {
-  color: var(--accent-cyan);
-  background: var(--bg-hover);
-  border-color: var(--accent-cyan-dim);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--platform-bg-raised) 82%, transparent);
+  border-color: var(--border-strong);
 }
 
 .tool-strip-chevron {
@@ -618,7 +830,7 @@ const canOpenWorkspacePath = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 1px 6px;
   margin-left: auto;
   flex-shrink: 0;
   border-radius: 999px;
@@ -626,8 +838,15 @@ const canOpenWorkspacePath = computed(() => {
   font-family: var(--font-mono);
   font-weight: var(--fw-semibold);
   letter-spacing: 0.3px;
-  border: 1px solid transparent;
+  border: 0;
   line-height: 1.2;
+}
+
+:global(:root[data-platform="macos"] .tool-status-pill){
+  padding: 1px 6px;
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
 }
 
 .status-pill-icon {
@@ -640,21 +859,25 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-status-pill.status-done {
-  color: var(--accent-emerald);
-  background: color-mix(in srgb, var(--accent-emerald) 10%, transparent);
-  border-color: color-mix(in srgb, var(--accent-emerald) 22%, transparent);
+  color: var(--text-faint);
+  background: transparent;
+  border-color: transparent;
+}
+
+.tool-status-pill.status-done .status-pill-label {
+  display: none;
 }
 
 .tool-status-pill.status-error {
   color: var(--accent-rose, #f43f5e);
-  background: color-mix(in srgb, var(--accent-rose, #f43f5e) 10%, transparent);
-  border-color: color-mix(in srgb, var(--accent-rose, #f43f5e) 22%, transparent);
+  background: transparent;
+  border-color: transparent;
 }
 
 .tool-status-pill.status-running {
   color: var(--text-muted);
-  background: var(--bg-deepest);
-  border-color: var(--border-subtle);
+  background: transparent;
+  border-color: transparent;
 }
 
 .tool-status-pill.status-running .status-pill-icon {
@@ -689,7 +912,7 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-code {
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px 12px;
@@ -706,12 +929,130 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-code-shell {
-  border-left: 3px solid var(--agent-code-executor);
-  background: rgba(167, 139, 250, 0.05);
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 54%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-window) 76%, transparent);
 }
 
 .tool-result-code {
-  border-left: 3px solid var(--accent-emerald-dim);
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 54%, transparent);
+}
+
+.worktree-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.worktree-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.worktree-result-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.worktree-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 8px;
+}
+
+.worktree-result-block {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-deepest);
+  padding: 7px;
+}
+
+.worktree-result-block span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.worktree-result-block pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.worktree-result-block.patch pre {
+  max-height: 300px;
+}
+
+.diff-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.diff-result-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.diff-result-block {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-deepest);
+  padding: 7px;
+}
+
+.diff-result-block span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.diff-result-block pre {
+  max-height: 300px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .tool-executing {
@@ -724,6 +1065,12 @@ const canOpenWorkspacePath = computed(() => {
   margin-top: 4px;
   font-size: 11px !important;
   color: var(--accent-cyan) !important;
+}
+
+@media (max-width: 760px) {
+  .worktree-result-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Transfer inline (fallback) */
@@ -741,6 +1088,7 @@ const canOpenWorkspacePath = computed(() => {
   gap: 6px;
   font-weight: 600;
   font-family: var(--font-mono);
+  color: var(--text-muted);
 }
 
 .transfer-arrow {
@@ -780,17 +1128,18 @@ const canOpenWorkspacePath = computed(() => {
   gap: 8px;
   font-size: 12px;
   padding: 6px 12px;
-  background: rgba(139, 141, 163, 0.06);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 70%, transparent);
   border-radius: var(--radius-sm);
-  border-left: 3px solid rgba(139, 141, 163, 0.3);
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 48%, transparent);
   margin: 2px 0;
 }
 
 .reasoning-agent {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
   flex-shrink: 0;
+  color: var(--text-faint);
 }
 
 .reasoning-text {
@@ -844,9 +1193,10 @@ const canOpenWorkspacePath = computed(() => {
 
 .thinking-agent {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
   flex-shrink: 0;
+  color: var(--text-faint);
 }
 
 .thinking-label {
