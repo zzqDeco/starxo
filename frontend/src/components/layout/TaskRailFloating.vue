@@ -85,9 +85,9 @@ function statusClass(status: UnifiedTaskStatus) {
   --task-space-2: 8px;
   --task-space-3: 10px;
   --task-status-todo: var(--text-faint);
-  --task-status-doing: var(--accent-cyan);
-  --task-status-done: var(--accent-emerald);
-  --task-status-blocked: var(--accent-rose);
+  --task-status-doing: color-mix(in srgb, var(--platform-accent) 62%, var(--text-muted));
+  --task-status-done: var(--text-faint);
+  --task-status-blocked: var(--platform-danger);
 
   position: relative;
   border: 1px solid var(--border-subtle);
@@ -120,7 +120,7 @@ function statusClass(status: UnifiedTaskStatus) {
 
 .task-summary {
   font-size: var(--task-font-sm);
-  color: var(--task-status-done);
+  color: var(--text-muted);
   font-family: var(--font-mono);
 }
 
@@ -153,12 +153,12 @@ function statusClass(status: UnifiedTaskStatus) {
 
 .metric.doing {
   color: var(--task-status-doing);
-  background: color-mix(in srgb, var(--task-status-doing) 12%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
 }
 
 .metric.blocked {
   color: var(--task-status-blocked);
-  background: color-mix(in srgb, var(--task-status-blocked) 12%, transparent);
+  background: color-mix(in srgb, var(--task-status-blocked) 8%, transparent);
 }
 
 .task-chevron {
@@ -180,7 +180,7 @@ function statusClass(status: UnifiedTaskStatus) {
 
 .task-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--task-status-doing), var(--task-status-done));
+  background: color-mix(in srgb, var(--platform-accent) 58%, var(--text-muted));
   transition: width 220ms ease;
 }
 
@@ -215,7 +215,7 @@ function statusClass(status: UnifiedTaskStatus) {
   gap: var(--task-space-1);
   padding: var(--task-space-1) var(--task-space-2);
   border-radius: 8px;
-  background: var(--platform-bg-toolbar);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
   border: 1px solid transparent;
 }
 

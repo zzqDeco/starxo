@@ -41,7 +41,7 @@ const isResultTruncated = computed(() =>
 )
 
 // ---------- Tool categorization ----------
-type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'worktree' | 'other'
+type ToolCategory = 'file' | 'shell' | 'edit' | 'agent' | 'todo' | 'notify' | 'worktree' | 'search' | 'other'
 
 interface ToolDisplayInfo {
   category: ToolCategory
@@ -103,6 +103,17 @@ function todoStats(todos: TodoItem[]): string {
   return `${done}/${doing}/${todo}`
 }
 
+function todoStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    pending: t('message.todoStatus.pending'),
+    in_progress: t('message.todoStatus.inProgress'),
+    done: t('message.todoStatus.done'),
+    failed: t('message.todoStatus.failed'),
+    blocked: t('message.todoStatus.blocked'),
+  }
+  return labels[status || ''] || t('common.unknown')
+}
+
 interface TodoItem {
   id: string
   title: string
@@ -160,12 +171,12 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   const exitCode = parseExitCode(result)
   const parsed = parsedToolResult.value
 
-  if (name === 'read_file') {
+  if (name === 'Read' || name === 'read_file') {
     return {
       category: 'file',
       color: 'var(--agent-file-manager)',
       action: t('message.tool.read'),
-      primary: args?.path || '-',
+      primary: args?.file_path || args?.path || '-',
       secondary: result ? `${result.length} ${t('message.tool.chars')}` : undefined,
     }
   }
@@ -180,12 +191,22 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
-  if (name === 'list_files') {
+  if (name === 'Glob' || name === 'list_files') {
     return {
-      category: 'file',
+      category: name === 'Glob' ? 'search' : 'file',
       color: 'var(--agent-file-manager)',
-      action: t('message.tool.list'),
-      primary: args?.path || '/workspace',
+      action: name === 'Glob' ? t('message.tool.glob') : t('message.tool.list'),
+      primary: args?.path || args?.pattern || '/workspace',
+      secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
+    }
+  }
+
+  if (name === 'Grep') {
+    return {
+      category: 'search',
+      color: 'var(--agent-file-manager)',
+      action: t('message.tool.grep'),
+      primary: args?.pattern || args?.query || '-',
       secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
     }
   }
@@ -201,7 +222,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
-  if (name === 'shell_execute') {
+  if (name === 'Bash' || name === 'shell_execute') {
     return {
       category: 'shell',
       color: 'var(--agent-code-executor)',
@@ -221,13 +242,30 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
     }
   }
 
-  if (name === 'task') {
+  if (name === 'Agent' || name === 'task') {
     return {
       category: 'agent',
       color: 'var(--agent-orchestrator)',
       action: t('message.tool.delegate'),
-      primary: args?.subagent_type || 'sub-agent',
+      primary: args?.subagent_type || args?.subagentType || t('message.agent.subagent'),
       secondary: truncStr(args?.description || '', 60) || undefined,
+    }
+  }
+
+  if (name === 'ToolSearch' || name === 'WebSearch' || name === 'WebFetch' || name === 'TaskOutput' || name === 'TaskStop') {
+    const actionLabels: Record<string, string> = {
+      ToolSearch: t('message.tool.toolSearch'),
+      WebSearch: t('message.tool.webSearch'),
+      WebFetch: t('message.tool.webFetch'),
+      TaskOutput: t('message.tool.taskOutput'),
+      TaskStop: t('message.tool.taskStop'),
+    }
+    return {
+      category: name === 'WebSearch' || name === 'WebFetch' || name === 'ToolSearch' ? 'search' : 'other',
+      color: 'var(--agent-default)',
+      action: actionLabels[name],
+      primary: args?.query || args?.url || args?.task_id || args?.taskID || '-',
+      secondary: result ? `${countLines(result)} ${t('message.tool.lines')}` : undefined,
     }
   }
 
@@ -244,7 +282,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
   }
 
   if (name === 'update_todo') {
-    const detail = args ? `${args.id} -> ${args.status}` : '-'
+    const detail = args ? `${args.id} -> ${todoStatusLabel(args.status)}` : '-'
     return {
       category: 'todo',
       color: 'var(--agent-default)',
@@ -282,7 +320,7 @@ const toolInfo = computed<ToolDisplayInfo>(() => {
       color: 'var(--accent-cyan)',
       action: t('message.tool.worktreeDiff'),
       primary: parsed?.worktreeBranch || parsed?.worktreePath || '-',
-      secondary: parsed ? `${worktreeStatusLines.value.length} status · ${worktreeStatLines.value.length} stat` : undefined,
+      secondary: parsed ? `${worktreeStatusLines.value.length} ${t('workspace.worktree.statusLines')} · ${worktreeStatLines.value.length} ${t('workspace.worktree.statLines')}` : undefined,
     }
   }
 
@@ -384,7 +422,7 @@ const canOpenWorkspacePath = computed(() => {
           @keydown.enter.prevent="toggleExpanded"
           @keydown.space.prevent="toggleExpanded"
         >
-          <NIcon size="13" :style="{ color: toolInfo.color }">
+          <NIcon size="13" class="tool-strip-icon">
             <DocumentText v-if="toolInfo.category === 'file'" />
             <CodeSlash v-else-if="toolInfo.category === 'edit'" />
             <Terminal v-else-if="toolInfo.category === 'shell'" />
@@ -394,7 +432,7 @@ const canOpenWorkspacePath = computed(() => {
             <GitBranch v-else-if="toolInfo.category === 'worktree'" />
             <Build v-else />
           </NIcon>
-          <span class="tool-strip-action" :style="{ color: toolInfo.color }">{{ toolInfo.action }}</span>
+          <span class="tool-strip-action">{{ toolInfo.action }}</span>
           <span class="tool-strip-primary" :title="toolInfo.primary">{{ toolInfo.primary }}</span>
           <span v-if="toolInfo.secondary" class="tool-strip-secondary">{{ toolInfo.secondary }}</span>
           <button
@@ -491,9 +529,9 @@ const canOpenWorkspacePath = computed(() => {
     <template v-else-if="event.type === 'transfer'">
       <div class="event-transfer-inline">
         <span class="transfer-text">
-          <span :style="{ color: agentColor(event.agent) }">{{ agentLabel(event.agent) }}</span>
+          <span>{{ agentLabel(event.agent) }}</span>
           <NIcon size="12" class="transfer-arrow"><ChevronForward /></NIcon>
-          <span :style="{ color: agentColor(event.content) }">{{ agentLabel(event.content) }}</span>
+          <span>{{ agentLabel(event.content) }}</span>
         </span>
         <span v-if="event.toolArgs" class="transfer-desc">{{ event.toolArgs }}</span>
       </div>
@@ -518,7 +556,7 @@ const canOpenWorkspacePath = computed(() => {
     <!-- Reasoning: agent's intent explanation before tool calls -->
     <template v-else-if="event.type === 'reasoning'">
       <div class="event-reasoning">
-        <span class="reasoning-agent" :style="{ color: agentColor(event.agent) }">
+        <span class="reasoning-agent">
           {{ agentLabel(event.agent) }}
         </span>
         <span class="reasoning-text">{{ event.content }}</span>
@@ -533,7 +571,7 @@ const canOpenWorkspacePath = computed(() => {
           <span class="dot"></span>
           <span class="dot"></span>
         </span>
-        <span class="thinking-agent" :style="{ color: agentColor(event.agent) }">
+        <span class="thinking-agent">
           {{ agentLabel(event.agent) }}
         </span>
         <span class="thinking-label">{{ t('message.thinking') }}</span>
@@ -576,6 +614,7 @@ const canOpenWorkspacePath = computed(() => {
   font-size: 11.5px;
   font-weight: var(--fw-medium);
   letter-spacing: 0;
+  color: var(--text-faint) !important;
 }
 
 .event-message-content {
@@ -649,8 +688,8 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-strip.expandable:hover {
-  border-color: color-mix(in srgb, var(--accent-cyan) 30%, var(--border-subtle));
-  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--border-strong) 66%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-raised) 76%, transparent);
 }
 
 .tool-strip-file {
@@ -694,6 +733,11 @@ const canOpenWorkspacePath = computed(() => {
 :global(:root[data-platform="macos"] .tool-strip-worktree),
 :global(:root[data-platform="macos"] .tool-strip-other){
   border-left-width: 1px;
+  border-left-color: color-mix(in srgb, var(--border-strong) 52%, transparent);
+}
+
+.tool-strip-icon {
+  color: var(--text-muted);
 }
 
 .tool-strip-action {
@@ -701,12 +745,14 @@ const canOpenWorkspacePath = computed(() => {
   font-weight: 700;
   font-family: var(--font-mono);
   flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 :global(:root[data-platform="macos"] .tool-strip-action){
   font-family: var(--font-sans);
   font-size: 11.5px;
   font-weight: var(--fw-medium);
+  color: var(--text-muted);
 }
 
 .tool-strip-primary {
@@ -743,9 +789,9 @@ const canOpenWorkspacePath = computed(() => {
 
 .tool-open-path:hover,
 .tool-open-path:focus-visible {
-  color: var(--accent-cyan);
-  background: var(--bg-hover);
-  border-color: var(--accent-cyan-dim);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--platform-bg-raised) 82%, transparent);
+  border-color: var(--border-strong);
 }
 
 .tool-strip-chevron {
@@ -793,9 +839,9 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-status-pill.status-done {
-  color: var(--accent-emerald);
-  background: color-mix(in srgb, var(--accent-emerald) 10%, transparent);
-  border-color: color-mix(in srgb, var(--accent-emerald) 22%, transparent);
+  color: var(--text-faint);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border-subtle) 70%, transparent);
 }
 
 .tool-status-pill.status-error {
@@ -805,9 +851,9 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-status-pill.status-running {
-  color: var(--text-muted);
-  background: var(--bg-deepest);
-  border-color: var(--border-subtle);
+  color: color-mix(in srgb, var(--platform-accent) 60%, var(--text-muted));
+  background: color-mix(in srgb, var(--platform-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
 }
 
 .tool-status-pill.status-running .status-pill-icon {
@@ -859,12 +905,12 @@ const canOpenWorkspacePath = computed(() => {
 }
 
 .tool-code-shell {
-  border-left: 3px solid var(--agent-code-executor);
-  background: rgba(167, 139, 250, 0.05);
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 54%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-window) 76%, transparent);
 }
 
 .tool-result-code {
-  border-left: 3px solid var(--accent-emerald-dim);
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 54%, transparent);
 }
 
 .worktree-result {
@@ -1018,6 +1064,7 @@ const canOpenWorkspacePath = computed(() => {
   gap: 6px;
   font-weight: 600;
   font-family: var(--font-mono);
+  color: var(--text-muted);
 }
 
 .transfer-arrow {
@@ -1057,17 +1104,18 @@ const canOpenWorkspacePath = computed(() => {
   gap: 8px;
   font-size: 12px;
   padding: 6px 12px;
-  background: rgba(139, 141, 163, 0.06);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 70%, transparent);
   border-radius: var(--radius-sm);
-  border-left: 3px solid rgba(139, 141, 163, 0.3);
+  border-left: 1px solid color-mix(in srgb, var(--border-strong) 48%, transparent);
   margin: 2px 0;
 }
 
 .reasoning-agent {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
   flex-shrink: 0;
+  color: var(--text-faint);
 }
 
 .reasoning-text {
@@ -1121,9 +1169,10 @@ const canOpenWorkspacePath = computed(() => {
 
 .thinking-agent {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
   flex-shrink: 0;
+  color: var(--text-faint);
 }
 
 .thinking-label {

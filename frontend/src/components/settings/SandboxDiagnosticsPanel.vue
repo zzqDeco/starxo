@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
-import { NAlert, NButton, NCollapse, NCollapseItem, NIcon, NTag, NTooltip } from 'naive-ui'
+import { NAlert, NButton, NCollapse, NCollapseItem, NIcon, NTooltip } from 'naive-ui'
 import { BuildOutline, CheckmarkCircle, ClipboardOutline, CloseCircle, InformationCircle, Warning } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -27,14 +27,6 @@ const statusCounts = computed(() => {
   return counts
 })
 
-function tagType(status: string) {
-  if (status === 'pass') return 'success'
-  if (status === 'fail') return 'error'
-  if (status === 'warn') return 'warning'
-  if (status === 'skipped') return 'default'
-  return 'info'
-}
-
 function statusIcon(status: string) {
   if (status === 'pass') return CheckmarkCircle
   if (status === 'fail') return CloseCircle
@@ -48,10 +40,24 @@ function fixFor(check: SandboxDiagnosticCheck) {
   return diagnostics.value.fixes.filter((fix) => ids.has(fix.id))
 }
 
-function riskType(risk: string) {
-  if (risk === 'security') return 'error'
-  if (risk === 'sudo') return 'warning'
-  return 'info'
+function diagnosticStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pass: t('settings.sandbox.statusPass'),
+    warn: t('settings.sandbox.statusWarn'),
+    fail: t('settings.sandbox.statusFail'),
+    info: t('settings.sandbox.statusInfo'),
+    skipped: t('settings.sandbox.statusSkipped'),
+  }
+  return labels[status] || status
+}
+
+function riskLabel(risk: string) {
+  const labels: Record<string, string> = {
+    safe: t('settings.sandbox.riskSafe'),
+    sudo: t('settings.sandbox.riskSudo'),
+    security: t('settings.sandbox.riskSecurity'),
+  }
+  return labels[risk] || risk
 }
 
 async function runDiagnostics() {
@@ -113,12 +119,12 @@ async function copyFix(fix: SandboxFixSuggestion) {
       <div class="diagnostics-summary" :class="{ failed: !diagnostics.available }">
         <div class="summary-main">
           <strong>{{ diagnostics.summary }}</strong>
-          <span>{{ diagnostics.runtime }} · {{ diagnostics.os || 'unknown' }}</span>
+          <span>{{ diagnostics.runtime }} · {{ diagnostics.os || t('common.unknown') }}</span>
         </div>
         <div class="summary-tags">
-          <NTag size="small" round type="success">{{ statusCounts.pass }} pass</NTag>
-          <NTag v-if="statusCounts.warn" size="small" round type="warning">{{ statusCounts.warn }} warn</NTag>
-          <NTag v-if="statusCounts.fail" size="small" round type="error">{{ statusCounts.fail }} fail</NTag>
+          <span class="diagnostic-badge pass">{{ statusCounts.pass }} {{ t('settings.sandbox.statusPass') }}</span>
+          <span v-if="statusCounts.warn" class="diagnostic-badge warn">{{ statusCounts.warn }} {{ t('settings.sandbox.statusWarn') }}</span>
+          <span v-if="statusCounts.fail" class="diagnostic-badge fail">{{ statusCounts.fail }} {{ t('settings.sandbox.statusFail') }}</span>
         </div>
       </div>
 
@@ -137,7 +143,7 @@ async function copyFix(fix: SandboxFixSuggestion) {
           <div class="check-content">
             <div class="check-line">
               <span class="check-label">{{ check.label }}</span>
-              <NTag size="small" round :type="tagType(check.status)">{{ check.status }}</NTag>
+              <span :class="['diagnostic-badge', check.status]">{{ diagnosticStatusLabel(check.status) }}</span>
             </div>
             <p>{{ check.message }}</p>
             <p v-if="check.details" class="muted">{{ check.details }}</p>
@@ -146,7 +152,7 @@ async function copyFix(fix: SandboxFixSuggestion) {
                 <pre v-if="check.command" class="code-block">{{ check.command }}</pre>
                 <pre v-if="check.output" class="code-block">{{ check.output }}</pre>
                 <div v-for="fix in fixFor(check)" :key="fix.id" class="inline-fix">
-                  <NTag size="small" :type="riskType(fix.risk)">{{ fix.risk }}</NTag>
+                  <span :class="['risk-badge', fix.risk]">{{ riskLabel(fix.risk) }}</span>
                   <span>{{ fix.title }}</span>
                 </div>
               </NCollapseItem>
@@ -163,7 +169,7 @@ async function copyFix(fix: SandboxFixSuggestion) {
               <strong>{{ fix.title }}</strong>
               <p>{{ fix.description }}</p>
             </div>
-            <NTag size="small" :type="riskType(fix.risk)">{{ fix.risk }}</NTag>
+            <span :class="['risk-badge', fix.risk]">{{ riskLabel(fix.risk) }}</span>
           </div>
           <pre v-if="fix.commands?.length" class="code-block">{{ fix.commands.join('\n') }}</pre>
           <div v-if="fix.commands?.length" class="fix-actions">
@@ -216,6 +222,46 @@ async function copyFix(fix: SandboxFixSuggestion) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.diagnostic-badge,
+.risk-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 74%, transparent);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+
+.diagnostic-badge.pass,
+.risk-badge.safe {
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.diagnostic-badge.warn,
+.risk-badge.sudo {
+  color: color-mix(in srgb, var(--platform-warning) 74%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-warning) 18%, transparent);
+  background: color-mix(in srgb, var(--platform-warning) 7%, transparent);
+}
+
+.diagnostic-badge.fail,
+.risk-badge.security {
+  color: var(--platform-danger);
+  border-color: color-mix(in srgb, var(--platform-danger) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-danger) 7%, transparent);
+}
+
+.diagnostic-badge.info,
+.diagnostic-badge.skipped {
+  color: var(--text-muted);
 }
 
 .diagnostics-title {

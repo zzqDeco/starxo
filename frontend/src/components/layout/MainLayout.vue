@@ -13,6 +13,7 @@ import { useKeybinds } from '@/composables/useKeybinds'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const WorkspaceDrawer = defineAsyncComponent(() => import('@/components/files/WorkspaceDrawer.vue'))
 const ContainerDock = defineAsyncComponent(() => import('@/components/containers/ContainerDock.vue'))
@@ -194,6 +195,10 @@ function openCommandPalette() {
   showPalette.value = true
 }
 
+function toggleNativeWindowZoom() {
+  void toggleWindowZoom()
+}
+
 let stopWorkspaceBridge: (() => void) | null = null
 onMounted(() => {
   stopWorkspaceBridge = onWorkspaceOpenPath(() => {
@@ -216,6 +221,12 @@ onUnmounted(() => {
       'inspector-active': inspectorVisible,
     }"
   >
+    <div
+      class="window-top-edge-hit-area"
+      aria-hidden="true"
+      @dblclick.stop.prevent="toggleNativeWindowZoom"
+    ></div>
+
     <div
       v-if="!isBelow768"
       class="left-panel"
@@ -339,6 +350,20 @@ onUnmounted(() => {
   background: var(--platform-bg-window);
   overflow: hidden;
   position: relative;
+}
+
+.window-top-edge-hit-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 12px;
+  z-index: calc(var(--z-sticky, 20) + 3);
+  --wails-draggable: no-drag;
+}
+
+:global(:root[data-platform="macos"] .window-top-edge-hit-area){
+  display: none;
 }
 
 /* CSS safety net — keeps layout contained if JS breakpoints lag at resize.

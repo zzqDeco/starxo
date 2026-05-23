@@ -611,8 +611,9 @@ onUnmounted(() => {
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content) {
   position: relative;
-  background: var(--platform-bg-active);
-  color: var(--accent-cyan);
+  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 50%, transparent);
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content::before) {

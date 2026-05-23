@@ -63,18 +63,35 @@ function summarizeToolCall(evt: TurnEvent): string {
   const name = evt.toolName || 'tool'
   const args = tryParseArgs(evt.toolArgs)
 
-  if (name === 'read_file') return `${t('message.tool.read')} ${args?.path || '-'}`
-  if (name === 'write_file') return `${t('message.tool.write')} ${args?.path || '-'}`
-  if (name === 'list_files') return `${t('message.tool.list')} ${args?.path || '/workspace'}`
-  if (name === 'str_replace_editor') return `${t('message.tool.edit')} ${args?.path || '-'}`
-  if (name === 'shell_execute') return `${t('message.tool.shell')} ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
+  if (name === 'Read' || name === 'read_file') return `${t('message.tool.read')} ${args?.file_path || args?.path || '-'}`
+  if (name === 'Write' || name === 'write_file') return `${t('message.tool.write')} ${args?.file_path || args?.path || '-'}`
+  if (name === 'Glob' || name === 'list_files') return `${name === 'Glob' ? t('message.tool.glob') : t('message.tool.list')} ${args?.path || args?.pattern || '/workspace'}`
+  if (name === 'Grep') return `${t('message.tool.grep')} ${args?.pattern || args?.query || '-'}`
+  if (name === 'Edit' || name === 'str_replace_editor') return `${t('message.tool.edit')} ${args?.file_path || args?.path || '-'}`
+  if (name === 'Bash' || name === 'shell_execute') return `${t('message.tool.shell')} ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
   if (name === 'python_execute') return `${t('message.tool.python')} ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
-  if (name === 'task') return `${t('message.tool.delegate')} ${args?.subagent_type || 'sub-agent'}`
+  if (name === 'Agent' || name === 'task') return `${t('message.tool.delegate')} ${args?.subagent_type || args?.subagentType || t('message.agent.subagent')}`
+  if (name === 'ToolSearch') return `${t('message.tool.toolSearch')} ${args?.query || '-'}`
+  if (name === 'WebSearch') return `${t('message.tool.webSearch')} ${args?.query || '-'}`
+  if (name === 'WebFetch') return `${t('message.tool.webFetch')} ${args?.url || '-'}`
+  if (name === 'TaskOutput') return `${t('message.tool.taskOutput')} ${args?.task_id || args?.taskID || '-'}`
+  if (name === 'TaskStop') return `${t('message.tool.taskStop')} ${args?.task_id || args?.taskID || '-'}`
   if (name === 'write_todos') return t('message.tool.todos')
-  if (name === 'update_todo') return `${t('message.tool.todoUpdate')} ${args?.id || '-'} -> ${args?.status || '-'}`
+  if (name === 'update_todo') return `${t('message.tool.todoUpdate')} ${args?.id || '-'} -> ${todoStatusLabel(args?.status)}`
   if (name === 'notify_user') return `${t('message.tool.notify')} ${truncStr(args?.message || '-', 50)}`
 
   return truncStr(name, 70)
+}
+
+function todoStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    pending: t('message.todoStatus.pending'),
+    in_progress: t('message.todoStatus.inProgress'),
+    done: t('message.todoStatus.done'),
+    failed: t('message.todoStatus.failed'),
+    blocked: t('message.todoStatus.blocked'),
+  }
+  return labels[status || ''] || t('common.unknown')
 }
 
 function summarizeEvent(evt: TurnEvent): string {
@@ -330,9 +347,9 @@ function copyContent() {
           <div v-if="seg.type === 'transfer'" class="transfer-divider">
             <span class="transfer-line"></span>
             <span class="transfer-label">
-              <span :style="{ color: agentColor(seg.fromAgent || '') }">{{ agentLabel(seg.fromAgent || '') }}</span>
+              <span>{{ agentLabel(seg.fromAgent || '') }}</span>
               <span class="transfer-arrow">&rarr;</span>
-              <span :style="{ color: agentColor(seg.agent) }">{{ agentLabel(seg.agent) }}</span>
+              <span>{{ agentLabel(seg.agent) }}</span>
             </span>
             <span class="transfer-line"></span>
           </div>
@@ -451,7 +468,7 @@ function copyContent() {
 .user-content {
   background: transparent;
   color: var(--text-secondary);
-  border-right: 2px solid var(--accent-cyan);
+  border-right: 2px solid color-mix(in srgb, var(--platform-accent) 46%, var(--border-strong));
   padding: 2px 12px 2px 16px;
   font-size: var(--fs-md);
   line-height: var(--lh-normal);
@@ -573,9 +590,10 @@ function copyContent() {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  font-weight: 600;
-  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
   white-space: nowrap;
+  color: var(--text-muted);
 }
 
 .transfer-arrow {
@@ -596,18 +614,18 @@ function copyContent() {
 }
 
 .segment-color-bar {
-  width: 3px;
+  width: 2px;
   height: 14px;
   border-radius: 2px;
-  background: var(--seg-color);
+  background: color-mix(in srgb, var(--border-strong) 70%, transparent);
   flex-shrink: 0;
 }
 
 .segment-agent-name {
   font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--seg-color);
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--text-muted);
   letter-spacing: 0;
 }
 
@@ -644,7 +662,7 @@ function copyContent() {
 }
 
 .subagent-segment:hover {
-  border-color: color-mix(in srgb, var(--agent-color) 30%, transparent);
+  border-color: color-mix(in srgb, var(--border-strong) 58%, transparent);
 }
 
 .subagent-header {
@@ -658,26 +676,26 @@ function copyContent() {
 }
 
 .subagent-header:hover {
-  background: color-mix(in srgb, var(--agent-color) 6%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-raised) 62%, transparent);
 }
 
 .subagent-icon {
   width: 22px;
   height: 22px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--agent-color) 15%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--agent-color);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .subagent-name {
   font-size: 12px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--agent-color);
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
   letter-spacing: 0;
   flex-shrink: 0;
 }
@@ -699,15 +717,15 @@ function copyContent() {
 }
 
 .subagent-state-pill.running {
-  color: var(--accent-violet);
-  border-color: color-mix(in srgb, var(--accent-violet) 32%, transparent);
-  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
+  color: color-mix(in srgb, var(--platform-accent) 62%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 8%, transparent);
 }
 
 .subagent-state-pill.done {
-  color: var(--accent-emerald);
-  border-color: color-mix(in srgb, var(--accent-emerald) 32%, transparent);
-  background: color-mix(in srgb, var(--accent-emerald) 10%, transparent);
+  color: var(--text-faint);
+  border-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  background: transparent;
 }
 
 .subagent-stats {
@@ -718,7 +736,7 @@ function copyContent() {
 }
 
 .subagent-status.done {
-  color: var(--accent-emerald);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -766,13 +784,13 @@ function copyContent() {
 }
 
 .subagent-body {
-  border-top: 1px solid color-mix(in srgb, var(--agent-color) 10%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
   padding: 8px 12px 10px;
 }
 
 .subagent-body .segment-events {
   padding-left: 8px;
-  border-left-color: color-mix(in srgb, var(--agent-color) 20%, transparent);
+  border-left-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
 }
 
 /* Expand/collapse transition */

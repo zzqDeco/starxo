@@ -18,10 +18,14 @@
 - 修复 i18n 回退：`zh-CN`/`en-US` 归一化为 `zh`/`en`，缺失 key 先查语言包再 fallback，最后才 humanize，避免 `Title`、`Mode Label`、`Placeholder` 这类变量名式文案出现在 UI。
 - Agent 和工具时间线文案本地化，避免在中文界面里露出 `Coding Agent` 等内部英文标签。
 - 处理 GitHub review 指出的 workspace change 事件一致性：上传前固定 active sandbox id；不可解析工具结果不触发刷新；LSPEdit 多文件改动触发 broad refresh；前端 debounce 保留预览重载意图。
+- macOS 从 hidden inset titlebar 切回 Wails/native default titlebar，由系统接管交通灯、窗口阴影、标题栏拖拽和双击 zoom；自定义 Header 只承担应用 toolbar 职责。
+- `useNativeWindow` 保留为自定义 toolbar/非 macOS 区域的窗口 zoom fallback，优先使用 Wails `WindowToggleMaximise` / `WindowUnmaximise`。
+- Runtime V2 新工具名（`Read`、`Bash`、`Grep`、`ToolSearch`、`WebSearch` 等）补齐时间线本地化，避免工具面板继续显示裸 canonical name。
 
 ## Verification
 - `cd frontend && npm run build`
 - `go test ./...`
 - `wails build -skipbindings -trimpath`
 - Computer Use 检查 1224px 宽度：左侧无 240px 空白、右侧无双重重型面板、任务轨道不遮挡输入。
+- Computer Use 将 macOS app 窗口缩到 1000x640 后双击原生标题栏，确认窗口贴合到可用屏幕大小。
 - 用 `192.168.31.59` 回归 sandbox 创建、terminal 写入文件、workspace 自动刷新、agent 写入文件、销毁后清空状态。

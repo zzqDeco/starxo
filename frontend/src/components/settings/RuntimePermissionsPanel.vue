@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NPopconfirm, NTag } from 'naive-ui'
+import { NButton, NEmpty, NPopconfirm } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
@@ -26,11 +26,32 @@ let eventCleanups: Array<() => void> = []
 
 const activeSessionId = computed(() => sessionStore.activeSessionId || '')
 
-function riskType(risk?: string) {
-  if (risk === 'destructive') return 'error'
-  if (risk === 'execute') return 'warning'
-  if (risk === 'write') return 'info'
-  return 'default'
+function riskLabel(risk?: string) {
+  const labels: Record<string, string> = {
+    destructive: t('permissions.riskDestructive'),
+    execute: t('permissions.riskExecute'),
+    write: t('permissions.riskWrite'),
+    read: t('permissions.riskRead'),
+  }
+  return labels[risk || ''] || t('permissions.riskStandard')
+}
+
+function sourceLabel(source?: string) {
+  if (!source || source === 'runtime') return t('permissions.sourceRuntime')
+  if (source === 'mcp') return t('permissions.sourceMcp')
+  return source
+}
+
+function toolClassLabel(toolClass?: string) {
+  const labels: Record<string, string> = {
+    read: t('permissions.classRead'),
+    write: t('permissions.classWrite'),
+    execute: t('permissions.classExecute'),
+    destructive: t('permissions.classDestructive'),
+    task: t('permissions.classTask'),
+    tool: t('permissions.classTool'),
+  }
+  return labels[toolClass || ''] || t('permissions.classTool')
 }
 
 function formatTime(ms?: number) {
@@ -131,8 +152,8 @@ onUnmounted(() => {
             <span>{{ request.toolName }}</span>
           </div>
           <div class="row-meta">
-            <NTag size="small" :type="riskType(request.risk)">{{ request.risk }}</NTag>
-            <span>{{ request.source || 'runtime' }}</span>
+            <span :class="['risk-badge', request.risk || 'standard']">{{ riskLabel(request.risk) }}</span>
+            <span>{{ sourceLabel(request.source) }}</span>
             <span>{{ formatTime(request.createdAt) }}</span>
           </div>
         </article>
@@ -161,7 +182,7 @@ onUnmounted(() => {
         <article v-for="grant in grants" :key="grant.toolName" class="permission-row">
           <div class="row-main">
             <strong>{{ grant.toolName }}</strong>
-            <span>{{ grant.source || 'runtime' }} / {{ grant.toolClass || 'tool' }}</span>
+            <span>{{ sourceLabel(grant.source) }} / {{ toolClassLabel(grant.toolClass) }}</span>
           </div>
           <div class="row-actions">
             <span class="grant-time">{{ formatTime(grant.createdAt) }}</span>
@@ -227,7 +248,7 @@ onUnmounted(() => {
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--bg-deeper);
+  background: color-mix(in srgb, var(--platform-bg-window) 72%, transparent);
 }
 
 .row-main {
@@ -256,6 +277,34 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-sm);
   flex-shrink: 0;
+}
+
+.risk-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 74%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+
+.risk-badge.write,
+.risk-badge.execute {
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
+}
+
+.risk-badge.destructive {
+  color: var(--platform-danger);
+  border-color: color-mix(in srgb, var(--platform-danger) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-danger) 7%, transparent);
 }
 
 @media (max-width: 720px) {

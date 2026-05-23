@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NAlert, NButton, NCheckbox, NIcon, NInput, NTag, NTooltip } from 'naive-ui'
+import { NAlert, NButton, NCheckbox, NIcon, NInput, NTooltip } from 'naive-ui'
 import { CheckmarkCircle, ChevronDown, CopyOutline, GitBranch, GitMerge, Refresh, Search, Warning } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -184,9 +184,9 @@ onUnmounted(() => {
         <NIcon size="14"><GitBranch /></NIcon>
         {{ t('workspace.worktree.title') }}
       </span>
-      <NTag size="small" :type="state?.active ? 'info' : 'default'">
+      <span :class="['worktree-status-badge', { active: state?.active }]">
         {{ state?.active ? t('workspace.worktree.active') : t('workspace.worktree.inactive') }}
-      </NTag>
+      </span>
       <span v-if="state?.active" class="worktree-current" :title="state.worktreePath">{{ worktreeShortPath }}</span>
       <span class="worktree-chevron" :class="{ expanded }">
         <NIcon size="13"><ChevronDown /></NIcon>
@@ -245,13 +245,13 @@ onUnmounted(() => {
           <div class="review-summary">
             <span><strong>{{ reviewStatusLines.length }}</strong>{{ t('workspace.worktree.statusLines') }}</span>
             <span><strong>{{ diffStatLines.length }}</strong>{{ t('workspace.worktree.statLines') }}</span>
-            <NTag v-if="review?.truncated || review?.untrackedTruncated" size="small" type="warning">
+            <span v-if="review?.truncated || review?.untrackedTruncated" class="review-badge warning">
               {{ t('workspace.worktree.truncated') }}
-            </NTag>
-            <NTag v-else-if="!hasChanges" size="small" type="success">
-              <template #icon><NIcon><CheckmarkCircle /></NIcon></template>
+            </span>
+            <span v-else-if="!hasChanges" class="review-badge clean">
+              <NIcon size="12"><CheckmarkCircle /></NIcon>
               {{ t('workspace.worktree.clean') }}
-            </NTag>
+            </span>
           </div>
 
           <div class="review-grid">
@@ -299,7 +299,7 @@ onUnmounted(() => {
             :placeholder="t('workspace.worktree.commitPlaceholder')"
           />
           <NCheckbox v-model:checked="removeWorktree">{{ t('workspace.worktree.removeAfterMerge') }}</NCheckbox>
-          <NButton size="small" type="primary" :disabled="!hasReview || !hasChanges" :loading="merging" @click="mergeWorktree">
+          <NButton size="small" type="default" class="merge-btn" :disabled="!hasReview || !hasChanges" :loading="merging" @click="mergeWorktree">
             <template #icon><NIcon size="14"><GitMerge /></NIcon></template>
             {{ t('workspace.worktree.merge') }}
           </NButton>
@@ -336,10 +336,43 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
+}
+
+.worktree-status-badge,
+.review-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 74%, transparent);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+  padding: 2px 7px;
+}
+
+.worktree-status-badge.active {
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
+}
+
+.review-badge.clean {
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.review-badge.warning {
+  color: color-mix(in srgb, var(--platform-warning) 74%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-warning) 18%, transparent);
+  background: color-mix(in srgb, var(--platform-warning) 7%, transparent);
 }
 
 .worktree-current {
@@ -443,7 +476,7 @@ onUnmounted(() => {
   min-width: 0;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: var(--bg-deepest);
+  background: color-mix(in srgb, var(--platform-bg-window) 72%, transparent);
   padding: 7px;
   display: flex;
   flex-direction: column;
@@ -519,6 +552,23 @@ onUnmounted(() => {
 .merge-controls {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto auto;
+}
+
+.merge-btn {
+  --n-color: color-mix(in srgb, var(--platform-bg-raised) 88%, transparent) !important;
+  --n-color-hover: color-mix(in srgb, var(--platform-bg-hover) 46%, var(--platform-bg-raised)) !important;
+  --n-color-pressed: color-mix(in srgb, var(--platform-bg-active) 48%, var(--platform-bg-raised)) !important;
+  --n-color-focus: color-mix(in srgb, var(--platform-bg-hover) 46%, var(--platform-bg-raised)) !important;
+  --n-border: 1px solid var(--border-subtle) !important;
+  --n-border-hover: 1px solid color-mix(in srgb, var(--platform-accent) 24%, var(--border-subtle)) !important;
+  --n-border-pressed: 1px solid color-mix(in srgb, var(--platform-accent) 28%, var(--border-subtle)) !important;
+  --n-border-focus: 1px solid color-mix(in srgb, var(--platform-accent) 28%, var(--border-subtle)) !important;
+  --n-text-color: var(--text-primary) !important;
+  --n-text-color-hover: var(--text-primary) !important;
+  --n-text-color-pressed: var(--text-primary) !important;
+  --n-text-color-focus: var(--text-primary) !important;
+  --n-ripple-color: transparent !important;
+  font-weight: var(--fw-medium);
 }
 
 @media (max-width: 900px) {

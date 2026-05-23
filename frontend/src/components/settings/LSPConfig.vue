@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
-import { NButton, NForm, NFormItem, NIcon, NInput, NInputNumber, NSwitch, NTag } from 'naive-ui'
+import { NButton, NForm, NFormItem, NIcon, NInput, NInputNumber, NSwitch } from 'naive-ui'
 import { Add, CodeSlash, Refresh, Trash } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -64,6 +64,14 @@ async function refreshStatus() {
     loadingStatus.value = false
   }
 }
+
+function configStateLabel(disabled?: boolean) {
+  return disabled ? t('settings.lsp.stateDisabled') : t('settings.lsp.stateConfigured')
+}
+
+function serverStateLabel(alive?: boolean) {
+  return alive ? t('settings.lsp.stateAlive') : t('settings.lsp.stateStopped')
+}
 </script>
 
 <template>
@@ -119,20 +127,20 @@ async function refreshStatus() {
       <div class="status-head">
         <NIcon size="18"><CodeSlash /></NIcon>
         <strong>{{ status.enabled ? t('settings.lsp.enabled') : t('settings.lsp.disabled') }}</strong>
-        <NTag size="small">{{ status.servers?.length || 0 }} {{ t('settings.lsp.runningServers') }}</NTag>
+        <span class="status-badge neutral">{{ status.servers?.length || 0 }} {{ t('settings.lsp.runningServers') }}</span>
       </div>
       <div class="status-list">
         <div v-for="item in status.configured || []" :key="`configured:${item.language}:${item.executable}`" class="status-row">
           <span class="mono">{{ item.language }}</span>
-          <NTag size="small" :type="!item.disabled ? 'success' : 'default'">{{ !item.disabled ? 'configured' : 'disabled' }}</NTag>
+          <span :class="['status-badge', !item.disabled ? 'active' : 'neutral']">{{ configStateLabel(item.disabled) }}</span>
           <span>{{ item.command?.join(' ') || item.executable }}</span>
           <span v-if="item.builtIn">{{ t('settings.lsp.builtIn') }}</span>
         </div>
         <div v-for="server in status.servers || []" :key="`${server.sessionId}:${server.workspace}:${server.language}`" class="status-row">
           <span class="mono">{{ server.language }}</span>
-          <NTag size="small" :type="server.alive ? 'success' : 'error'">{{ server.alive ? 'alive' : 'stopped' }}</NTag>
+          <span :class="['status-badge', server.alive ? 'active' : 'danger']">{{ serverStateLabel(server.alive) }}</span>
           <span>{{ server.workspace }}</span>
-          <span>{{ server.requestCount }} req</span>
+          <span>{{ t('settings.lsp.requestCount', { count: server.requestCount || 0 }) }}</span>
         </div>
       </div>
     </section>
@@ -211,6 +219,32 @@ async function refreshStatus() {
 .status-row {
   min-height: 28px;
   overflow-wrap: anywhere;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 74%, transparent);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+
+.status-badge.active {
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
+}
+
+.status-badge.danger {
+  color: var(--platform-danger);
+  border-color: color-mix(in srgb, var(--platform-danger) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-danger) 7%, transparent);
 }
 
 @media (max-width: 720px) {

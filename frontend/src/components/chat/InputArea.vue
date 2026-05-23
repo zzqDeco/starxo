@@ -77,7 +77,8 @@ const attachedFileName = computed(() => {
           <NTooltip trigger="hover" placement="top">
             <template #trigger>
               <NButton
-                :type="agentMode === 'default' ? 'primary' : 'default'"
+                type="default"
+                :class="['mode-btn', { active: agentMode === 'default' }]"
                 :disabled="isStreaming || modeSwitching"
                 :loading="modeSwitching && agentMode !== 'default'"
                 @click="emit('switch-mode', 'default')"
@@ -91,7 +92,8 @@ const attachedFileName = computed(() => {
           <NTooltip trigger="hover" placement="top">
             <template #trigger>
               <NButton
-                :type="agentMode === 'plan' ? 'primary' : 'default'"
+                type="default"
+                :class="['mode-btn', { active: agentMode === 'plan' }]"
                 :disabled="isStreaming || modeSwitching"
                 :loading="modeSwitching && agentMode !== 'plan'"
                 @click="emit('switch-mode', 'plan')"
@@ -231,7 +233,7 @@ const attachedFileName = computed(() => {
   --n-ripple-color: transparent !important;
 }
 
-:global(:root[data-platform="macos"] .mode-buttons .n-button--primary-type){
+:global(:root[data-platform="macos"] .mode-buttons .mode-btn.active){
   --n-color: var(--platform-bg-raised) !important;
   --n-color-hover: var(--platform-bg-raised) !important;
   --n-color-pressed: var(--platform-bg-raised) !important;
@@ -245,8 +247,8 @@ const attachedFileName = computed(() => {
   box-shadow: var(--platform-shadow-1);
 }
 
-:global(:root[data-platform="macos"] .mode-buttons .n-button--primary-type .n-button__state-border),
-:global(:root[data-platform="macos"] .mode-buttons .n-button--primary-type .n-button__border){
+:global(:root[data-platform="macos"] .mode-buttons .mode-btn.active .n-button__state-border),
+:global(:root[data-platform="macos"] .mode-buttons .mode-btn.active .n-button__border){
   border-color: transparent !important;
 }
 

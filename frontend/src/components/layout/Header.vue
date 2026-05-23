@@ -6,6 +6,7 @@ import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()
@@ -30,10 +31,20 @@ function toggleLocale() {
   locale.value = locale.value === 'en' ? 'zh' : 'en'
   localStorage.setItem('locale', locale.value)
 }
+
+function isInteractiveTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest('button, a, input, textarea, select, [role="button"], .n-button, .n-input')
+}
+
+function handleTitlebarDoubleClick(event: MouseEvent) {
+  if (isInteractiveTarget(event.target)) return
+  void toggleWindowZoom()
+}
 </script>
 
 <template>
-  <header class="app-header wails-drag" role="banner">
+  <header class="app-header wails-drag" role="banner" @dblclick="handleTitlebarDoubleClick">
     <div class="header-left">
       <div class="app-title" aria-label="Starxo">
         <span class="title-icon" aria-hidden="true"><NIcon size="14"><Flash /></NIcon></span>
@@ -149,7 +160,7 @@ function toggleLocale() {
 
 :global(:root[data-platform="macos"] .app-header){
   height: 52px;
-  padding-left: 76px;
+  padding-left: 12px;
   padding-right: 12px;
   background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
 }
@@ -158,6 +169,7 @@ function toggleLocale() {
   display: flex;
   align-items: center;
   gap: var(--space-md);
+  --wails-draggable: no-drag;
 }
 
 .app-title {
@@ -186,6 +198,7 @@ function toggleLocale() {
   justify-content: center;
   min-width: 0;
   padding: 0 var(--space-lg);
+  --wails-draggable: no-drag;
 }
 
 .command-trigger {
@@ -275,6 +288,7 @@ function toggleLocale() {
   align-items: center;
   gap: var(--space-sm);
   flex-shrink: 0;
+  --wails-draggable: no-drag;
 }
 
 .header-btn {

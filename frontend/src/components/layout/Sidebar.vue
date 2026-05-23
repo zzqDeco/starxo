@@ -7,6 +7,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -133,10 +134,20 @@ function runStateClass(sessionId: string) {
   if (state.running) return 'running'
   return state.mode === 'plan' ? 'plan' : 'idle'
 }
+
+function handleTitlebarDoubleClick() {
+  void toggleWindowZoom()
+}
 </script>
 
 <template>
   <nav class="sidebar" :class="{ compact: props.compact }" :aria-label="t('sidebar.sessions')">
+    <div
+      class="sidebar-window-hit-area"
+      aria-hidden="true"
+      @dblclick="handleTitlebarDoubleClick"
+    ></div>
+
     <!-- New Chat Button -->
     <div class="sidebar-top">
       <NButton
@@ -303,6 +314,11 @@ function runStateClass(sessionId: string) {
   height: 100%;
   padding: var(--space-md);
   background: transparent;
+  position: relative;
+}
+
+.sidebar-window-hit-area {
+  display: none;
 }
 
 .sidebar-top {
@@ -445,7 +461,7 @@ function runStateClass(sessionId: string) {
 }
 
 .session-item.active {
-  background: var(--platform-bg-active);
+  background: color-mix(in srgb, var(--platform-bg-raised) 94%, var(--platform-bg-sidebar));
   border-color: transparent;
   box-shadow: none;
 }
@@ -457,7 +473,8 @@ function runStateClass(sessionId: string) {
 }
 
 :global(:root[data-platform="macos"] .session-item.active){
-  background: color-mix(in srgb, var(--platform-accent) 12%, var(--platform-bg-raised));
+  background: color-mix(in srgb, var(--platform-bg-raised) 94%, var(--platform-bg-sidebar));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 52%, transparent);
 }
 
 :global(:root[data-platform="macos"] .session-title){
@@ -481,7 +498,7 @@ function runStateClass(sessionId: string) {
 }
 
 .session-item.active .session-icon {
-  color: var(--platform-accent);
+  color: var(--text-primary);
 }
 
 .session-info {
@@ -557,6 +574,17 @@ function runStateClass(sessionId: string) {
   padding: 46px 8px 10px;
 }
 
+:global(:root[data-platform="macos"] .sidebar-window-hit-area){
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 42px;
+  z-index: 2;
+  --wails-draggable: no-drag;
+}
+
 :global(:root[data-platform="macos"] .section-label){
   padding: 0 6px;
   margin-bottom: 6px;
@@ -584,7 +612,7 @@ function runStateClass(sessionId: string) {
 
 .container-count {
   font-size: 9px;
-  color: var(--accent-cyan);
+  color: var(--text-faint);
   font-weight: 600;
 }
 
@@ -613,8 +641,8 @@ function runStateClass(sessionId: string) {
 }
 
 .session-run-badge.running {
-  color: var(--accent-cyan);
-  border-color: color-mix(in srgb, var(--platform-accent) 24%, transparent);
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
 }
 
 .session-run-badge.waiting {
@@ -623,8 +651,8 @@ function runStateClass(sessionId: string) {
 }
 
 .session-run-badge.plan {
-  color: var(--accent-violet);
-  border-color: color-mix(in srgb, var(--accent-violet) 24%, transparent);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
 }
 
 .run-pulse {

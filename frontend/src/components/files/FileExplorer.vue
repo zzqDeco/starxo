@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref, onMounted, computed } from 'vue'
-import { NTree, NButton, NIcon, NEmpty, NTag, NSpin } from 'naive-ui'
+import { NTree, NButton, NIcon, NEmpty, NSpin } from 'naive-ui'
 import type { TreeOption } from 'naive-ui'
 import { FolderOpen, Document, CloudUpload, CloudDownload, Refresh } from '@vicons/ionicons5'
 import type { FileInfo } from '@/types/config'

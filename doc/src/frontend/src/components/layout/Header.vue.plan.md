@@ -9,7 +9,8 @@
 
 ## 2. 核心职责
 - 顶部工作台导航栏组件，展示应用标题、命令面板入口、连接状态、运行任务入口、工作区抽屉开关、语言切换与设置按钮。
-- 作为 Wails 可拖拽标题区域（`wails-drag`）。
+- 作为应用 toolbar，承载工作台级入口；macOS 原生窗口标题栏由 Wails/native titlebar 提供。
+- 在自定义 toolbar 的非交互区域补充双击窗口 zoom fallback，但原生标题栏仍是 macOS 的主窗口操作区域。
 
 ## 3. 输入与输出
 - 输入来源: `Props.workspaceDrawerVisible`、`Props.runtimeTasksVisible`
@@ -47,8 +48,9 @@
 - 事件名从右侧面板切换语义迁移为工作区抽屉语义，父组件需同步。
 - 新增 `header.commandPalette / header.commandPlaceholder` i18n 键。
 - macOS 下作为原生 toolbar 处理：高度更紧凑、命令入口按 search field 呈现、图标按钮保持中性色。
+- macOS 不再给隐藏标题栏 traffic-light 预留 76px 左内边距；内容位于系统标题栏下方，避免伪原生 chrome 影响窗口双击 zoom。
 
 ## 7. 维护建议
 - 修改 emits 时同步更新 `MainLayout.vue` 的监听逻辑。
-- 保持 `wails-drag` 只用于可拖拽区域，避免影响按钮点击交互。
+- 保持 `wails-drag` 只用于可拖拽区域，避免影响按钮点击交互；需要系统级标题栏行为时优先依赖原生 titlebar。
 - scoped CSS 平台选择器必须写成 `:global(:root[data-platform="macos"] .selector)`，避免污染 `:root`。
