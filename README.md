@@ -192,7 +192,7 @@ Long sessions use token-aware context compaction. Starxo keeps recent turns in f
 
 Skill middleware loads workspace-local `.starxo/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`. AGENTS.md middleware reads `AGENTS.md` and `.starxo/AGENTS.md` as transient runtime context without writing those instructions into persisted chat history.
 
-The experimental Eino agentic provider path is available through `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto`, but the default remains the existing `*schema.Message` path (`agenticProtocol=off`). If agentic provider setup fails, Starxo logs the failure and falls back to the Message runtime.
+The experimental Eino agentic provider path is available through `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto`, but the default remains the existing `*schema.Message` path (`agenticProtocol=off`). If agentic provider setup fails, Starxo logs the failure and falls back to the Message runtime. `agent.runtime.toolSearchMode=model_native` currently falls back to client-side search until Starxo can pre-grant model-native deferred tool discovery safely.
 
 ### Production Build
 

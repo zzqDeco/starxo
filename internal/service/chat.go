@@ -720,14 +720,11 @@ func einoV09PotentiallySearchable(entry tools.CatalogEntry, permCtx tools.ToolPe
 }
 
 func useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol string) bool {
-	switch strings.TrimSpace(toolSearchMode) {
-	case "model_native":
-		return strings.TrimSpace(agenticProtocol) != "" && strings.TrimSpace(agenticProtocol) != llm.AgenticProtocolOff
-	case "auto":
-		return strings.TrimSpace(agenticProtocol) != "" && strings.TrimSpace(agenticProtocol) != llm.AgenticProtocolOff
-	default:
-		return false
-	}
+	// Starxo still gates deferred tool execution through per-session discovery state.
+	// Eino's model-native path puts dynamic tools in DeferredToolInfos, which can let
+	// a model invoke them before Starxo has recorded discovery. Keep client-side
+	// tool_search as the only active path until native search can pre-grant discovery.
+	return false
 }
 
 // ChatService manages chat interactions between the frontend and the AI agent.

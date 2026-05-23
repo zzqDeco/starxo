@@ -648,11 +648,11 @@ func TestEinoV09ToolSearchModeHonorsAgenticNativeConfig(t *testing.T) {
 	if useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOff) {
 		t.Fatalf("model_native without agentic protocol must stay on client-side search")
 	}
-	if !useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOpenAI) {
-		t.Fatalf("expected model_native with agentic protocol to enable model-native tool search")
+	if useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOpenAI) {
+		t.Fatalf("model_native must stay disabled while Starxo uses discovery-gated deferred loading")
 	}
-	if !useEinoV09ModelToolSearch("auto", llm.AgenticProtocolArk) {
-		t.Fatalf("expected auto with agentic protocol to enable model-native tool search")
+	if useEinoV09ModelToolSearch("auto", llm.AgenticProtocolArk) {
+		t.Fatalf("auto must stay on client-side search while Starxo uses discovery-gated deferred loading")
 	}
 }
 

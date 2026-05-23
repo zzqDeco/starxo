@@ -46,6 +46,16 @@ func TestNormalizeRuntimeAgentInputUsesConfiguredRegistry(t *testing.T) {
 	if input.SubagentType != "triage" || input.Isolation != "worktree" {
 		t.Fatalf("unexpected normalized configured subagent: %#v", input)
 	}
+
+	defaulted, err := normalizeRuntimeAgentInput(runtimeAgentInput{
+		Prompt: "inspect",
+	}, registry)
+	if err != nil {
+		t.Fatalf("normalize default configured subagent: %v", err)
+	}
+	if defaulted.SubagentType != "triage" || defaulted.Isolation != "worktree" {
+		t.Fatalf("expected omitted subagent_type to use registry default, got %#v", defaulted)
+	}
 }
 
 func TestRuntimeSubagentRegistryFromConfigPreservesPolicy(t *testing.T) {

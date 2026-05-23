@@ -203,9 +203,6 @@ func normalizeRuntimeAgentInput(input runtimeAgentInput, registry *agent.Subagen
 	input.Description = strings.TrimSpace(input.Description)
 	input.Prompt = strings.TrimSpace(input.Prompt)
 	input.SubagentType = strings.TrimSpace(input.SubagentType)
-	if input.SubagentType == "" {
-		input.SubagentType = "general"
-	}
 	normalizedType, err := registry.Normalize(input.SubagentType)
 	if err != nil {
 		return runtimeAgentInput{}, err

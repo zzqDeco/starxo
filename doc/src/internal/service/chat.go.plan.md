@@ -148,8 +148,8 @@
   - runtime deferred tools 和 MCP deferred tools 共用 Eino v0.9 ToolSearch、session discovery 和 permission pipeline
   - Eino `tool_search` 结果会回写到 Starxo `DiscoveredToolRecord`，保证 compact/restore 后已发现工具不会丢失
   - Eino ToolSearch 候选集复用 `CanSearchCatalogEntry`，只暴露当前 mode、permission 和 MCP server state 下实际可搜索的 deferred tools；pending MCP 只有存在 cached metadata 时才进入候选
-  - Eino `tool_search` JSON 结果和 model-native structured `ToolSearchResult` 都会回写 discovery state
-  - `agent.runtime.toolSearchMode` 会传入 Eino middleware；`model_native` / `auto` 仅在 agentic protocol 探测成功后使用 model-native tool search，否则保持 client-side search
+  - Eino `tool_search` JSON 结果和 structured `ToolSearchResult` 都会回写 discovery state
+  - `agent.runtime.toolSearchMode` 暂时统一落到 client-side search；Eino model-native deferred retrieval 会绕过 Starxo discovered-tool gate，需等 pre-grant 机制完成后再启用
   - web tools 当前由本地应用进程执行 HTTP 请求，`WebSearch` provider 来自 `agent.webSearch` 配置；其他 runtime tools 使用远端 sandbox operator
   - `LSP` tool 会先尝试常驻 language server；server 缺失或启动失败时由 tools 层 fallback 到 `rg`/`sed`
 - Eino v0.9 context middleware：

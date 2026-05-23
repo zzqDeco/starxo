@@ -192,7 +192,7 @@ Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active 
 
 Skill middleware 会加载工作区内 `.starxo/skills/<name>/SKILL.md` 和 `.claude/skills/<name>/SKILL.md`。AGENTS.md middleware 会把 `AGENTS.md` 与 `.starxo/AGENTS.md` 作为 transient runtime context 注入，不写入持久化聊天历史。
 
-实验性的 Eino agentic provider 路径可通过 `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto` 开启，但默认仍是现有 `*schema.Message` 路径（`agenticProtocol=off`）。如果 agentic provider 初始化失败，Starxo 会记录日志并回退到 Message runtime。
+实验性的 Eino agentic provider 路径可通过 `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto` 开启，但默认仍是现有 `*schema.Message` 路径（`agenticProtocol=off`）。如果 agentic provider 初始化失败，Starxo 会记录日志并回退到 Message runtime。`agent.runtime.toolSearchMode=model_native` 当前会回退到 client-side search，直到 Starxo 能安全地为 model-native deferred tool discovery 做 pre-grant。
 
 ### 生产构建
 
