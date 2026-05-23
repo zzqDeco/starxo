@@ -153,6 +153,8 @@
   - 桌面端可通过 ChatService 的 worktree UI API 审阅、合并或退出当前 session worktree
   - `WorktreeDiff` timeline 结果会在字段级截断后重新序列化，避免对整段 JSON 字符串做硬截断导致前端结构化 diff 展示失效
   - `Write` / `Edit` timeline 结果同样会对 patch 字段做 JSON-safe 截断，保证前端结构化 diff UI 可解析
+  - runtime tool 产生 workspace side effect 时发出 `workspace:changed`：覆盖 `Bash`、`Write`、`Edit`、`LSPEdit`、`NotebookEdit` 和 worktree 切换/merge，前端可自动刷新文件树与预览
+  - workspace change path 只来自可解析的结构化结果；无法解析的 mutating result 不触发刷新。`LSPEdit` 多文件结果使用 broad refresh，避免只刷新首个文件。
 - Runtime LSP manager：
   - 按 `sessionID + workspacePath + language` 复用远端常驻进程
   - `UpdateSandbox` / `InvalidateRunner` 会关闭所有 LSP server，避免跨 SSH/sandbox 配置复用旧进程

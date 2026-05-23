@@ -31,6 +31,7 @@
   - 显示统计信息: tool calls 数 + messages 数
   - 显示最后动作摘要（`lastAction`），用于折叠态快速浏览
 - **Agent 颜色/标签系统**: agentColor() / agentLabel() / agentIconType() 按 agent 名称映射颜色、显示名和图标类型
+  - agentLabel 使用 i18n 文案，不在中文界面暴露 `Coding Agent`、`Code Writer` 等内部英文标签。
 - **模板结构**:
   - System: 红色提示条
   - User: 右对齐蓝色气泡，显示纯文本
@@ -47,6 +48,7 @@
 - Agent 分段逻辑修改影响 assistant 消息的展示结构
 - Agent 颜色系统修改需同步 TimelineEventItem 中的 agentColor
 - 子代理折叠行为修改影响用户交互体验
+- macOS 样式将 assistant avatar、segment header、sub-agent 卡片降为低对比度原生列表风格，避免消息区呈现网页卡片堆叠。
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

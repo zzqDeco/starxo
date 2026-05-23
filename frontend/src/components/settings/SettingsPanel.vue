@@ -252,9 +252,10 @@ onBeforeUnmount(() => {
 }
 
 .settings-nav-item.active {
-  background: var(--platform-bg-active);
-  color: var(--accent-cyan);
+  background: color-mix(in srgb, var(--platform-bg-raised) 78%, transparent);
+  color: var(--text-primary);
   border-left-color: transparent;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 50%, transparent);
 }
 
 .nav-label {
@@ -336,7 +337,8 @@ onBeforeUnmount(() => {
   }
   .settings-nav-item.active {
     border-left: none;
-    border-bottom-color: var(--accent-cyan);
+    border-bottom-color: color-mix(in srgb, var(--platform-accent) 50%, transparent);
+    box-shadow: none;
   }
 }
 </style>

@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NIcon, NTag, NTooltip } from 'naive-ui'
+import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { AlertCircle, CheckmarkCircle, Close, Copy, List, Refresh, Reload, StopCircle, Terminal, Time } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -44,20 +44,33 @@ function isDoneStatus(status?: string) {
   return status === 'completed' || status === 'stopped' || status === 'killed'
 }
 
-function statusType(status?: string) {
-  if (status === 'failed') return 'error'
-  if (status === 'stopped' || status === 'killed') return 'warning'
-  if (status === 'completed') return 'success'
-  if (isRunningStatus(status)) return 'info'
-  return 'default'
-}
-
 function statusIcon(status?: string) {
   if (status === 'completed') return CheckmarkCircle
   if (status === 'failed') return AlertCircle
   if (status === 'stopped' || status === 'killed') return StopCircle
   if (isRunningStatus(status)) return Reload
   return Time
+}
+
+function statusLabel(status?: string) {
+  const labels: Record<string, string> = {
+    pending: t('runtimeTasks.status.pending'),
+    running: t('runtimeTasks.status.running'),
+    completed: t('runtimeTasks.status.completed'),
+    failed: t('runtimeTasks.status.failed'),
+    stopped: t('runtimeTasks.status.stopped'),
+    killed: t('runtimeTasks.status.killed'),
+  }
+  return labels[status || ''] || t('runtimeTasks.status.unknown')
+}
+
+function taskTypeLabel(type?: string) {
+  const labels: Record<string, string> = {
+    bash: t('runtimeTasks.type.bash'),
+    agent: t('runtimeTasks.type.agent'),
+    subagent: t('runtimeTasks.type.agent'),
+  }
+  return labels[type || ''] || t('runtimeTasks.type.task')
 }
 
 function upsertTask(task: tools.RuntimeTaskSnapshot) {
@@ -279,10 +292,10 @@ onUnmounted(() => {
             <span class="task-row-main">
               <span class="task-row-title" :title="taskTitle(task)">{{ taskTitle(task) }}</span>
               <span class="task-row-meta">
-                {{ task.type || 'task' }} · {{ formatTime(task.startedAt) }} · {{ formatDuration(task) }}
+                {{ taskTypeLabel(task.type) }} · {{ formatTime(task.startedAt) }} · {{ formatDuration(task) }}
               </span>
             </span>
-            <NTag size="small" :type="statusType(task.status)">{{ task.status || 'unknown' }}</NTag>
+            <span :class="['task-status-pill', task.status || 'unknown']">{{ statusLabel(task.status) }}</span>
           </button>
         </section>
 
@@ -326,8 +339,8 @@ onUnmounted(() => {
 
             <div class="detail-meta">
               <span>{{ selectedTask.id }}</span>
-              <span>{{ selectedTask.type }}</span>
-              <span>{{ selectedTask.status }}</span>
+              <span>{{ taskTypeLabel(selectedTask.type) }}</span>
+              <span>{{ statusLabel(selectedTask.status) }}</span>
               <span>{{ formatDuration(selectedTask) }}</span>
               <span>{{ formatBytes((selectedTask as any).outputSize || output?.size || 0) }}</span>
             </div>
@@ -367,6 +380,11 @@ onUnmounted(() => {
   transition: opacity var(--transition-ui);
 }
 
+:global(:root[data-platform="macos"] .tasks-backdrop){
+  background: transparent;
+  backdrop-filter: none;
+}
+
 .runtime-tasks-shell.open .tasks-backdrop {
   opacity: 1;
 }
@@ -385,6 +403,14 @@ onUnmounted(() => {
   transform: translateX(100%);
   transition: transform 210ms var(--ease-out);
   outline: none;
+}
+
+:global(:root[data-platform="macos"] .runtime-tasks-panel){
+  top: 52px;
+  width: min(780px, 92vw);
+  background: color-mix(in srgb, var(--platform-bg-elevated) 92%, transparent);
+  backdrop-filter: blur(24px) saturate(1.35);
+  box-shadow: -12px 0 28px rgba(0, 0, 0, 0.14);
 }
 
 .runtime-tasks-shell.open .runtime-tasks-panel {
@@ -421,6 +447,12 @@ onUnmounted(() => {
   font-weight: var(--fw-bold);
   letter-spacing: 0.7px;
   text-transform: uppercase;
+}
+
+:global(:root[data-platform="macos"] .tasks-kicker){
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .tasks-head-actions {
@@ -504,18 +536,25 @@ onUnmounted(() => {
   border-color: var(--border-strong);
 }
 
+:global(:root[data-platform="macos"] .task-row:hover),
+:global(:root[data-platform="macos"] .task-row.active){
+  background: color-mix(in srgb, var(--platform-bg-raised) 82%, transparent);
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 50%, transparent);
+}
+
 .task-status-icon {
   color: var(--text-faint);
 }
 
 .task-status-icon.running,
 .task-status-icon.pending {
-  color: var(--accent-cyan);
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
   animation: spin 1.3s linear infinite;
 }
 
 .task-status-icon.completed {
-  color: var(--accent-emerald);
+  color: var(--text-faint);
 }
 
 .task-status-icon.failed {
@@ -524,7 +563,36 @@ onUnmounted(() => {
 
 .task-status-icon.stopped,
 .task-status-icon.killed {
-  color: var(--accent-amber);
+  color: var(--text-muted);
+}
+
+.task-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 42px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 72%, transparent);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+
+.task-status-pill.running,
+.task-status-pill.pending {
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
+  border-color: color-mix(in srgb, var(--platform-accent) 14%, transparent);
+}
+
+.task-status-pill.failed {
+  color: var(--platform-danger);
+  background: color-mix(in srgb, var(--platform-danger) 7%, transparent);
+  border-color: color-mix(in srgb, var(--platform-danger) 16%, transparent);
 }
 
 .task-row-main {

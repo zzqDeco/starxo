@@ -32,7 +32,7 @@ func main() {
 		},
 		BackgroundColour: options.NewRGBA(246, 246, 247, 0),
 		Mac: &mac.Options{
-			TitleBar:             mac.TitleBarHiddenInset(),
+			TitleBar:             mac.TitleBarDefault(),
 			Appearance:           mac.DefaultAppearance,
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,

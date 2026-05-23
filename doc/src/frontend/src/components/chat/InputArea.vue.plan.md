@@ -44,7 +44,9 @@
 ## 6. 变更影响面
 - 模式切换从 ChatPanel 顶部工具条下沉到 composer，输入区成为主要操作面板。
 - 输入区视觉密度降低，和 ChatPanel 底部栅格统一。
+- macOS 下模式切换按原生 segmented control 处理，active 状态使用中性 raised segment，不使用大面积蓝色 primary button。
 
 ## 7. 维护建议
 - 若后续引入多模态附件，优先扩展 `attachedFile` 结构为对象数组。
 - Wails runtime 类型建议后续补充声明，减少 `@ts-ignore` 依赖。
+- 在 scoped CSS 内覆盖 Naive UI 子节点时，macOS 平台选择器应使用 `:global(:root[data-platform="macos"] .mode-buttons .n-button)`，不要在 `:global(...)` 内嵌 `:deep(...)`。

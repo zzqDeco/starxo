@@ -6,6 +6,7 @@ import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()
@@ -30,10 +31,20 @@ function toggleLocale() {
   locale.value = locale.value === 'en' ? 'zh' : 'en'
   localStorage.setItem('locale', locale.value)
 }
+
+function isInteractiveTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest('button, a, input, textarea, select, [role="button"], .n-button, .n-input')
+}
+
+function handleTitlebarDoubleClick(event: MouseEvent) {
+  if (isInteractiveTarget(event.target)) return
+  void toggleWindowZoom()
+}
 </script>
 
 <template>
-  <header class="app-header wails-drag" role="banner">
+  <header class="app-header wails-drag" role="banner" @dblclick="handleTitlebarDoubleClick">
     <div class="header-left">
       <div class="app-title" aria-label="Starxo">
         <span class="title-icon" aria-hidden="true"><NIcon size="14"><Flash /></NIcon></span>
@@ -147,14 +158,18 @@ function toggleLocale() {
   position: relative;
 }
 
-:global(:root[data-platform="macos"]) .app-header {
-  padding-left: 76px;
+:global(:root[data-platform="macos"] .app-header){
+  height: 52px;
+  padding-left: 12px;
+  padding-right: 12px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: var(--space-md);
+  --wails-draggable: no-drag;
 }
 
 .app-title {
@@ -165,7 +180,7 @@ function toggleLocale() {
 }
 
 .title-icon {
-  color: var(--accent-cyan);
+  color: var(--platform-accent);
   display: flex;
 }
 
@@ -183,6 +198,7 @@ function toggleLocale() {
   justify-content: center;
   min-width: 0;
   padding: 0 var(--space-lg);
+  --wails-draggable: no-drag;
 }
 
 .command-trigger {
@@ -201,6 +217,14 @@ function toggleLocale() {
   transition: border-color var(--transition-ui), background var(--transition-ui), box-shadow var(--transition-ui);
 }
 
+:global(:root[data-platform="macos"] .command-trigger){
+  height: 34px;
+  max-width: 520px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 72%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--border-subtle) 80%, transparent);
+}
+
 .command-trigger:hover,
 .command-trigger:focus-visible {
   background: var(--platform-bg-raised);
@@ -209,7 +233,7 @@ function toggleLocale() {
 }
 
 .command-icon {
-  color: var(--accent-cyan);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -234,6 +258,15 @@ function toggleLocale() {
   color: var(--text-primary);
 }
 
+:global(:root[data-platform="macos"] .command-main){
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+:global(:root[data-platform="macos"] .command-sub){
+  font-size: 10.5px;
+}
+
 .command-sub {
   font-size: var(--fs-2xs);
   color: var(--text-faint);
@@ -255,6 +288,7 @@ function toggleLocale() {
   align-items: center;
   gap: var(--space-sm);
   flex-shrink: 0;
+  --wails-draggable: no-drag;
 }
 
 .header-btn {

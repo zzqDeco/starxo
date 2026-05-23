@@ -101,6 +101,7 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 	if runtime == nil {
 		return FileInfoDTO{}, fmt.Errorf("sandbox runtime manager is not available")
 	}
+	activeContainerID := s.sandbox.ActiveContainerRegID()
 
 	// Get file info
 	info, err := os.Stat(localPath)
@@ -115,6 +116,12 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 	if err := transfer.UploadToContainer(s.ctx, localPath, containerPath, runtime); err != nil {
 		return FileInfoDTO{}, fmt.Errorf("upload failed: %w", err)
 	}
+	wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+		ContainerID: activeContainerID,
+		Path:        containerPath,
+		Source:      "file",
+		Action:      "upload",
+	})
 
 	return FileInfoDTO{
 		Name:     baseName,

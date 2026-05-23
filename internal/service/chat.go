@@ -1851,7 +1851,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				run.addToolResult(msg.ToolCallID, msg.Content)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
 					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
-					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, msg.Content)
+					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, call.args, msg.Content)
 				}
 				// Mark this tool call as resolved
 				delete(pendingToolCalls, msg.ToolCallID)
@@ -2159,16 +2159,147 @@ func shrinkTimelineText(value string, removeBytes int) (string, bool) {
 	return value[:target-len(marker)] + marker, true
 }
 
-func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, result string) {
+func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, argsJSON, result string) {
 	if strings.HasPrefix(strings.TrimSpace(result), "Error:") {
 		return
 	}
 	switch toolName {
 	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
 		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sessionID, "action": toolName})
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{SessionID: sessionID, Source: "agent", Action: toolName})
 	case tools.RuntimeToolWorktreeDiff:
 		wailsEmit(s.ctx, "runtime:worktree_reviewed", map[string]string{"sessionId": sessionID})
 	}
+	if path, ok := runtimeToolWorkspaceChangePath(toolName, argsJSON, result); ok {
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+			SessionID: sessionID,
+			Path:      path,
+			Source:    "agent",
+			Action:    toolName,
+		})
+	}
+}
+
+func runtimeToolWorkspaceChangePath(toolName, argsJSON, result string) (string, bool) {
+	switch toolName {
+	case tools.RuntimeToolWrite:
+		var out tools.WriteOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil && out.FilePath != "" {
+			return out.FilePath, true
+		}
+		return "", false
+	case "write_file":
+		var legacyOut struct {
+			Success bool `json:"success"`
+		}
+		if err := json.Unmarshal([]byte(result), &legacyOut); err == nil && legacyOut.Success {
+			if path := runtimeToolArgPath(argsJSON); path != "" {
+				return path, true
+			}
+		}
+		return "", false
+	case tools.RuntimeToolEdit:
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil && out.FilePath != "" {
+			return out.FilePath, true
+		}
+		return "", false
+	case "str_replace_editor":
+		var out tools.EditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil && out.FilePath != "" {
+			return out.FilePath, true
+		}
+		args := runtimeToolArgs(argsJSON)
+		if strings.EqualFold(args.Command, "view") {
+			return "", false
+		}
+		if path := args.FilePathOrPath(); path != "" {
+			return path, true
+		}
+		return "", false
+	case tools.RuntimeToolLSPEdit:
+		var out tools.LSPEditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			if len(out.ChangedFiles) > 1 {
+				return "", out.EditCount > 0
+			}
+			if len(out.ChangedFiles) > 0 {
+				return out.ChangedFiles[0], out.EditCount > 0
+			}
+			return out.FilePath, out.EditCount > 0
+		}
+		return "", false
+	case tools.RuntimeToolNotebookEdit:
+		var out tools.NotebookEditOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return out.FilePath, out.Command != "view"
+		}
+		return "", false
+	case tools.RuntimeToolBash, "shell_execute":
+		if !bashCommandLooksMutating(runtimeToolArgs(argsJSON).Command) {
+			return "", false
+		}
+		var out tools.BashOutput
+		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			return "", out.BackgroundTaskID == "" && out.ExitCode == 0
+		}
+		var shellOut tools.ShellOutput
+		if err := json.Unmarshal([]byte(result), &shellOut); err == nil {
+			return "", shellOut.ExitCode == 0
+		}
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+type runtimeToolArgsSnapshot struct {
+	Path     string `json:"path"`
+	FilePath string `json:"file_path"`
+	Command  string `json:"command"`
+}
+
+func (a runtimeToolArgsSnapshot) FilePathOrPath() string {
+	if a.FilePath != "" {
+		return a.FilePath
+	}
+	return a.Path
+}
+
+func runtimeToolArgs(argsJSON string) runtimeToolArgsSnapshot {
+	var args runtimeToolArgsSnapshot
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+	return args
+}
+
+func runtimeToolArgPath(argsJSON string) string {
+	return runtimeToolArgs(argsJSON).FilePathOrPath()
+}
+
+func bashCommandLooksMutating(command string) bool {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return false
+	}
+	lowered := strings.ToLower(cmd)
+	if strings.ContainsAny(lowered, "><") {
+		return true
+	}
+	mutatingNeedles := []string{
+		"touch ", "mkdir ", "rm ", "mv ", "cp ", "chmod ", "chown ", "ln ",
+		"tee ", "sed -i", "perl -i", "patch ", "git apply", "git checkout",
+		"git switch", "git restore", "git reset", "git clean", "go mod tidy",
+		"gofmt -w", "prettier --write", "npm install", "npm i ", "pnpm install",
+		"yarn install", "bun install", "cargo add", "cargo fmt", "ruff --fix",
+		"python -m pip install", "pip install",
+	}
+	for _, needle := range mutatingNeedles {
+		needle = strings.TrimSpace(needle)
+		if strings.Contains(lowered, needle+" ") || strings.HasPrefix(lowered, needle+" ") || lowered == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -3760,7 +3891,7 @@ func (s *ChatService) buildAgentContext() agent.AgentContext {
 			Timestamp: time.Now().UnixMilli(),
 		}, sessionID)
 		if eventType == "tool_result" {
-			s.emitRuntimeWorktreeToolEvent(sessionID, toolName, result)
+			s.emitRuntimeWorktreeToolEvent(sessionID, toolName, toolArgs, result)
 		}
 	}
 

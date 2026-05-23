@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
-import { NButton, NForm, NFormItem, NIcon, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
+import { NButton, NForm, NFormItem, NIcon, NInput, NInputNumber, NSelect, NSwitch } from 'naive-ui'
 import { Flash, Search } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -33,8 +33,8 @@ const defaultProviderOptions = computed(() => {
     .filter((provider) => provider.name)
     .map((provider) => ({ label: provider.name, value: provider.name }))
   return [
-    { label: 'duckduckgo', value: 'duckduckgo' },
-    { label: 'tinyfish', value: 'tinyfish' },
+    { label: 'DuckDuckGo', value: 'duckduckgo' },
+    { label: 'TinyFish', value: 'tinyfish' },
     ...configured.filter((provider) => provider.value !== 'tinyfish' && provider.value !== 'duckduckgo'),
   ]
 })
@@ -82,11 +82,11 @@ async function runSmokeTest() {
   }
 }
 
-function statusType(status?: string) {
-  if (status === 'pass') return 'success'
-  if (status === 'warn') return 'warning'
-  if (status === 'fail') return 'error'
-  return 'default'
+function statusLabel(status?: string) {
+  if (status === 'pass') return t('settings.webSearch.statusPass')
+  if (status === 'warn') return t('settings.webSearch.statusWarn')
+  if (status === 'fail') return t('settings.webSearch.statusFail')
+  return t('settings.webSearch.statusUnknown')
 }
 </script>
 
@@ -154,9 +154,9 @@ function statusType(status?: string) {
       <div class="diagnostics-head">
         <NIcon size="18"><Search /></NIcon>
         <strong>{{ smoke.message }}</strong>
-        <NTag size="small" :type="smoke.ok ? 'success' : 'error'">
+        <span :class="['status-badge', smoke.ok ? 'active' : 'danger']">
           {{ smoke.ok ? t('settings.webSearch.ready') : t('settings.webSearch.needsFix') }}
-        </NTag>
+        </span>
       </div>
       <div v-if="smoke.url" class="smoke-url">{{ smoke.provider }} · {{ smoke.url }}</div>
       <div v-if="smoke.results?.length" class="smoke-results">
@@ -170,14 +170,16 @@ function statusType(status?: string) {
       <div class="diagnostics-head">
         <NIcon size="18"><Search /></NIcon>
         <strong>{{ diagnostics.summary }}</strong>
-        <NTag size="small" :type="diagnostics.available ? 'success' : 'error'">
+        <span :class="['status-badge', diagnostics.available ? 'active' : 'danger']">
           {{ diagnostics.available ? t('settings.webSearch.ready') : t('settings.webSearch.needsFix') }}
-        </NTag>
+        </span>
       </div>
       <div class="provider-results">
         <div v-for="provider in diagnostics.providers || []" :key="provider.name" class="provider-result">
           <span class="provider-name">{{ provider.name }}</span>
-          <NTag size="small" :type="statusType(provider.status)">{{ provider.status }}</NTag>
+          <span :class="['status-badge', provider.status === 'pass' ? 'active' : provider.status === 'fail' ? 'danger' : 'warning']">
+            {{ statusLabel(provider.status) }}
+          </span>
           <span class="provider-message">{{ provider.message }}</span>
         </div>
       </div>
@@ -258,6 +260,38 @@ function statusType(status?: string) {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 74%, transparent);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+
+.status-badge.active {
+  color: color-mix(in srgb, var(--platform-accent) 64%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-accent) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
+}
+
+.status-badge.warning {
+  color: color-mix(in srgb, var(--platform-warning) 74%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--platform-warning) 18%, transparent);
+  background: color-mix(in srgb, var(--platform-warning) 7%, transparent);
+}
+
+.status-badge.danger {
+  color: var(--platform-danger);
+  border-color: color-mix(in srgb, var(--platform-danger) 16%, transparent);
+  background: color-mix(in srgb, var(--platform-danger) 7%, transparent);
 }
 
 .provider-result {

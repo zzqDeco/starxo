@@ -194,7 +194,7 @@ wails build
 
 Output goes to `build/bin/`.
 
-Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens.
+Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens. macOS builds declare Local Network access because Starxo connects to LAN sandbox hosts over SSH; allow the system prompt if you use `192.168.x.x` or `.local` remotes.
 
 ### Tagged Release
 

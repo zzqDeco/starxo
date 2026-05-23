@@ -35,7 +35,7 @@ function statusClass(status: UnifiedTaskStatus) {
 </script>
 
 <template>
-  <section class="task-float" :class="{ expanded }">
+  <section v-if="taskStats.total > 0" class="task-float" :class="{ expanded }">
     <button type="button" class="task-head" @click="toggleExpanded">
       <span class="task-title">{{ t('taskRail.title') }}</span>
       <span class="task-summary">{{ taskStats.done }}/{{ taskStats.total }}</span>
@@ -85,14 +85,15 @@ function statusClass(status: UnifiedTaskStatus) {
   --task-space-2: 8px;
   --task-space-3: 10px;
   --task-status-todo: var(--text-faint);
-  --task-status-doing: var(--accent-cyan);
-  --task-status-done: var(--accent-emerald);
-  --task-status-blocked: var(--accent-rose);
+  --task-status-doing: color-mix(in srgb, var(--platform-accent) 62%, var(--text-muted));
+  --task-status-done: var(--text-faint);
+  --task-status-blocked: var(--platform-danger);
 
+  position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(23, 26, 45, 0.9) 0%, rgba(18, 21, 35, 0.95) 100%);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  border-radius: var(--radius-lg);
+  background: var(--platform-bg-toolbar);
+  box-shadow: none;
 }
 
 .task-head {
@@ -112,14 +113,14 @@ function statusClass(status: UnifiedTaskStatus) {
 .task-title {
   font-size: var(--task-font-xs);
   font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-faint);
 }
 
 .task-summary {
   font-size: var(--task-font-sm);
-  color: var(--task-status-done);
+  color: var(--text-muted);
   font-family: var(--font-mono);
 }
 
@@ -152,12 +153,12 @@ function statusClass(status: UnifiedTaskStatus) {
 
 .metric.doing {
   color: var(--task-status-doing);
-  background: color-mix(in srgb, var(--task-status-doing) 12%, transparent);
+  background: color-mix(in srgb, var(--platform-accent) 7%, transparent);
 }
 
 .metric.blocked {
   color: var(--task-status-blocked);
-  background: color-mix(in srgb, var(--task-status-blocked) 12%, transparent);
+  background: color-mix(in srgb, var(--task-status-blocked) 8%, transparent);
 }
 
 .task-chevron {
@@ -170,26 +171,35 @@ function statusClass(status: UnifiedTaskStatus) {
 }
 
 .task-progress {
-  height: 3px;
+  height: 2px;
   margin: 0 var(--task-space-3) var(--task-space-2);
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
 }
 
 .task-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--task-status-doing), var(--task-status-done));
+  background: color-mix(in srgb, var(--platform-accent) 58%, var(--text-muted));
   transition: width 220ms ease;
 }
 
 .task-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
   max-height: 180px;
   overflow: auto;
-  padding: 0 var(--task-space-2) var(--task-space-2);
+  padding: var(--task-space-2);
   display: flex;
   flex-direction: column;
   gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--platform-bg-elevated);
+  box-shadow: var(--elev-2);
 }
 
 .task-empty {
@@ -205,7 +215,7 @@ function statusClass(status: UnifiedTaskStatus) {
   gap: var(--task-space-1);
   padding: var(--task-space-1) var(--task-space-2);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
   border: 1px solid transparent;
 }
 

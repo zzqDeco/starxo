@@ -22,7 +22,7 @@
   - `Width: 1400`, `Height: 900`
   - `MinWidth: 1000`, `MinHeight: 600`
   - `WindowStartState: options.Maximised`（默认启动最大化）
-  - macOS 使用 hidden inset titlebar、system appearance、transparent/translucent window 和 About 信息
+  - macOS 使用 Wails/native default titlebar、system appearance、transparent/translucent window 和 About 信息
   - Windows 使用 system theme、Mica backdrop 和 light/dark titlebar custom theme
   - Linux 设置 app icon、program name 和 WebKit GPU policy
 - 生命周期:
@@ -46,6 +46,7 @@
 - 修改 `Bind` 会影响前端 IPC 能力。
 - 修改窗口参数会直接影响桌面端启动体验。
 - `WindowStartState` 变更会影响默认窗口状态（当前为最大化）。
+- macOS titlebar 策略会影响系统级窗口行为；默认 titlebar 由系统处理交通灯、标题栏双击 zoom、拖拽和窗口菜单一致性。
 
 ## 7. 维护建议
 - 新增后端服务时必须加入 `Bind`。

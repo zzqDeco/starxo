@@ -56,6 +56,74 @@ func TestTimelineToolResultLimitKeepsWorktreeDiffReview(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolWorkspaceChangePath(t *testing.T) {
+	writeRaw, err := json.Marshal(tools.WriteOutput{FilePath: "/workspace/a.txt"})
+	if err != nil {
+		t.Fatalf("marshal write: %v", err)
+	}
+	path, ok := runtimeToolWorkspaceChangePath(tools.RuntimeToolWrite, "", string(writeRaw))
+	if !ok || path != "/workspace/a.txt" {
+		t.Fatalf("expected write workspace change path, got path=%q ok=%v", path, ok)
+	}
+
+	legacyWriteRaw, err := json.Marshal(tools.WriteFileOutput{Success: true})
+	if err != nil {
+		t.Fatalf("marshal legacy write: %v", err)
+	}
+	path, ok = runtimeToolWorkspaceChangePath("write_file", `{"path":"/workspace/legacy.txt"}`, string(legacyWriteRaw))
+	if !ok || path != "/workspace/legacy.txt" {
+		t.Fatalf("expected legacy write to use args path, got path=%q ok=%v", path, ok)
+	}
+
+	path, ok = runtimeToolWorkspaceChangePath("str_replace_editor", `{"command":"str_replace","path":"/workspace/edit.txt"}`, "File has been edited")
+	if !ok || path != "/workspace/edit.txt" {
+		t.Fatalf("expected legacy str_replace_editor to use args path, got path=%q ok=%v", path, ok)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath("str_replace_editor", `{"command":"view","path":"/workspace/edit.txt"}`, "file contents"); ok || path != "" {
+		t.Fatalf("expected str_replace view not to refresh, got path=%q ok=%v", path, ok)
+	}
+
+	bashRaw, err := json.Marshal(tools.BashOutput{ExitCode: 0})
+	if err != nil {
+		t.Fatalf("marshal bash: %v", err)
+	}
+	path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolBash, `{"command":"echo ok > a.txt"}`, string(bashRaw))
+	if !ok || path != "" {
+		t.Fatalf("expected successful mutating bash to refresh workspace without path, got path=%q ok=%v", path, ok)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolBash, `{"command":"pwd"}`, string(bashRaw)); ok || path != "" {
+		t.Fatalf("expected read-only bash not to refresh workspace, got path=%q ok=%v", path, ok)
+	}
+
+	failedBashRaw, err := json.Marshal(tools.BashOutput{ExitCode: 1})
+	if err != nil {
+		t.Fatalf("marshal failed bash: %v", err)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolBash, `{"command":"touch a.txt"}`, string(failedBashRaw)); ok || path != "" {
+		t.Fatalf("expected failed bash not to emit workspace change, got path=%q ok=%v", path, ok)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolWrite, "", "recoverable write error"); ok || path != "" {
+		t.Fatalf("expected unparseable write result not to emit workspace change, got path=%q ok=%v", path, ok)
+	}
+
+	lspRaw, err := json.Marshal(tools.LSPEditOutput{EditCount: 2, ChangedFiles: []string{"/workspace/a.go", "/workspace/b.go"}})
+	if err != nil {
+		t.Fatalf("marshal lsp edit: %v", err)
+	}
+	path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolLSPEdit, "", string(lspRaw))
+	if !ok || path != "" {
+		t.Fatalf("expected multi-file lsp edit to refresh broadly, got path=%q ok=%v", path, ok)
+	}
+
+	notebookRaw, err := json.Marshal(tools.NotebookEditOutput{FilePath: "/workspace/a.ipynb", Command: "view"})
+	if err != nil {
+		t.Fatalf("marshal notebook: %v", err)
+	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolNotebookEdit, "", string(notebookRaw)); ok || path != "/workspace/a.ipynb" {
+		t.Fatalf("expected notebook view not to refresh, got path=%q ok=%v", path, ok)
+	}
+}
+
 func TestTimelineToolResultContentKeepsLargeWorktreeDiffJSONParseable(t *testing.T) {
 	result := tools.WorktreeDiffOutput{
 		WorkspacePath:      "/workspace",

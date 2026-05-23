@@ -235,6 +235,10 @@ onUnmounted(() => {
   padding: var(--space-lg) 0;
 }
 
+:global(:root[data-platform="macos"] .messages-area){
+  padding: 14px 0;
+}
+
 .messages-list {
   max-width: var(--chat-content-max-width);
   margin: 0 auto;
@@ -242,6 +246,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
+}
+
+:global(:root[data-platform="macos"] .messages-list){
+  gap: 12px;
 }
 
 .empty-state {
@@ -325,6 +333,13 @@ onUnmounted(() => {
   font-size: var(--fs-xs);
 }
 
+:global(:root[data-platform="macos"] .capability-item),
+:global(:root[data-platform="macos"] .hint-card){
+  background: color-mix(in srgb, var(--platform-bg-raised) 62%, transparent);
+  border-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  box-shadow: none;
+}
+
 .empty-hints {
   display: flex;
   flex-wrap: wrap;
@@ -404,6 +419,15 @@ onUnmounted(() => {
   border-top: 1px solid var(--border-subtle);
   background: var(--platform-bg-toolbar);
   backdrop-filter: blur(24px) saturate(1.25);
+}
+
+:global(:root[data-platform="macos"] .bottom-area){
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 86%, transparent);
+}
+
+:global(:root[data-platform="macos"] .bottom-stack){
+  padding-top: 8px;
+  padding-bottom: 12px;
 }
 
 .bottom-stack {

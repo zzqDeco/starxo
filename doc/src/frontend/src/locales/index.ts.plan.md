@@ -18,9 +18,11 @@
 
 ## 4. 关键实现细节
 - 使用组合式 API 模式：`legacy: false`
-- 默认 locale 优先读本地缓存，否则回退到 `zh`
-- `fallbackLocale` 固定为 `en`
+- 默认 locale 优先读本地缓存，否则读浏览器语言，最终回退到 `zh`
+- `normalizeLocale()` 会把 `zh-CN` / `en-US` 等平台 locale 归一化为 `zh` / `en`，并写回 localStorage，避免 locale key 漂移。
+- `fallbackLocale` 采用双向 fallback：中文缺失回退英文，英文缺失回退中文。
 - 语言包一次性注册为 `{ en, zh }`
+- `missing` handler 不直接展示原始 key；先手动查当前语言包与 fallback 语言包，最后才把 key 的最后一段 humanize，避免 UI 暴露 `header.title` 或 `Mode Label` 等变量名式文案。
 
 ## 5. 依赖关系
 - 内部依赖: `./en`、`./zh`

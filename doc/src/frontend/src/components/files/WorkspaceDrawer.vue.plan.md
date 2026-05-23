@@ -17,9 +17,9 @@
 
 ## 4. 关键实现细节
 - 宽度控制:
-  - `drawerWidth` 默认 980
+  - `drawerWidth` 默认 760
   - `SplitHandle` 持久化 key: `starxo-workspace-drawer-width`
-  - `minDrawerWidth` / `maxDrawerWidth` 根据窗口宽度约束
+  - `minDrawerWidth` / `maxDrawerWidth` 根据窗口宽度约束，避免窄屏抽屉宽于视口
 - 交互行为:
   - 点击遮罩关闭
   - `Esc` 关闭
@@ -35,7 +35,7 @@
   - `vue`, `@vueuse/core`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
 
 ## 6. 变更影响面
-- 影响工作区入口交互方式（从常驻区域迁移为按需抽屉）。
+- 桌面端 workspace 由 MainLayout inspector 承载；该抽屉主要服务 1200px 以下的窄屏 sheet。
 
 ## 7. 维护建议
 - 如需持久化“默认是否打开”，可在父组件存储 `show` 状态。

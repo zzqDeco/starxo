@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { useWailsEvent } from '@/composables/useWailsEvent'
+import { useSessionStore } from '@/stores/sessionStore'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -19,6 +20,14 @@ interface WorkspaceTreeNode extends TreeOption {
   path?: string
   isLeaf?: boolean
   children?: WorkspaceTreeNode[]
+}
+
+interface WorkspaceChangedEvent {
+  sessionId?: string
+  containerID?: string
+  path?: string
+  source?: string
+  action?: string
 }
 
 const files = ref<FileInfo[]>([])
@@ -31,11 +40,14 @@ const treeWidth = ref(220)
 const showTransfer = ref(false)
 const { t } = useI18n()
 const feedback = useUiFeedback()
+const sessionStore = useSessionStore()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
 const currentWorkspaceContainerID = ref('')
 const cleaningTmp = ref(false)
 let refreshRequestID = 0
 let previewRequestID = 0
+let workspaceRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let pendingPreviewReloadPath = ''
 
 const selectedFile = computed(() => files.value.find(f => f.path === selectedPath.value) || null)
 const workspacePath = computed(() => workspaceInfo.value?.workspacePath || '')
@@ -156,10 +168,54 @@ async function refreshFiles() {
   }
 }
 
+function pathMatchesSelected(changedPath?: string) {
+  if (!selectedPath.value) return false
+  if (!changedPath) return true
+  const selected = selectedPath.value
+  if (changedPath === selected) return true
+  const displayedChanged = displayPath(changedPath)
+  const displayedSelected = displayPath(selected)
+  return displayedChanged === displayedSelected || selected.endsWith(`/${changedPath.replace(/^\/+/, '')}`)
+}
+
+function shouldHandleWorkspaceChanged(data?: WorkspaceChangedEvent) {
+  if (data?.sessionId && sessionStore.activeSessionId && data.sessionId !== sessionStore.activeSessionId) {
+    return false
+  }
+  if (data?.containerID && currentWorkspaceContainerID.value && data.containerID !== currentWorkspaceContainerID.value) {
+    return false
+  }
+  return true
+}
+
+function scheduleWorkspaceRefresh(data?: WorkspaceChangedEvent) {
+  if (!shouldHandleWorkspaceChanged(data)) return
+  if (pathMatchesSelected(data?.path)) {
+    pendingPreviewReloadPath = selectedPath.value
+  }
+  if (workspaceRefreshTimer) {
+    clearTimeout(workspaceRefreshTimer)
+  }
+  workspaceRefreshTimer = setTimeout(async () => {
+    workspaceRefreshTimer = null
+    const previewPath = pendingPreviewReloadPath
+    pendingPreviewReloadPath = ''
+    await refreshFiles()
+    if (previewPath && selectedPath.value === previewPath) {
+      await loadPreview(previewPath)
+    }
+  }, 180)
+}
+
 function clearWorkspaceState(invalidateRequests = true) {
   if (invalidateRequests) {
     refreshRequestID++
   }
+  if (workspaceRefreshTimer) {
+    clearTimeout(workspaceRefreshTimer)
+    workspaceRefreshTimer = null
+  }
+  pendingPreviewReloadPath = ''
   previewRequestID++
   workspaceInfo.value = null
   currentWorkspaceContainerID.value = ''
@@ -289,6 +345,10 @@ useWailsEvent('ssh:disconnected', () => {
   clearWorkspaceState()
 })
 
+useWailsEvent('workspace:changed', (data: WorkspaceChangedEvent) => {
+  scheduleWorkspaceRefresh(data)
+})
+
 onMounted(async () => {
   await refreshFiles()
   const pending = consumePendingWorkspacePath()
@@ -301,6 +361,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (workspaceRefreshTimer) {
+    clearTimeout(workspaceRefreshTimer)
+    workspaceRefreshTimer = null
+  }
+  pendingPreviewReloadPath = ''
   stopWorkspaceBridge?.()
 })
 </script>
@@ -435,6 +500,7 @@ onUnmounted(() => {
   flex-direction: column;
   min-height: 0;
   background: var(--platform-bg-elevated);
+  container-type: inline-size;
 }
 
 .workspace-header {
@@ -545,8 +611,9 @@ onUnmounted(() => {
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content) {
   position: relative;
-  background: var(--platform-bg-active);
-  color: var(--accent-cyan);
+  background: color-mix(in srgb, var(--platform-bg-raised) 86%, transparent);
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--platform-accent) 50%, transparent);
 }
 
 .workspace-tree :deep(.n-tree-node--selected .n-tree-node-content::before) {
@@ -566,6 +633,49 @@ onUnmounted(() => {
 @media (max-width: 900px) {
   .workspace-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 640px) {
+  .workspace-header {
+    height: auto;
+    min-height: 42px;
+    align-items: flex-start;
+    padding: 8px 10px;
+  }
+
+  .workspace-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .workspace-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .meta-item.path {
+    grid-column: 1 / -1;
+  }
+
+  .workspace-body {
+    flex-direction: column;
+  }
+
+  .tree-pane {
+    width: 100% !important;
+    height: min(42%, 260px);
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .workspace-body :deep(.split-handle) {
+    display: none;
+  }
+
+  .preview-pane {
+    min-height: 0;
   }
 }
 </style>

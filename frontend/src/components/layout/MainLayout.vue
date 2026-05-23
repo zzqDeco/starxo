@@ -8,16 +8,20 @@ import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import SplitHandle from './SplitHandle.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
+import WorkspacePanel from '@/components/files/WorkspacePanel.vue'
 import { useKeybinds } from '@/composables/useKeybinds'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
+import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const WorkspaceDrawer = defineAsyncComponent(() => import('@/components/files/WorkspaceDrawer.vue'))
 const ContainerDock = defineAsyncComponent(() => import('@/components/containers/ContainerDock.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
 const CommandPalette = defineAsyncComponent(() => import('@/components/palette/CommandPalette.vue'))
 const RuntimeTasksPanel = defineAsyncComponent(() => import('@/components/runtime/RuntimeTasksPanel.vue'))
+
+type InspectorMode = 'runtime' | 'workspace' | null
 
 const { t } = useI18n()
 const sessionStore = useSessionStore()
@@ -29,6 +33,7 @@ const showMobileSidebar = ref(false)
 const showResponsiveDock = ref(false)
 const showPalette = ref(false)
 const showRuntimeTasks = ref(false)
+const inspectorMode = ref<InspectorMode>('runtime')
 
 useKeybinds([
   { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = !showPalette.value }, allowInInput: true },
@@ -50,7 +55,8 @@ useKeybinds([
 
 // Resizable panel widths
 const leftWidth = ref(240)
-const containerDockWidth = ref(360)
+const runtimeDockWidth = ref(360)
+const workspaceInspectorWidth = ref(620)
 
 // Window auto-adapt
 const { width: windowWidth } = useWindowSize()
@@ -58,6 +64,12 @@ const { width: windowWidth } = useWindowSize()
 const isBelow1200 = computed(() => windowWidth.value < 1200)
 const isBelow992 = computed(() => windowWidth.value < 992)
 const isBelow768 = computed(() => windowWidth.value < 768)
+const isDesktopInspector = computed(() => !isBelow1200.value)
+const workspaceInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'workspace')
+const runtimeInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'runtime')
+const inspectorVisible = computed(() => isDesktopInspector.value && inspectorMode.value !== null)
+const workspaceVisible = computed(() => isDesktopInspector.value ? workspaceInspectorActive.value : showWorkspaceDrawer.value)
+const isSidebarCompact = computed(() => !isBelow768.value && (workspaceInspectorActive.value || windowWidth.value < 1320))
 
 const leftMinSize = computed(() => {
   if (isBelow768.value) return 0
@@ -71,6 +83,7 @@ const leftMaxSize = computed(() => {
 })
 
 const dockMinSize = computed(() => {
+  if (workspaceInspectorActive.value) return 420
   if (isBelow992.value) return 240
   if (isBelow1200.value) return 280
   return 320
@@ -80,6 +93,9 @@ const effectiveLeftWidth = computed(() => {
   if (isBelow768.value) {
     return 0
   }
+  if (isSidebarCompact.value) {
+    return 64
+  }
   if (isBelow992.value) {
     return Math.min(leftWidth.value, 220)
   }
@@ -87,15 +103,40 @@ const effectiveLeftWidth = computed(() => {
 })
 
 const effectiveDockWidth = computed(() => {
-  if (isBelow1200.value) {
-    return Math.min(containerDockWidth.value, 320)
+  if (workspaceInspectorActive.value) {
+    const maxWorkspace = Math.max(dockMinSize.value, Math.min(760, windowWidth.value - effectiveLeftWidth.value - 460))
+    return Math.min(Math.max(workspaceInspectorWidth.value, dockMinSize.value), maxWorkspace)
   }
-  return containerDockWidth.value
+  if (isBelow1200.value) {
+    return Math.min(runtimeDockWidth.value, 320)
+  }
+  return runtimeDockWidth.value
 })
+
+const inspectorDefaultSize = computed(() => workspaceInspectorActive.value ? 620 : 360)
+const inspectorMaxSize = computed(() => {
+  if (workspaceInspectorActive.value) {
+    return Math.min(760, Math.max(460, windowWidth.value - effectiveLeftWidth.value - 460))
+  }
+  return 500
+})
+const inspectorStorageKey = computed(() => workspaceInspectorActive.value ? 'starxo-workspace-inspector-width' : 'starxo-runtime-inspector-width')
+
+function updateInspectorWidth(value: number) {
+  if (workspaceInspectorActive.value) {
+    workspaceInspectorWidth.value = value
+    return
+  }
+  runtimeDockWidth.value = value
+}
 
 watch(isBelow1200, (below) => {
   if (!below) {
     showResponsiveDock.value = false
+    showWorkspaceDrawer.value = false
+    if (!inspectorMode.value) {
+      inspectorMode.value = 'runtime'
+    }
   }
 })
 
@@ -110,7 +151,15 @@ function toggleSettings() {
 }
 
 function toggleWorkspaceDrawer() {
+  if (isDesktopInspector.value) {
+    inspectorMode.value = workspaceInspectorActive.value ? 'runtime' : 'workspace'
+    showResponsiveDock.value = false
+    return
+  }
   showWorkspaceDrawer.value = !showWorkspaceDrawer.value
+  if (showWorkspaceDrawer.value) {
+    showResponsiveDock.value = false
+  }
 }
 
 function toggleRuntimeTasks() {
@@ -118,7 +167,13 @@ function toggleRuntimeTasks() {
 }
 
 function openWorkspaceDrawer() {
+  if (isDesktopInspector.value) {
+    inspectorMode.value = 'workspace'
+    showResponsiveDock.value = false
+    return
+  }
   showWorkspaceDrawer.value = true
+  showResponsiveDock.value = false
 }
 
 function openRuntimeTasks() {
@@ -131,16 +186,23 @@ function toggleMobileSidebar() {
 
 function toggleResponsiveDock() {
   showResponsiveDock.value = !showResponsiveDock.value
+  if (showResponsiveDock.value) {
+    showWorkspaceDrawer.value = false
+  }
 }
 
 function openCommandPalette() {
   showPalette.value = true
 }
 
+function toggleNativeWindowZoom() {
+  void toggleWindowZoom()
+}
+
 let stopWorkspaceBridge: (() => void) | null = null
 onMounted(() => {
   stopWorkspaceBridge = onWorkspaceOpenPath(() => {
-    showWorkspaceDrawer.value = true
+    openWorkspaceDrawer()
   })
 })
 
@@ -150,17 +212,31 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="main-layout">
+  <div
+    class="main-layout"
+    :class="{
+      'sidebar-compact': isSidebarCompact,
+      'workspace-active': workspaceInspectorActive,
+      'runtime-active': runtimeInspectorActive,
+      'inspector-active': inspectorVisible,
+    }"
+  >
+    <div
+      class="window-top-edge-hit-area"
+      aria-hidden="true"
+      @dblclick.stop.prevent="toggleNativeWindowZoom"
+    ></div>
+
     <div
       v-if="!isBelow768"
       class="left-panel"
       :style="{ width: effectiveLeftWidth + 'px' }"
     >
-      <Sidebar />
+      <Sidebar :compact="isSidebarCompact" />
     </div>
 
     <SplitHandle
-      v-if="!isBelow768"
+      v-if="!isBelow768 && !isSidebarCompact"
       direction="horizontal"
       :default-size="240"
       :min-size="leftMinSize"
@@ -175,7 +251,7 @@ onUnmounted(() => {
         @toggle-workspace-drawer="toggleWorkspaceDrawer"
         @toggle-runtime-tasks="toggleRuntimeTasks"
         @open-command-palette="openCommandPalette"
-        :workspace-drawer-visible="showWorkspaceDrawer"
+        :workspace-drawer-visible="workspaceVisible"
         :runtime-tasks-visible="showRuntimeTasks"
       />
 
@@ -184,26 +260,29 @@ onUnmounted(() => {
           <div class="chat-area">
             <ChatPanel />
           </div>
-          <WorkspaceDrawer v-model:show="showWorkspaceDrawer" />
         </div>
 
-        <template v-if="!isBelow1200">
+        <template v-if="inspectorVisible">
           <SplitHandle
+            :key="inspectorMode || 'none'"
             direction="horizontal"
-            :default-size="360"
+            :default-size="inspectorDefaultSize"
             :min-size="dockMinSize"
-            :max-size="500"
+            :max-size="inspectorMaxSize"
             :reverse="true"
-            storage-key="starxo-container-dock-width"
-            @update:size="(v: number) => containerDockWidth = v"
+            :storage-key="inspectorStorageKey"
+            @update:size="updateInspectorWidth"
           />
 
-          <div class="container-dock" :style="{ width: effectiveDockWidth + 'px' }">
-            <ContainerDock />
-          </div>
+          <aside class="inspector-panel" :class="`mode-${inspectorMode}`" :style="{ width: effectiveDockWidth + 'px' }">
+            <WorkspacePanel v-if="workspaceInspectorActive" />
+            <ContainerDock v-else />
+          </aside>
         </template>
       </div>
     </div>
+
+    <WorkspaceDrawer v-if="isBelow1200" v-model:show="showWorkspaceDrawer" />
 
     <div
       v-if="isBelow1200"
@@ -273,11 +352,25 @@ onUnmounted(() => {
   position: relative;
 }
 
+.window-top-edge-hit-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 12px;
+  z-index: calc(var(--z-sticky, 20) + 3);
+  --wails-draggable: no-drag;
+}
+
+:global(:root[data-platform="macos"] .window-top-edge-hit-area){
+  display: none;
+}
+
 /* CSS safety net — keeps layout contained if JS breakpoints lag at resize.
    Structural mounting (v-if gates) stays in JS so drawer contents unmount
    when collapsed; these rules only clamp visuals. */
 @media (max-width: 1200px) {
-  .container-dock {
+  .inspector-panel {
     display: none;
   }
 }
@@ -299,6 +392,10 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.sidebar-compact .left-panel {
+  border-right-color: color-mix(in srgb, var(--border-subtle) 70%, transparent);
+}
+
 .center-section {
   flex: 1;
   display: flex;
@@ -313,7 +410,7 @@ onUnmounted(() => {
   display: flex;
   min-height: 0;
   overflow: hidden;
-  padding: 8px 8px 8px 0;
+  padding: 8px;
   gap: 0;
 }
 
@@ -335,7 +432,16 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.container-dock {
+.chat-area :deep(.chat-panel) {
+  --chat-content-max-width: min(960px, 100%);
+}
+
+.inspector-active .chat-area :deep(.chat-panel) {
+  --chat-content-max-width: 100%;
+  --chat-content-padding: 18px;
+}
+
+.inspector-panel {
   height: 100%;
   background: var(--platform-bg-elevated);
   backdrop-filter: blur(18px) saturate(1.18);
@@ -345,6 +451,30 @@ onUnmounted(() => {
   flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.inspector-panel.mode-workspace {
+  background: var(--platform-bg-content);
+}
+
+:global(:root[data-platform="macos"] .content-area){
+  padding: 0;
+}
+
+:global(:root[data-platform="macos"] .chat-shell),
+:global(:root[data-platform="macos"] .inspector-panel){
+  border-radius: 0;
+  border-top: 0;
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+:global(:root[data-platform="macos"] .chat-shell){
+  border-left: 0;
+}
+
+:global(:root[data-platform="macos"] .inspector-panel){
+  border-right: 0;
 }
 
 .responsive-dock,
