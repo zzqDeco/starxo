@@ -716,16 +716,7 @@ func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, permCtx tools.ToolP
 }
 
 func einoV09PotentiallySearchable(entry tools.CatalogEntry, permCtx tools.ToolPermissionContext) bool {
-	if !entry.PermissionSpec.AllowSearch {
-		return false
-	}
-	if permCtx.Mode == "plan" && !entry.ReadOnlyEligible() {
-		return false
-	}
-	if !entry.IsMcp {
-		return true
-	}
-	return true
+	return tools.CanSearchCatalogEntry(entry, permCtx).Allowed
 }
 
 func useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol string) bool {
@@ -1911,7 +1902,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				run.addToolResult(msg.ToolCallID, msg.Content)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
 					if call.name == tools.ToolSearchName {
-						s.recordToolSearchOutputForRun(run, msg.Content)
+						s.recordToolSearchOutputForRun(run, msg)
 					}
 					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
 					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, call.args, msg.Content)
@@ -1971,14 +1962,12 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	return strings.Join(allContents, "\n\n"), transferCount, false
 }
 
-func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, content string) {
+func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, msg *schema.Message) {
 	if run == nil {
 		return
 	}
-	var output struct {
-		Matches []string `json:"matches"`
-	}
-	if err := json.Unmarshal([]byte(content), &output); err != nil || len(output.Matches) == 0 {
+	matches := toolSearchMatchesFromMessage(msg)
+	if len(matches) == 0 {
 		return
 	}
 
@@ -1992,7 +1981,7 @@ func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, content stri
 
 	sessionID := run.sessionID
 	now := s.now().UnixMilli()
-	for _, name := range output.Matches {
+	for _, name := range matches {
 		entry, ok := bundle.MCPCatalog.LookupExact(name)
 		if !ok || !entry.ShouldDefer || entry.AlwaysLoad {
 			continue
@@ -2004,6 +1993,48 @@ func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, content stri
 			DiscoveredAt:  now,
 		})
 	}
+}
+
+func toolSearchMatchesFromMessage(msg *schema.Message) []string {
+	if msg == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	matches := make([]string, 0)
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		matches = append(matches, name)
+	}
+
+	if strings.TrimSpace(msg.Content) != "" {
+		var output struct {
+			Matches []string `json:"matches"`
+		}
+		if err := json.Unmarshal([]byte(msg.Content), &output); err == nil {
+			for _, name := range output.Matches {
+				add(name)
+			}
+		}
+	}
+	for _, part := range msg.UserInputMultiContent {
+		if part.Type != schema.ChatMessagePartTypeToolSearchResult || part.ToolSearchResult == nil {
+			continue
+		}
+		for _, info := range part.ToolSearchResult.Tools {
+			if info == nil {
+				continue
+			}
+			add(info.Name)
+		}
+	}
+	return matches
 }
 
 func timelineToolResultLimit(toolName string) int {
@@ -3354,8 +3385,13 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		return nil, fmt.Errorf("failed to create chat model: %w", err)
 	}
 	logger.RunnerEvent("chat_model_created", "type", cfg.LLM.Type, "model", cfg.LLM.Model)
-	if protocol := strings.TrimSpace(cfg.Agent.Runtime.AgenticProtocol); protocol != "" && protocol != llm.AgenticProtocolOff {
+	effectiveAgenticProtocol := strings.TrimSpace(cfg.Agent.Runtime.AgenticProtocol)
+	if effectiveAgenticProtocol == "" {
+		effectiveAgenticProtocol = llm.AgenticProtocolOff
+	}
+	if protocol := effectiveAgenticProtocol; protocol != "" && protocol != llm.AgenticProtocolOff {
 		if _, agenticErr := llm.NewAgenticModel(ctx, cfg.LLM, protocol); agenticErr != nil {
+			effectiveAgenticProtocol = llm.AgenticProtocolOff
 			logger.Warn("[RUNNER] Agentic beta model disabled; falling back to Message runtime",
 				"protocol", protocol, "error", agenticErr)
 		} else {
@@ -3463,12 +3499,12 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	}
 
 	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
-	defaultToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "default", cfg.Agent.Runtime.ToolSearchMode, cfg.Agent.Runtime.AgenticProtocol)
+	defaultToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "default", cfg.Agent.Runtime.ToolSearchMode, effectiveAgenticProtocol)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build Eino v0.9 default tool_search bridge: %w", err)
 	}
-	planToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "plan", cfg.Agent.Runtime.ToolSearchMode, cfg.Agent.Runtime.AgenticProtocol)
+	planToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "plan", cfg.Agent.Runtime.ToolSearchMode, effectiveAgenticProtocol)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build Eino v0.9 plan tool_search bridge: %w", err)

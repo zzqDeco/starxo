@@ -12,6 +12,7 @@
 ## 3. 关键实现细节
 - `SubagentDefinition` 是运行时定义，不直接暴露给模型。
 - `SubagentRegistry.Normalize(...)` 允许 service 层使用配置生成自定义 registry。
+- 自定义 registry 不会隐式注入无限制 `general`；空 `subagent_type` 会落到 registry 的默认 definition，优先使用配置中的 `general`，否则使用第一条有效配置。
 - `RuntimeSubagentPrompt(...)` 会把 subagent 类型、workspace 和 isolation 写入子 agent instruction。
 - `AllowedTools` 为空表示不做工具白名单限制；非空时由 service 层过滤 runtime core tools。
 

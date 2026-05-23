@@ -16,18 +16,13 @@ type SubagentDefinition struct {
 }
 
 type SubagentRegistry struct {
-	defs map[string]SubagentDefinition
+	defs        map[string]SubagentDefinition
+	defaultName string
 }
 
 func DefaultSubagentRegistry() *SubagentRegistry {
 	defs := []SubagentDefinition{
-		{
-			Name:              "general",
-			Description:       "General-purpose focused coding subagent for bounded tasks.",
-			AllowedTools:      []string{"Read", "Write", "Edit", "Glob", "Grep", "Bash", "TaskOutput", "TaskStop"},
-			DefaultIsolation:  "none",
-			BackgroundAllowed: true,
-		},
+		defaultGeneralSubagentDefinition(),
 		{
 			Name:              "code_writer",
 			Description:       "Writes, edits, and refactors code in the sandbox workspace.",
@@ -78,16 +73,29 @@ func NewSubagentRegistry(defs []SubagentDefinition) *SubagentRegistry {
 			def.AllowedTools = normalizeToolNames(def.AllowedTools)
 		}
 		r.defs[name] = def
-	}
-	if _, ok := r.defs["general"]; !ok {
-		r.defs["general"] = SubagentDefinition{
-			Name:              "general",
-			Description:       "General-purpose focused coding subagent for bounded tasks.",
-			DefaultIsolation:  "none",
-			BackgroundAllowed: true,
+		if r.defaultName == "" || name == "general" {
+			r.defaultName = name
 		}
 	}
+	if len(r.defs) == 0 {
+		def := defaultGeneralSubagentDefinition()
+		r.defs[def.Name] = def
+		r.defaultName = def.Name
+	}
+	if r.defaultName == "" {
+		r.defaultName = "general"
+	}
 	return r
+}
+
+func defaultGeneralSubagentDefinition() SubagentDefinition {
+	return SubagentDefinition{
+		Name:              "general",
+		Description:       "General-purpose focused coding subagent for bounded tasks.",
+		AllowedTools:      []string{"Read", "Write", "Edit", "Glob", "Grep", "Bash", "TaskOutput", "TaskStop"},
+		DefaultIsolation:  "none",
+		BackgroundAllowed: true,
+	}
 }
 
 func (r *SubagentRegistry) Get(name string) (SubagentDefinition, bool) {
@@ -99,11 +107,17 @@ func (r *SubagentRegistry) Get(name string) (SubagentDefinition, bool) {
 }
 
 func (r *SubagentRegistry) MustGet(name string) SubagentDefinition {
+	if r == nil {
+		r = DefaultSubagentRegistry()
+	}
 	def, ok := r.Get(name)
 	if ok {
 		return def
 	}
-	def, _ = r.Get("general")
+	def, _ = r.Get(r.defaultName)
+	if def.Name == "" {
+		def = defaultGeneralSubagentDefinition()
+	}
 	return def
 }
 
@@ -122,7 +136,10 @@ func (r *SubagentRegistry) Names() []string {
 func (r *SubagentRegistry) Normalize(name string) (string, error) {
 	name = normalizeSubagentName(name)
 	if name == "" {
-		return "general", nil
+		if r == nil {
+			r = DefaultSubagentRegistry()
+		}
+		return r.defaultName, nil
 	}
 	if _, ok := r.Get(name); ok {
 		return name, nil

@@ -168,7 +168,7 @@ wails dev
 
 顶层 Agent 现在运行在 Eino `v0.9.0-beta.1` 上，使用更小的 always-loaded runtime 工具面。Eino dynamic `tool_search` middleware 负责按需暴露 deferred tools，Starxo 继续负责 catalog 元数据、plan-mode 过滤、权限检查和 discovered-tool 持久化。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
 
-固定 `transfer_to_agent` 子 Agent 路径不再是默认运行时。`Agent` 是唯一委派入口，并通过 `agent.runtime.subagents` 解析 `subagent_type`。内置定义包括 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`；每个定义可限制 allowed tools、默认 isolation、指令和是否允许后台执行。旧 deep-transfer 实现仅通过 `agent.runtime.enableBuiltinDeepTransferFallback` 作为调试 fallback 保留。
+固定 `transfer_to_agent` 子 Agent 路径不再是默认运行时。`Agent` 是唯一委派入口，并通过 `agent.runtime.subagents` 解析 `subagent_type`。内置定义包括 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`；每个定义可限制 allowed tools、默认 isolation、指令和是否允许后台执行。自定义 registry 不会隐式获得无限制的 `general`；空 `subagent_type` 使用配置默认项。旧 deep-transfer 实现仅通过 `agent.runtime.enableBuiltinDeepTransferFallback` 作为调试 fallback 保留。
 
 当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`WorktreeDiff`、`WorktreeMerge`、`LSP`、`LSPEdit`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`LSPEdit` 通过 permission queue 暴露可写的 language-server rename/format 操作。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
 

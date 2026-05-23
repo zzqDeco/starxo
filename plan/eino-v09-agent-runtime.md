@@ -10,11 +10,13 @@ Starxo's default agent runtime is migrated to `github.com/cloudwego/eino v0.9.0-
 - Deferred tools: worktree, LSP, Skill, Notebook, WebFetch/WebSearch, MCP resource/action tools, and future large tool classes.
 - `Agent` is the only default subagent delegation entry. Fixed deep-transfer subagents are kept behind `agent.runtime.enableBuiltinDeepTransferFallback` for debugging.
 - `agent.runtime.subagents` defines built-in and user-configured subagent definitions: name, description, instruction, allowed tools, default isolation, and background policy.
+- Custom subagent registries do not receive an implicit unrestricted `general`; empty `subagent_type` uses the registry default.
 
 ## Eino v0.9 Middleware
 
 - `dynamictool/toolsearch` owns model-visible deferred tool discovery.
 - Starxo remains the authority for catalog metadata, plan-mode filtering, permission, discovered-tool persistence, and workspace guard.
+- Starxo filters Eino ToolSearch candidates through the same runtime availability rules used by the permission surface, and persists both JSON and model-native structured search results.
 - `summarization` and `reduction` middleware handle token-aware compact and large tool result storage.
 - `skill` loads workspace-local `.starxo/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`.
 - `agentsmd` loads `AGENTS.md` and `.starxo/AGENTS.md` as transient runtime instructions.

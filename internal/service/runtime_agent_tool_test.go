@@ -70,6 +70,21 @@ func TestRuntimeSubagentRegistryFromConfigPreservesPolicy(t *testing.T) {
 	if !runtimeSubagentAllowsTool(def, "Read") || runtimeSubagentAllowsTool(def, "Write") {
 		t.Fatalf("expected configured allowed tools to be enforced: %#v", def.AllowedTools)
 	}
+
+	normalized, err := registry.Normalize("")
+	if err != nil {
+		t.Fatalf("normalize empty configured subagent: %v", err)
+	}
+	if normalized != "review_only" {
+		t.Fatalf("expected empty subagent_type to use configured default, got %q", normalized)
+	}
+	defaultDef := registry.MustGet("")
+	if defaultDef.Name != "review_only" || runtimeSubagentAllowsTool(defaultDef, "Write") {
+		t.Fatalf("expected default configured subagent to preserve policy, got %#v", defaultDef)
+	}
+	if _, ok := registry.Get("general"); ok {
+		t.Fatalf("custom registry without general must not inject an unrestricted general")
+	}
 }
 
 func TestFormatRuntimeAgentRunResultIncludesWorktreeMetadata(t *testing.T) {
