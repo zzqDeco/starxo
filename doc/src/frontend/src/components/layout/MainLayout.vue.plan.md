@@ -37,6 +37,9 @@
   - 窄屏下 `WorkspaceDrawer` 与 responsive `ContainerDock` overlay 互斥
   - SettingsPanel / CommandPalette / WorkspaceDrawer / ContainerDock / RuntimeTasksPanel 使用 async component 降低首包
   - `onWorkspaceOpenPath()` 打开 WorkspaceDrawer；路径选择由 WorkspacePanel 消费 pending path
+- macOS 样式:
+  - 使用 root platform attribute 做平台分支时，scoped CSS 必须写成 `:global(:root[data-platform="macos"] .selector)`，不能写成 `:global(:root[data-platform="macos"]) .selector`，后者会被编译成只作用于 `:root` 并污染全局根节点。
+  - macOS 下主内容和 inspector 去掉网页卡片圆角/阴影，按原生三栏窗口处理。
 - 拖拽持久化 key:
   - `starxo-left-panel-width`
   - `starxo-runtime-inspector-width`

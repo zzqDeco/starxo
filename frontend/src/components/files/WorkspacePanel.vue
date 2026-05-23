@@ -47,6 +47,7 @@ const cleaningTmp = ref(false)
 let refreshRequestID = 0
 let previewRequestID = 0
 let workspaceRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let pendingPreviewReloadPath = ''
 
 const selectedFile = computed(() => files.value.find(f => f.path === selectedPath.value) || null)
 const workspacePath = computed(() => workspaceInfo.value?.workspacePath || '')
@@ -189,15 +190,19 @@ function shouldHandleWorkspaceChanged(data?: WorkspaceChangedEvent) {
 
 function scheduleWorkspaceRefresh(data?: WorkspaceChangedEvent) {
   if (!shouldHandleWorkspaceChanged(data)) return
-  const shouldReloadPreview = pathMatchesSelected(data?.path)
+  if (pathMatchesSelected(data?.path)) {
+    pendingPreviewReloadPath = selectedPath.value
+  }
   if (workspaceRefreshTimer) {
     clearTimeout(workspaceRefreshTimer)
   }
   workspaceRefreshTimer = setTimeout(async () => {
     workspaceRefreshTimer = null
+    const previewPath = pendingPreviewReloadPath
+    pendingPreviewReloadPath = ''
     await refreshFiles()
-    if (shouldReloadPreview && selectedPath.value) {
-      await loadPreview(selectedPath.value)
+    if (previewPath && selectedPath.value === previewPath) {
+      await loadPreview(previewPath)
     }
   }, 180)
 }
@@ -210,6 +215,7 @@ function clearWorkspaceState(invalidateRequests = true) {
     clearTimeout(workspaceRefreshTimer)
     workspaceRefreshTimer = null
   }
+  pendingPreviewReloadPath = ''
   previewRequestID++
   workspaceInfo.value = null
   currentWorkspaceContainerID.value = ''
@@ -359,6 +365,7 @@ onUnmounted(() => {
     clearTimeout(workspaceRefreshTimer)
     workspaceRefreshTimer = null
   }
+  pendingPreviewReloadPath = ''
   stopWorkspaceBridge?.()
 })
 </script>

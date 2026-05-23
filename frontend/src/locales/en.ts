@@ -125,6 +125,13 @@ export default {
       msgs: 'msgs',
       noActions: 'No actions yet',
     },
+    agent: {
+      orchestrator: 'Orchestrator',
+      codeWriter: 'Code Writer',
+      codeExecutor: 'Code Executor',
+      fileManager: 'File Manager',
+      codingAgent: 'Coding Agent',
+    },
     tool: {
       read: 'Read',
       write: 'Write',
@@ -170,7 +177,7 @@ export default {
     title: 'Execution Plan',
   },
   taskRail: {
-    title: 'Task Rail',
+    title: 'Tasks',
     sourceTodos: 'source: todos',
     sourcePlan: 'source: plan',
     running: 'running',
@@ -184,8 +191,8 @@ export default {
     dependsOn: 'Depends on',
   },
   runtimeTasks: {
-    kicker: 'Runtime V2',
-    title: 'Runtime Tasks',
+    kicker: 'Background',
+    title: 'Background Tasks',
     total: 'total',
     running: 'running',
     completed: 'finished',

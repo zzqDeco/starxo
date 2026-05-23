@@ -11,6 +11,8 @@
 - 大型 `WorktreeDiff` timeline payload 会保持可解析 JSON，并在字段级标记截断。
 - 大型 `WorktreeMerge` conflict timeline payload 会保持可解析 JSON，保留 `conflicted` / `conflictFiles` / recovery metadata，并收缩 `mergeOutput` 或过长 conflict path。
 - 大型 `Edit` / `Write` timeline payload 会保持可解析 JSON，并对 patch 字段标记截断。
+- `runtimeToolWorkspaceChangePath` 对无法解析的 mutating tool JSON 结果不再发出 workspace refresh，避免错误/历史文本误触发刷新。
+- `LSPEdit` 多文件结果返回 broad workspace refresh，避免只刷新首个文件导致其他预览过期。
 
 ## 维护建议
 - 新增 worktree UI API 时优先补无 sandbox 依赖的状态/路由单测。

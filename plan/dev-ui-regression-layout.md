@@ -13,6 +13,11 @@
 - `WorkspacePanel` 对 `workspace:changed` 做 session/container 过滤和 debounce 刷新；当前预览文件变更后自动重载。
 - Workspace panel 增加 container query，窄 inspector 下文件树和预览自动堆叠，避免控件 offscreen。
 - macOS production/dev plist 补充 Local Network 用途声明和 local networking ATS 例外，避免打包 app 访问局域网 SSH 主机时报 `no route to host`。
+- 修复 scoped CSS 中 macOS selector 写法：统一使用 `:global(:root[data-platform="macos"] .selector)`，避免把组件样式误编译到 `:root` 导致白屏/根节点污染。
+- 收敛 macOS native 视觉：侧栏 source list、toolbar search field、右侧 inspector、composer segmented control、runtime tasks sheet 和工具时间线均使用更接近 macOS 的低对比度面板、细分隔线和中性按钮。
+- 修复 i18n 回退：`zh-CN`/`en-US` 归一化为 `zh`/`en`，缺失 key 先查语言包再 fallback，最后才 humanize，避免 `Title`、`Mode Label`、`Placeholder` 这类变量名式文案出现在 UI。
+- Agent 和工具时间线文案本地化，避免在中文界面里露出 `Coding Agent` 等内部英文标签。
+- 处理 GitHub review 指出的 workspace change 事件一致性：上传前固定 active sandbox id；不可解析工具结果不触发刷新；LSPEdit 多文件改动触发 broad refresh；前端 debounce 保留预览重载意图。
 
 ## Verification
 - `cd frontend && npm run build`

@@ -315,11 +315,11 @@ function agentColor(name: string): string {
 
 function agentLabel(name: string): string {
   const labels: Record<string, string> = {
-    'orchestrator': 'Orchestrator',
-    'code_writer': 'Code Writer',
-    'code_executor': 'Code Executor',
-    'file_manager': 'File Manager',
-    'coding_agent': 'Coding Agent'
+    'orchestrator': t('message.agent.orchestrator'),
+    'code_writer': t('message.agent.codeWriter'),
+    'code_executor': t('message.agent.codeExecutor'),
+    'file_manager': t('message.agent.fileManager'),
+    'coding_agent': t('message.agent.codingAgent')
   }
   return labels[name] || name
 }
@@ -568,6 +568,16 @@ const canOpenWorkspacePath = computed(() => {
   letter-spacing: 0.3px;
 }
 
+:global(:root[data-platform="macos"] .event-agent-badge){
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+}
+
 .event-message-content {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -575,6 +585,14 @@ const canOpenWorkspacePath = computed(() => {
   padding: 12px 16px;
   font-size: 13.5px;
   line-height: 1.7;
+}
+
+:global(:root[data-platform="macos"] .event-message-content){
+  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
+  border-color: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-radius: 9px;
+  padding: 10px 12px;
+  line-height: 1.6;
 }
 
 .streaming-cursor {
@@ -618,6 +636,14 @@ const canOpenWorkspacePath = computed(() => {
   text-align: left;
 }
 
+:global(:root[data-platform="macos"] .tool-strip){
+  min-height: 26px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 54%, transparent);
+  border-color: color-mix(in srgb, var(--border-subtle) 68%, transparent);
+}
+
 .tool-strip.expandable {
   cursor: pointer;
 }
@@ -659,11 +685,28 @@ const canOpenWorkspacePath = computed(() => {
   border-left: 3px solid var(--text-muted);
 }
 
+:global(:root[data-platform="macos"] .tool-strip-file),
+:global(:root[data-platform="macos"] .tool-strip-edit),
+:global(:root[data-platform="macos"] .tool-strip-shell),
+:global(:root[data-platform="macos"] .tool-strip-agent),
+:global(:root[data-platform="macos"] .tool-strip-todo),
+:global(:root[data-platform="macos"] .tool-strip-notify),
+:global(:root[data-platform="macos"] .tool-strip-worktree),
+:global(:root[data-platform="macos"] .tool-strip-other){
+  border-left-width: 1px;
+}
+
 .tool-strip-action {
   font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
   flex-shrink: 0;
+}
+
+:global(:root[data-platform="macos"] .tool-strip-action){
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
 }
 
 .tool-strip-primary {
@@ -731,6 +774,13 @@ const canOpenWorkspacePath = computed(() => {
   letter-spacing: 0.3px;
   border: 1px solid transparent;
   line-height: 1.2;
+}
+
+:global(:root[data-platform="macos"] .tool-status-pill){
+  padding: 1px 6px;
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
 }
 
 .status-pill-icon {

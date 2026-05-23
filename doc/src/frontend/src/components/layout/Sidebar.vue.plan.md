@@ -45,3 +45,6 @@
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
 - Sidebar 仅负责 SSH 连接控制，容器相关操作不应添加到此组件。
+- macOS native 样式应保持 source list 语义：主操作与连接按钮使用中性/细描边控件，不使用大面积蓝色网页 CTA；compact rail 仍要保留新建、会话菜单和连接/断开入口。
+- macOS sidebar 顶部必须给系统 traffic-light 标题栏让出空间，避免新建会话按钮与窗口控制按钮重叠。
+- scoped CSS 的 macOS 分支必须使用 `:global(:root[data-platform="macos"] .selector)`，避免把组件规则编译到 `:root`。

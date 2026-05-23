@@ -125,6 +125,13 @@ export default {
       msgs: '消息',
       noActions: '暂无动作',
     },
+    agent: {
+      orchestrator: '编排代理',
+      codeWriter: '代码编写',
+      codeExecutor: '代码执行',
+      fileManager: '文件管理',
+      codingAgent: '编程代理',
+    },
     tool: {
       read: '读取',
       write: '写入',
@@ -170,7 +177,7 @@ export default {
     title: '执行计划',
   },
   taskRail: {
-    title: '任务轨道',
+    title: '任务',
     sourceTodos: '来源：待办',
     sourcePlan: '来源：计划',
     running: '进行中',
@@ -184,8 +191,8 @@ export default {
     dependsOn: '依赖',
   },
   runtimeTasks: {
-    kicker: 'Runtime V2',
-    title: '运行任务',
+    kicker: '后台',
+    title: '后台任务',
     total: '总数',
     running: '运行中',
     completed: '已结束',

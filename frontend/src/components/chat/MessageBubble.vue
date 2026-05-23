@@ -63,16 +63,16 @@ function summarizeToolCall(evt: TurnEvent): string {
   const name = evt.toolName || 'tool'
   const args = tryParseArgs(evt.toolArgs)
 
-  if (name === 'read_file') return `Read ${args?.path || '-'}`
-  if (name === 'write_file') return `Write ${args?.path || '-'}`
-  if (name === 'list_files') return `List ${args?.path || '/workspace'}`
-  if (name === 'str_replace_editor') return `Edit ${args?.path || '-'}`
-  if (name === 'shell_execute') return `Shell ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
-  if (name === 'python_execute') return `Python ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
-  if (name === 'task') return `Delegate ${args?.subagent_type || 'sub-agent'}`
-  if (name === 'write_todos') return 'Write todos'
-  if (name === 'update_todo') return `Todo ${args?.id || '-'} -> ${args?.status || '-'}`
-  if (name === 'notify_user') return `Notify ${truncStr(args?.message || '-', 50)}`
+  if (name === 'read_file') return `${t('message.tool.read')} ${args?.path || '-'}`
+  if (name === 'write_file') return `${t('message.tool.write')} ${args?.path || '-'}`
+  if (name === 'list_files') return `${t('message.tool.list')} ${args?.path || '/workspace'}`
+  if (name === 'str_replace_editor') return `${t('message.tool.edit')} ${args?.path || '-'}`
+  if (name === 'shell_execute') return `${t('message.tool.shell')} ${truncStr((args?.command || '').split('\n')[0] || '-', 70)}`
+  if (name === 'python_execute') return `${t('message.tool.python')} ${truncStr((args?.code || '').split('\n')[0] || '-', 70)}`
+  if (name === 'task') return `${t('message.tool.delegate')} ${args?.subagent_type || 'sub-agent'}`
+  if (name === 'write_todos') return t('message.tool.todos')
+  if (name === 'update_todo') return `${t('message.tool.todoUpdate')} ${args?.id || '-'} -> ${args?.status || '-'}`
+  if (name === 'notify_user') return `${t('message.tool.notify')} ${truncStr(args?.message || '-', 50)}`
 
   return truncStr(name, 70)
 }
@@ -250,11 +250,11 @@ function agentColor(name: string): string {
 
 function agentLabel(name: string): string {
   const labels: Record<string, string> = {
-    'orchestrator': 'Orchestrator',
-    'code_writer': 'Code Writer',
-    'code_executor': 'Code Executor',
-    'file_manager': 'File Manager',
-    'coding_agent': 'Coding Agent'
+    'orchestrator': t('message.agent.orchestrator'),
+    'code_writer': t('message.agent.codeWriter'),
+    'code_executor': t('message.agent.codeExecutor'),
+    'file_manager': t('message.agent.fileManager'),
+    'coding_agent': t('message.agent.codingAgent')
   }
   return labels[name] || name
 }
@@ -486,6 +486,19 @@ function copyContent() {
   flex-shrink: 0;
 }
 
+:global(:root[data-platform="macos"] .assistant-header){
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+:global(:root[data-platform="macos"] .assistant-avatar){
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  color: var(--platform-accent);
+  border-radius: 5px;
+}
+
 .bubble-content {
   font-size: 13.5px;
   line-height: 1.7;
@@ -535,6 +548,10 @@ function copyContent() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+:global(:root[data-platform="macos"] .timeline-container){
+  gap: 1px;
 }
 
 /* Transfer divider */
@@ -594,6 +611,13 @@ function copyContent() {
   letter-spacing: 0;
 }
 
+:global(:root[data-platform="macos"] .segment-agent-name),
+:global(:root[data-platform="macos"] .subagent-name){
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: var(--fw-medium);
+}
+
 .segment-events {
   padding-left: 11px;
   border-left: 1px solid var(--border-subtle);
@@ -611,6 +635,12 @@ function copyContent() {
   margin: 6px 0;
   overflow: hidden;
   transition: border-color 200ms ease;
+}
+
+:global(:root[data-platform="macos"] .subagent-segment){
+  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
+  border-color: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  border-radius: 8px;
 }
 
 .subagent-segment:hover {
@@ -660,6 +690,12 @@ function copyContent() {
   border-radius: 999px;
   border: 1px solid transparent;
   flex-shrink: 0;
+}
+
+:global(:root[data-platform="macos"] .subagent-state-pill){
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  background: transparent;
 }
 
 .subagent-state-pill.running {

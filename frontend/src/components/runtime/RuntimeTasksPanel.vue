@@ -367,6 +367,11 @@ onUnmounted(() => {
   transition: opacity var(--transition-ui);
 }
 
+:global(:root[data-platform="macos"] .tasks-backdrop){
+  background: transparent;
+  backdrop-filter: none;
+}
+
 .runtime-tasks-shell.open .tasks-backdrop {
   opacity: 1;
 }
@@ -385,6 +390,14 @@ onUnmounted(() => {
   transform: translateX(100%);
   transition: transform 210ms var(--ease-out);
   outline: none;
+}
+
+:global(:root[data-platform="macos"] .runtime-tasks-panel){
+  top: 52px;
+  width: min(780px, 92vw);
+  background: color-mix(in srgb, var(--platform-bg-elevated) 92%, transparent);
+  backdrop-filter: blur(24px) saturate(1.35);
+  box-shadow: -12px 0 28px rgba(0, 0, 0, 0.14);
 }
 
 .runtime-tasks-shell.open .runtime-tasks-panel {
@@ -421,6 +434,12 @@ onUnmounted(() => {
   font-weight: var(--fw-bold);
   letter-spacing: 0.7px;
   text-transform: uppercase;
+}
+
+:global(:root[data-platform="macos"] .tasks-kicker){
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .tasks-head-actions {
@@ -502,6 +521,12 @@ onUnmounted(() => {
 .task-row.active {
   background: var(--bg-elevated);
   border-color: var(--border-strong);
+}
+
+:global(:root[data-platform="macos"] .task-row:hover),
+:global(:root[data-platform="macos"] .task-row.active){
+  background: color-mix(in srgb, var(--platform-accent) 10%, var(--platform-bg-raised));
+  border-color: transparent;
 }
 
 .task-status-icon {

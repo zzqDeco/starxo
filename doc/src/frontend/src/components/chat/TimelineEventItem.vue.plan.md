@@ -22,6 +22,7 @@
   - `action`（动作）
   - `primary`（主信息，如路径/命令）
   - `secondary`（辅助信息，如退出码/行数）
+- Agent 名称和工具动作均通过 i18n 输出，避免时间线在中文界面混用内部英文 runtime 名称。
 - 文件/编辑类工具若 `primary` 是容器绝对路径，会显示工作区打开按钮，调用 `openWorkspacePath(path)` 打开抽屉并预览文件。
 - 结果处理:
   - toolResult 超过 500 字符默认截断，可手动展开
@@ -49,7 +50,9 @@
 - 时间线中 todo 工具的可视形态由“详情组件”改为“摘要条”，减少视觉堆叠。
 - 文件路径可以从时间线跳转到 WorkspacePanel，提高工具事件与文件预览的联动。
 - Runtime worktree 工具在时间线中更容易审阅，避免用户只看到大段 JSON。
+- macOS 下工具条使用更轻的 row 样式、细边框和中性状态 pill，降低颜色噪音。
 
 ## 7. 维护建议
 - 新增工具名时在 `toolInfo` 中显式分类，避免落入 `other` 丢失语义。
 - 若扩展 todo 详情，建议放在独立面板而非消息时间线内。
+- scoped CSS 中平台分支使用 `:global(:root[data-platform="macos"] .selector)`，防止选择器被编译为裸 `:root`。

@@ -20,6 +20,7 @@
 - tablist:
   - `containers`: 当前会话容器、其他容器和生命周期操作（复用 ContainerPanel）
   - `terminal`: xterm 终端输出（复用 TerminalPanel）
+- macOS 下 tablist 按 segmented control 视觉处理，active tab 使用中性 raised segment，不使用网页式蓝色 tab。
 - 样式保证高度填满、tabpanel 独立滚动和右侧 Dock 内部信息密度。
 - 主布局通过 `SplitHandle` 控制 Dock 宽度，Dock 本身不处理拖拽状态。
 

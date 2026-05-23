@@ -147,8 +147,11 @@ function toggleLocale() {
   position: relative;
 }
 
-:global(:root[data-platform="macos"]) .app-header {
+:global(:root[data-platform="macos"] .app-header){
+  height: 52px;
   padding-left: 76px;
+  padding-right: 12px;
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
 }
 
 .header-left {
@@ -165,7 +168,7 @@ function toggleLocale() {
 }
 
 .title-icon {
-  color: var(--accent-cyan);
+  color: var(--platform-accent);
   display: flex;
 }
 
@@ -201,6 +204,14 @@ function toggleLocale() {
   transition: border-color var(--transition-ui), background var(--transition-ui), box-shadow var(--transition-ui);
 }
 
+:global(:root[data-platform="macos"] .command-trigger){
+  height: 34px;
+  max-width: 520px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 72%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--border-subtle) 80%, transparent);
+}
+
 .command-trigger:hover,
 .command-trigger:focus-visible {
   background: var(--platform-bg-raised);
@@ -209,7 +220,7 @@ function toggleLocale() {
 }
 
 .command-icon {
-  color: var(--accent-cyan);
+  color: var(--text-faint);
   flex-shrink: 0;
 }
 
@@ -232,6 +243,15 @@ function toggleLocale() {
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
+}
+
+:global(:root[data-platform="macos"] .command-main){
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+:global(:root[data-platform="macos"] .command-sub){
+  font-size: 10.5px;
 }
 
 .command-sub {

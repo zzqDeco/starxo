@@ -204,6 +204,52 @@ const attachedFileName = computed(() => {
   flex-shrink: 0;
 }
 
+:global(:root[data-platform="macos"] .composer-meta){
+  margin-bottom: 6px;
+}
+
+:global(:root[data-platform="macos"] .mode-caption){
+  display: none;
+}
+
+:global(:root[data-platform="macos"] .mode-buttons){
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 70%, transparent);
+}
+
+:global(:root[data-platform="macos"] .mode-buttons .n-button){
+  --n-height: 22px !important;
+  --n-border-radius: 6px !important;
+  --n-padding: 0 8px !important;
+  --n-font-size: 11px !important;
+  --n-border: 1px solid transparent !important;
+  --n-border-hover: 1px solid transparent !important;
+  --n-border-pressed: 1px solid transparent !important;
+  --n-border-focus: 1px solid transparent !important;
+  --n-ripple-color: transparent !important;
+}
+
+:global(:root[data-platform="macos"] .mode-buttons .n-button--primary-type){
+  --n-color: var(--platform-bg-raised) !important;
+  --n-color-hover: var(--platform-bg-raised) !important;
+  --n-color-pressed: var(--platform-bg-raised) !important;
+  --n-color-focus: var(--platform-bg-raised) !important;
+  --n-text-color: var(--text-primary) !important;
+  --n-text-color-hover: var(--text-primary) !important;
+  --n-text-color-pressed: var(--text-primary) !important;
+  --n-text-color-focus: var(--text-primary) !important;
+  background: var(--platform-bg-raised) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--platform-shadow-1);
+}
+
+:global(:root[data-platform="macos"] .mode-buttons .n-button--primary-type .n-button__state-border),
+:global(:root[data-platform="macos"] .mode-buttons .n-button--primary-type .n-button__border){
+  border-color: transparent !important;
+}
+
 .composer-hint {
   font-size: var(--fs-2xs);
   color: var(--text-faint);
@@ -253,6 +299,16 @@ const attachedFileName = computed(() => {
   box-shadow: var(--platform-shadow-1);
   position: relative;
   transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
+}
+
+:global(:root[data-platform="macos"] .input-shell){
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 88%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--border-subtle) 86%, transparent);
+}
+
+:global(:root[data-platform="macos"] .chat-input .n-input-wrapper){
+  padding-left: 2px;
 }
 
 .input-shell::after {

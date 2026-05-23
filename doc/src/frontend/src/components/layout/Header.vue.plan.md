@@ -46,7 +46,9 @@
 ## 6. 变更影响面
 - 事件名从右侧面板切换语义迁移为工作区抽屉语义，父组件需同步。
 - 新增 `header.commandPalette / header.commandPlaceholder` i18n 键。
+- macOS 下作为原生 toolbar 处理：高度更紧凑、命令入口按 search field 呈现、图标按钮保持中性色。
 
 ## 7. 维护建议
 - 修改 emits 时同步更新 `MainLayout.vue` 的监听逻辑。
 - 保持 `wails-drag` 只用于可拖拽区域，避免影响按钮点击交互。
+- scoped CSS 平台选择器必须写成 `:global(:root[data-platform="macos"] .selector)`，避免污染 `:root`。

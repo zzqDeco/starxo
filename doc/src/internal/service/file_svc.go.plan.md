@@ -16,3 +16,4 @@
 ## 维护要点
 - `workspacePath` 先取 active runtime 的真实 workspace 作为默认值，再按 active session 的 runtime worktree state 覆盖；旧 `/workspace` 会由 transfer/operator 映射。
 - tmp 清理必须走 runtime 的路径守卫，不能复用 workspace 文件删除逻辑。
+- 上传前必须捕获 active sandbox registry ID，并在上传完成后用捕获值发出 `workspace:changed`，避免长上传期间切换 sandbox 后刷新错目标。

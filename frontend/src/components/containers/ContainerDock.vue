@@ -156,9 +156,28 @@ const activeContainerName = computed(() => {
 }
 
 .runtime-tab.active {
-  color: var(--accent-cyan);
-  background: var(--platform-bg-active);
-  border-color: color-mix(in srgb, var(--platform-accent) 26%, transparent);
+  color: var(--text-primary);
+  background: var(--platform-bg-raised);
+  border-color: var(--border-subtle);
+  box-shadow: var(--elev-1);
+}
+
+:global(:root[data-platform="macos"] .runtime-tab){
+  height: 28px;
+  border-radius: 7px;
+  background: transparent;
+}
+
+:global(:root[data-platform="macos"] .runtime-tabs){
+  padding: 2px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
+  border: 1px solid var(--border-subtle);
+  gap: 0;
+}
+
+:global(:root[data-platform="macos"] .runtime-tab){
+  border-color: transparent;
 }
 
 .runtime-body {

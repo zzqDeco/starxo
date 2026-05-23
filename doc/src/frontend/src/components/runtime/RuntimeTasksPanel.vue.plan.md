@@ -20,6 +20,7 @@
 - 右侧抽屉布局:
   - 左侧任务列表按 `startedAt` 倒序稳定展示。
   - 右侧详情区展示任务 id/type/status/duration/outputSize、命令、输出和错误。
+- macOS 下作为轻量 inspector sheet 处理：透明 backdrop、blur panel、低对比度行选中态，避免覆盖式网页 drawer 的厚重感。
 - 自动刷新:
   - 面板打开时拉取当前会话任务。
   - 每 4 秒刷新任务列表；选中任务仍在运行时同步刷新输出。
@@ -41,3 +42,4 @@
 ## 7. 维护建议
 - 如果未来 task output 支持分页加载，应复用后端 `offset/limit/nextOffset` 字段，而不是一次性读取全部内容。
 - 如果新增 task 类型，优先保持 `RuntimeTaskSnapshot.type/status` 通用显示，不在前端硬编码每类任务协议。
+- 事件监听需保留 `EventsOn` 返回的 cleanup，并在 `onUnmounted` 中逐个释放。

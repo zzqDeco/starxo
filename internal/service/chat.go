@@ -2187,28 +2187,31 @@ func runtimeToolWorkspaceChangePath(toolName, result string) (string, bool) {
 		if err := json.Unmarshal([]byte(result), &out); err == nil {
 			return out.FilePath, true
 		}
-		return "", true
+		return "", false
 	case tools.RuntimeToolEdit, "str_replace_editor":
 		var out tools.EditOutput
 		if err := json.Unmarshal([]byte(result), &out); err == nil {
 			return out.FilePath, true
 		}
-		return "", true
+		return "", false
 	case tools.RuntimeToolLSPEdit:
 		var out tools.LSPEditOutput
 		if err := json.Unmarshal([]byte(result), &out); err == nil {
+			if len(out.ChangedFiles) > 1 {
+				return "", out.EditCount > 0
+			}
 			if len(out.ChangedFiles) > 0 {
 				return out.ChangedFiles[0], out.EditCount > 0
 			}
 			return out.FilePath, out.EditCount > 0
 		}
-		return "", true
+		return "", false
 	case tools.RuntimeToolNotebookEdit:
 		var out tools.NotebookEditOutput
 		if err := json.Unmarshal([]byte(result), &out); err == nil {
 			return out.FilePath, out.Command != "view"
 		}
-		return "", true
+		return "", false
 	case tools.RuntimeToolBash, "shell_execute":
 		var out tools.BashOutput
 		if err := json.Unmarshal([]byte(result), &out); err == nil {
@@ -2218,7 +2221,7 @@ func runtimeToolWorkspaceChangePath(toolName, result string) (string, bool) {
 		if err := json.Unmarshal([]byte(result), &shellOut); err == nil {
 			return "", shellOut.ExitCode == 0
 		}
-		return "", true
+		return "", false
 	default:
 		return "", false
 	}

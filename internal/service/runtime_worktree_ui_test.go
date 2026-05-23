@@ -82,6 +82,18 @@ func TestRuntimeToolWorkspaceChangePath(t *testing.T) {
 	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolBash, string(failedBashRaw)); ok || path != "" {
 		t.Fatalf("expected failed bash not to emit workspace change, got path=%q ok=%v", path, ok)
 	}
+	if path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolWrite, "recoverable write error"); ok || path != "" {
+		t.Fatalf("expected unparseable write result not to emit workspace change, got path=%q ok=%v", path, ok)
+	}
+
+	lspRaw, err := json.Marshal(tools.LSPEditOutput{EditCount: 2, ChangedFiles: []string{"/workspace/a.go", "/workspace/b.go"}})
+	if err != nil {
+		t.Fatalf("marshal lsp edit: %v", err)
+	}
+	path, ok = runtimeToolWorkspaceChangePath(tools.RuntimeToolLSPEdit, string(lspRaw))
+	if !ok || path != "" {
+		t.Fatalf("expected multi-file lsp edit to refresh broadly, got path=%q ok=%v", path, ok)
+	}
 
 	notebookRaw, err := json.Marshal(tools.NotebookEditOutput{FilePath: "/workspace/a.ipynb", Command: "view"})
 	if err != nil {

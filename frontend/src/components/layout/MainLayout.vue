@@ -432,6 +432,26 @@ onUnmounted(() => {
   background: var(--platform-bg-content);
 }
 
+:global(:root[data-platform="macos"] .content-area){
+  padding: 0;
+}
+
+:global(:root[data-platform="macos"] .chat-shell),
+:global(:root[data-platform="macos"] .inspector-panel){
+  border-radius: 0;
+  border-top: 0;
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+:global(:root[data-platform="macos"] .chat-shell){
+  border-left: 0;
+}
+
+:global(:root[data-platform="macos"] .inspector-panel){
+  border-right: 0;
+}
+
 .responsive-dock,
 .mobile-sidebar {
   position: absolute;
