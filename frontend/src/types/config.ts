@@ -77,6 +77,23 @@ export interface RuntimeLSPConfig {
   servers?: RuntimeLSPServerConfig[]
 }
 
+export interface SubagentDefinitionConfig {
+  name: string
+  description: string
+  instruction?: string
+  allowedTools?: string[]
+  defaultIsolation?: 'none' | 'worktree'
+  backgroundAllowed?: boolean
+}
+
+export interface AgentRuntimeConfig {
+  engine: 'eino_v09'
+  toolSearchMode: 'client' | 'model_native' | 'auto'
+  agenticProtocol: 'off' | 'auto' | 'agentic_openai' | 'agentic_ark'
+  enableBuiltinDeepTransferFallback: boolean
+  subagents?: SubagentDefinitionConfig[]
+}
+
 export interface AppSettings {
   ssh: SSHConfig
   sandbox: SandboxConfig
@@ -89,7 +106,7 @@ export interface AppSettings {
   }
   llm: LLMConfig
   mcp: { servers: MCPServerConfig[] }
-  agent: { maxIterations: number; webSearch?: WebSearchConfig; lsp?: RuntimeLSPConfig }
+  agent: { maxIterations: number; runtime?: AgentRuntimeConfig; webSearch?: WebSearchConfig; lsp?: RuntimeLSPConfig }
 }
 
 export interface FileInfo {

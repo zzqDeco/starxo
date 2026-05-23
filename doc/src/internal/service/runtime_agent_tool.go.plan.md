@@ -18,9 +18,11 @@
 
 ## 4. 关键实现细节
 - `runtimeAgentInput` 支持 `description`、`prompt`、`subagent_type`、`background`、`isolation`，`model` 和 `mode` 作为后续扩展保留字段。
-- `subagent_type` 会规范化为 `general`、`code_writer`、`code_executor`、`file_manager`；`isolation` 会规范化为 `none` 或 `worktree`，非法值直接返回错误。
+- `subagent_type` 会通过 `agent.runtime.subagents` 对应的动态 registry 规范化；默认内置 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`。
+- `isolation` 会规范化为 `none` 或 `worktree`；缺省值来自 subagent definition 的 `defaultIsolation`。
+- subagent definition 可限制 `allowedTools`，也可通过 `backgroundAllowed=false` 禁止后台执行。
 - `Agent` 是 always-load runtime tool，但执行仍会经过 permission wrapper。
-- 子 agent 使用同一个 Eino chat model，并注入 Runtime V2 core tools；子工具同样走 permission gate 和 timeline event wrapper。
+- 子 agent 使用同一个 Eino chat model，并按 subagent definition 注入允许的 Runtime V2 core tools；子工具同样走 permission gate 和 timeline event wrapper。
 - `background=true` 时调用 `runtimeTaskManager.StartAgentTask`，任务输出落盘到 runtime task output 文件。
 - `isolation=worktree` 时通过 `runtimeWorkspaceManager.CreateIsolatedWorktree` 创建 git worktree，并用 context-scoped workspace override 只影响当前子 agent；父 session 的 active workspace 不会被临时切走。
 - 同步和后台 Agent 输出都会包含 worktree path/branch，便于后续人工审阅或合并。
@@ -38,3 +40,4 @@
 ## 7. 维护建议
 - 后续若启用 `model`/`mode` override，必须同步处理权限、成本和 runner lifecycle。
 - 子 agent 可用工具增加时，应先确认是否需要 deferred loading，而不是默认注入所有工具。
+- 新增或修改 subagent definition 时要同步检查 `allowedTools`、默认 worktree 策略和后台执行策略，避免子 agent 获得超出预期的能力。

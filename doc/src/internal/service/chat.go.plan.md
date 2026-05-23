@@ -10,13 +10,14 @@
 ## 2. 核心职责
 - 实现 `ChatService`，负责多会话聊天、runner 生命周期、事件流转、中断恢复、mode 切换。
 - 维护共享 runner 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
-- 构建并装配 deferred MCP surface：MCP action/resource catalog、`tool_search`、permission gate、per-model-call late binding、announcement 注入。
+- 构建并装配 deferred MCP/runtime surface：MCP action/resource catalog、Eino v0.9 `tool_search` bridge、permission gate、per-model-call late binding、announcement 注入。
 - 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
+- 管理 Eino v0.9 runtime beta path：默认 Message runtime，显式 `agenticProtocol` 时仅探测 agentic provider 可用性并允许失败回退。
 - 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、后台任务、文件 read state、diff summary、todos、plan 和 worktree state。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
@@ -140,12 +141,19 @@
   - runtime entries 同样经过 permission wrapper
   - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
   - background `Bash` 任务写入 `runtimeTaskManager`
+  - `Agent` tool 从 `agent.runtime.subagents` 构建动态 subagent registry，按 definition 决定 allowed tools、default isolation 和 background policy
 - Runtime V2 dynamic/deferred catalog：
   - `Agent` 作为 always-load runtime tool 注册，支持同步/后台子 agent 和 worktree 隔离
   - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册
-  - runtime deferred tools 和 MCP deferred tools 共用 ToolSearch、session discovery 和 permission pipeline
+  - runtime deferred tools 和 MCP deferred tools 共用 Eino v0.9 ToolSearch、session discovery 和 permission pipeline
+  - Eino `tool_search` 结果会回写到 Starxo `DiscoveredToolRecord`，保证 compact/restore 后已发现工具不会丢失
   - web tools 当前由本地应用进程执行 HTTP 请求，`WebSearch` provider 来自 `agent.webSearch` 配置；其他 runtime tools 使用远端 sandbox operator
   - `LSP` tool 会先尝试常驻 language server；server 缺失或启动失败时由 tools 层 fallback 到 `rg`/`sed`
+- Eino v0.9 context middleware：
+  - `summarization` 做 token-aware compact
+  - `reduction` 将大工具结果写入 `.starxo/tool-results`
+  - `skill` 从 `.starxo/skills` 和 `.claude/skills` 发现 `SKILL.md`
+  - `agentsmd` 注入 `AGENTS.md` 和 `.starxo/AGENTS.md` transient context
 - Runtime workspace manager：
   - 按 sessionID 记录 active worktree
   - 后续 Runtime V2 file/search/edit/shell 工具通过 context sessionID 解析当前 workspace

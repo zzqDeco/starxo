@@ -22,8 +22,9 @@ const (
 )
 
 type ToolSearchInput struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
+	Query      string `json:"query"`
+	Limit      int    `json:"limit,omitempty"`
+	MaxResults int    `json:"max_results,omitempty"`
 }
 
 type ToolSearchOutput struct {
@@ -65,6 +66,9 @@ func NewToolSearchTool(provider ToolSearchProvider) (tool.InvokableTool, error) 
 
 func ExecuteToolSearch(input ToolSearchInput, state ToolSearchState, now time.Time) (ToolSearchOutput, []model.DiscoveredToolRecord) {
 	limit := input.Limit
+	if limit <= 0 {
+		limit = input.MaxResults
+	}
 	if limit <= 0 {
 		limit = defaultToolSearchLimit
 	}

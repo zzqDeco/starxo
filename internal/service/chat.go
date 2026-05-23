@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	einotoolsearch "github.com/cloudwego/eino/adk/middlewares/dynamictool/toolsearch"
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -677,6 +678,30 @@ func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx conte
 
 		return fmt.Sprintf("unknown tool %s", name), nil
 	}
+}
+
+func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvider, mode string) (adk.ChatModelAgentMiddleware, error) {
+	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
+		return nil, nil
+	}
+	state := tools.ComputeDeferredMCPState(provider.bundle.MCPCatalog, nil, provider.permissionContext("", mode))
+	dynamicTools := make([]einotool.BaseTool, 0, len(state.SearchablePoolForMode))
+	for _, entry := range state.SearchablePoolForMode {
+		if entry.Tool == nil {
+			continue
+		}
+		dynamicTools = append(dynamicTools, entry.Tool)
+	}
+	if len(dynamicTools) == 0 {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return einotoolsearch.New(ctx, &einotoolsearch.Config{
+		DynamicTools:       dynamicTools,
+		UseModelToolSearch: false,
+	})
 }
 
 // ChatService manages chat interactions between the frontend and the AI agent.
@@ -1850,6 +1875,9 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				// Store tool result in session's context history
 				run.addToolResult(msg.ToolCallID, msg.Content)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
+					if call.name == tools.ToolSearchName {
+						s.recordToolSearchOutputForRun(sessionID, msg.Content)
+					}
 					run.recordRuntimeToolResult(call.name, call.args, msg.Content, s.now().UnixMilli())
 					s.emitRuntimeWorktreeToolEvent(sessionID, call.name, call.args, msg.Content)
 				}
@@ -1906,6 +1934,36 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	}
 
 	return strings.Join(allContents, "\n\n"), transferCount, false
+}
+
+func (s *ChatService) recordToolSearchOutputForRun(sessionID, content string) {
+	var output struct {
+		Matches []string `json:"matches"`
+	}
+	if err := json.Unmarshal([]byte(content), &output); err != nil || len(output.Matches) == 0 {
+		return
+	}
+
+	s.mu.Lock()
+	bundle := s.installedBundle
+	s.mu.Unlock()
+	if bundle == nil || bundle.MCPCatalog == nil {
+		return
+	}
+
+	now := s.now().UnixMilli()
+	for _, name := range output.Matches {
+		entry, ok := bundle.MCPCatalog.LookupExact(name)
+		if !ok || !entry.ShouldDefer || entry.AlwaysLoad {
+			continue
+		}
+		s.AddDiscoveredTool(sessionID, model.DiscoveredToolRecord{
+			CanonicalName: entry.CanonicalName,
+			Server:        entry.Server,
+			Kind:          entry.Kind,
+			DiscoveredAt:  now,
+		})
+	}
 }
 
 func timelineToolResultLimit(toolName string) int {
@@ -3256,6 +3314,14 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		return nil, fmt.Errorf("failed to create chat model: %w", err)
 	}
 	logger.RunnerEvent("chat_model_created", "type", cfg.LLM.Type, "model", cfg.LLM.Model)
+	if protocol := strings.TrimSpace(cfg.Agent.Runtime.AgenticProtocol); protocol != "" && protocol != llm.AgenticProtocolOff {
+		if _, agenticErr := llm.NewAgenticModel(ctx, cfg.LLM, protocol); agenticErr != nil {
+			logger.Warn("[RUNNER] Agentic beta model disabled; falling back to Message runtime",
+				"protocol", protocol, "error", agenticErr)
+		} else {
+			logger.RunnerEvent("agentic_beta_model_available", "protocol", protocol)
+		}
+	}
 
 	bundle := &RunnerBundle{
 		ConfigDigest:                  digest,
@@ -3268,6 +3334,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	if s.runtimeLSP != nil {
 		s.runtimeLSP.SetConfig(cfg.Agent.LSP)
 	}
+	subagentRegistry := newRuntimeSubagentRegistry(cfg.Agent.Runtime.Subagents)
 
 	topLevelCatalog := tools.NewToolCatalog()
 	runtimeEntries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
@@ -3283,7 +3350,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 			return nil, fmt.Errorf("failed to register runtime tool %s: %w", wrapped.CanonicalName, err)
 		}
 	}
-	agentEntry, err := s.newRuntimeAgentCatalogEntry(ctx, mdl, op, provider, ac)
+	agentEntry, err := s.newRuntimeAgentCatalogEntry(ctx, mdl, op, provider, ac, subagentRegistry)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
 		return nil, fmt.Errorf("failed to build runtime Agent tool: %w", err)
@@ -3347,23 +3414,40 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	}
 	bundle.MCPCatalog = topLevelCatalog
 
-	toolSearchTool, err := tools.NewToolSearchTool(provider)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build tool_search: %w", err)
+	extraTools := make([]einotool.BaseTool, 0, len(topLevelCatalog.CanonicalNames()))
+	for _, entry := range topLevelCatalog.Entries() {
+		if entry.ShouldDefer && !entry.AlwaysLoad {
+			continue
+		}
+		extraTools = append(extraTools, entry.Tool)
 	}
 
-	extraTools := make([]einotool.BaseTool, 0, len(topLevelCatalog.CanonicalNames())+1)
-	extraTools = append(extraTools, toolSearchTool)
-	extraTools = append(extraTools, topLevelCatalog.Tools()...)
-
 	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
+	defaultToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "default")
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build Eino v0.9 default tool_search bridge: %w", err)
+	}
+	planToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "plan")
+	if err != nil {
+		s.closeMCPHandlesLocked(surface.Handles)
+		return nil, fmt.Errorf("failed to build Eino v0.9 plan tool_search bridge: %w", err)
+	}
 	unknownToolsHandler := newDeferredUnknownToolHandler(provider)
+	defaultHandlers := []adk.ChatModelAgentMiddleware{deferredHandler}
+	if defaultToolSearchHandler != nil {
+		defaultHandlers = append([]adk.ChatModelAgentMiddleware{defaultToolSearchHandler}, defaultHandlers...)
+	}
+	planHandlers := []adk.ChatModelAgentMiddleware{deferredHandler}
+	if planToolSearchHandler != nil {
+		planHandlers = append([]adk.ChatModelAgentMiddleware{planToolSearchHandler}, planHandlers...)
+	}
 
 	deepAgentDefault, err := agent.BuildDeepAgentForMode(
 		ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault,
-		[]adk.ChatModelAgentMiddleware{deferredHandler},
+		defaultHandlers,
 		unknownToolsHandler,
+		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
 	)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
@@ -3373,8 +3457,9 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 
 	deepAgentPlan, err := agent.BuildDeepAgentForMode(
 		ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan,
-		[]adk.ChatModelAgentMiddleware{deferredHandler},
+		planHandlers,
 		unknownToolsHandler,
+		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
 	)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)

@@ -8,7 +8,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 
 ## Features
 
-- **Deep Agent Architecture** — Orchestrator agent delegates to 3 specialized sub-agents (code_writer / code_executor / file_manager) via `transfer_to_agent`
+- **Claude Code-style Agent Runtime** — Eino v0.9 runtime with direct tools, `ToolSearch`, dynamic `Agent` subagents, task management, worktree isolation, Skill, and AGENTS.md context
 - **Dual Execution Modes** — Default mode (direct execution) + Plan mode (Planner/Replanner structured execution)
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
@@ -33,7 +33,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 |------------|---------|---------|
 | Go | 1.24 | Primary language |
 | Wails | v2.11 | Desktop framework (Go + WebView) |
-| CloudWeGo Eino | v0.7 | Agent framework (ADK, Runner, Deep Agent, PlanExecute) |
+| CloudWeGo Eino | v0.9.0-beta.1 | Agent framework (ADK, Runner, Deep Agent, ToolSearch/Skill/Reduction/Summarization middleware) |
 | eino-ext | - | LLM Providers (OpenAI/Ark/Ollama) + MCP + Commandline |
 | golang.org/x/crypto | - | SSH connections |
 | pkg/sftp | v1.13 | SFTP file transfer |
@@ -63,12 +63,14 @@ starxo/
 │
 ├── internal/
 │   ├── agent/                       # AI Agent construction & configuration
-│   │   ├── deep_agent.go            #   Deep Agent orchestrator (3 sub-agents)
+│   │   ├── deep_agent.go            #   Eino v0.9 top-level agent builder
+│   │   ├── subagents.go             #   Dynamic runtime subagent registry
+│   │   ├── eino_v09_context.go      #   Skill, AGENTS.md, reduction, summarization middleware
 │   │   ├── runner.go                #   Runner builders (default + plan mode)
 │   │   ├── prompts.go               #   System prompts for all agents
-│   │   ├── codewriter.go            #   code_writer sub-agent
-│   │   ├── codeexecutor.go          #   code_executor sub-agent
-│   │   ├── filemanager.go           #   file_manager sub-agent
+│   │   ├── codewriter.go            #   Legacy transfer fallback code_writer sub-agent
+│   │   ├── codeexecutor.go          #   Legacy transfer fallback code_executor sub-agent
+│   │   ├── filemanager.go           #   Legacy transfer fallback file_manager sub-agent
 │   │   ├── context.go               #   AgentContext (workspace, sandbox, SSH info)
 │   │   ├── plan.go                  #   Plan/Step type definitions
 │   │   ├── plan_wrapper.go          #   Plan state persistence + event emission
@@ -111,7 +113,7 @@ starxo/
 │   │
 │   ├── config/                      # Configuration management
 │   ├── context/                     # Context engine (history, file context, windowing)
-│   ├── llm/                         # LLM provider factory
+│   ├── llm/                         # LLM provider factory + optional agentic beta adapters
 │   ├── model/                       # Data models (Message, Session, sandbox registry)
 │   ├── storage/                     # Persistence (sessions, sandboxes)
 │   ├── store/                       # CheckPointStore (interrupt/resume state)
@@ -164,7 +166,9 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 
 ### Agent Runtime V2
 
-The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
+The top-level agent now runs on Eino `v0.9.0-beta.1` and receives a smaller always-loaded runtime tool surface. Eino's dynamic `tool_search` middleware exposes deferred tools on demand while Starxo keeps catalog metadata, plan-mode filtering, permission checks, and discovered-tool persistence. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
+
+The fixed `transfer_to_agent` subagent path is no longer the default runtime. `Agent` is the delegation entry point and resolves `subagent_type` through `agent.runtime.subagents`. Built-ins include `general`, `code_writer`, `code_executor`, `file_manager`, and `reviewer`; each definition can constrain allowed tools, default isolation, instructions, and whether background execution is allowed. The previous deep-transfer implementation remains behind `agent.runtime.enableBuiltinDeepTransferFallback` for debugging only.
 
 Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `WorktreeDiff`, `WorktreeMerge`, `LSP`, `LSPEdit`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `LSPEdit` exposes writable language-server rename/format operations through the permission queue. `Agent` can run focused subagents synchronously or in the background, and can request context-scoped worktree isolation for bounded tasks without switching the parent session workspace.
 
@@ -184,7 +188,11 @@ Risky tool calls are routed through the Runtime V2 permission queue. The desktop
 
 Background Bash and Agent jobs can be inspected from the Runtime Tasks panel. The panel lists tasks for the active session, refreshes task status/output, supports copying output, and can stop running tasks through the Runtime V2 task APIs.
 
-Long sessions use token-aware context compaction. Starxo keeps recent turns in full and injects a compact runtime summary that preserves discovered tools, session permission grants, task output pointers, file read ranges, recent edit summaries, todos, plan state, and active worktree routing. Full message history remains persisted in `session_data.json`.
+Long sessions use token-aware context compaction. Starxo keeps recent turns in full and injects a compact runtime summary that preserves discovered tools, session permission grants, task output pointers, file read ranges, recent edit summaries, todos, plan state, and active worktree routing. Eino v0.9 summarization/reduction middleware stores large tool results under `.starxo/tool-results`, while Starxo's sidecar compact state keeps the runtime bookkeeping that must survive summarization. Full message history remains persisted in `session_data.json`.
+
+Skill middleware loads workspace-local `.starxo/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`. AGENTS.md middleware reads `AGENTS.md` and `.starxo/AGENTS.md` as transient runtime context without writing those instructions into persisted chat history.
+
+The experimental Eino agentic provider path is available through `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto`, but the default remains the existing `*schema.Message` path (`agenticProtocol=off`). If agentic provider setup fails, Starxo logs the failure and falls back to the Message runtime.
 
 ### Production Build
 

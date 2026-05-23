@@ -19,7 +19,7 @@ import (
 type runtimeAgentInput struct {
 	Description  string `json:"description,omitempty" jsonschema:"description=short description of the delegated task"`
 	Prompt       string `json:"prompt" jsonschema:"description=full task prompt for the subagent"`
-	SubagentType string `json:"subagent_type,omitempty" jsonschema:"description=general, code_writer, code_executor, or file_manager"`
+	SubagentType string `json:"subagent_type,omitempty" jsonschema:"description=general, code_writer, code_executor, file_manager, or reviewer"`
 	Model        string `json:"model,omitempty" jsonschema:"description=reserved for future model override"`
 	Mode         string `json:"mode,omitempty" jsonschema:"description=reserved for future mode override"`
 	Background   bool   `json:"background,omitempty" jsonschema:"description=run in background and return a task id"`
@@ -41,21 +41,25 @@ type runtimeAgentRunResult struct {
 	worktree tools.WorktreeOutput
 }
 
-func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext) (tools.CatalogEntry, error) {
+func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, registry *agent.SubagentRegistry) (tools.CatalogEntry, error) {
 	t, err := toolutils.InferTool(tools.RuntimeToolAgent,
 		"Spawn a focused runtime subagent for a well-scoped task. Supports synchronous or background execution and optional worktree isolation.",
 		func(ctx context.Context, input runtimeAgentInput) (runtimeAgentOutput, error) {
 			if strings.TrimSpace(input.Prompt) == "" {
 				return runtimeAgentOutput{}, fmt.Errorf("prompt is required")
 			}
-			normalized, err := normalizeRuntimeAgentInput(input)
+			normalized, err := normalizeRuntimeAgentInput(input, registry)
 			if err != nil {
 				return runtimeAgentOutput{}, err
+			}
+			def := registry.MustGet(normalized.SubagentType)
+			if normalized.Background && !def.BackgroundAllowed {
+				return runtimeAgentOutput{}, fmt.Errorf("subagent_type %s does not allow background execution", normalized.SubagentType)
 			}
 			agentID := fmt.Sprintf("agent-%d", s.now().UnixNano())
 			description := runtimeFirstNonEmpty(normalized.Description, normalized.SubagentType, "Runtime subagent")
 			run := func(runCtx context.Context) (runtimeAgentRunResult, error) {
-				return s.runRuntimeSubagent(runCtx, mdl, op, provider, ac, agentID, normalized)
+				return s.runRuntimeSubagent(runCtx, mdl, op, provider, ac, agentID, normalized, registry)
 			}
 			if normalized.Background {
 				if s.runtimeTasks == nil {
@@ -108,7 +112,7 @@ func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einom
 	}, nil
 }
 
-func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, agentID string, input runtimeAgentInput) (runtimeAgentRunResult, error) {
+func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, agentID string, input runtimeAgentInput, registry *agent.SubagentRegistry) (runtimeAgentRunResult, error) {
 	worktreeResult := tools.WorktreeOutput{}
 	if input.Isolation == "worktree" {
 		if s.runtimeWorkspaces == nil {
@@ -126,9 +130,13 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	if err != nil {
 		return runtimeAgentRunResult{}, err
 	}
+	def := registry.MustGet(input.SubagentType)
 	subTools := make([]einotool.BaseTool, 0, len(entries))
 	for _, entry := range entries {
 		if entry.CanonicalName == tools.RuntimeToolAgent {
+			continue
+		}
+		if !runtimeSubagentAllowsTool(def, entry.CanonicalName) {
 			continue
 		}
 		wrapped := entry
@@ -137,11 +145,10 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	}
 	subTools = agent.WrapToolsWithEvents(agentID, subTools, ac)
 
-	subagentType := runtimeFirstNonEmpty(input.SubagentType, "general")
 	sub, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        agentID,
-		Description: "Runtime subagent for delegated coding tasks.",
-		Instruction: runtimeSubagentInstruction(subagentType, currentRuntimeAgentWorkspace(ac.WorkspacePath, worktreeResult), input.Isolation),
+		Description: def.Description,
+		Instruction: agent.RuntimeSubagentPrompt(def, currentRuntimeAgentWorkspace(ac.WorkspacePath, worktreeResult), input.Isolation),
 		Model:       mdl,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
@@ -189,21 +196,25 @@ func collectRuntimeAgentResult(iter *adk.AsyncIterator[*adk.AgentEvent]) (string
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func normalizeRuntimeAgentInput(input runtimeAgentInput) (runtimeAgentInput, error) {
+func normalizeRuntimeAgentInput(input runtimeAgentInput, registry *agent.SubagentRegistry) (runtimeAgentInput, error) {
+	if registry == nil {
+		registry = agent.DefaultSubagentRegistry()
+	}
 	input.Description = strings.TrimSpace(input.Description)
 	input.Prompt = strings.TrimSpace(input.Prompt)
 	input.SubagentType = strings.TrimSpace(input.SubagentType)
 	if input.SubagentType == "" {
 		input.SubagentType = "general"
 	}
-	switch input.SubagentType {
-	case "general", "code_writer", "code_executor", "file_manager":
-	default:
-		return runtimeAgentInput{}, fmt.Errorf("unsupported subagent_type %q; use general, code_writer, code_executor, or file_manager", input.SubagentType)
+	normalizedType, err := registry.Normalize(input.SubagentType)
+	if err != nil {
+		return runtimeAgentInput{}, err
 	}
+	input.SubagentType = normalizedType
 	input.Isolation = strings.TrimSpace(input.Isolation)
 	if input.Isolation == "" {
-		input.Isolation = "none"
+		def := registry.MustGet(input.SubagentType)
+		input.Isolation = def.DefaultIsolation
 	}
 	switch input.Isolation {
 	case "none", "worktree":
@@ -232,16 +243,14 @@ func currentRuntimeAgentWorkspace(defaultWorkspace string, worktree tools.Worktr
 	return defaultWorkspace
 }
 
-func runtimeSubagentInstruction(subagentType, workspacePath, isolation string) string {
-	isolationNote := "none"
-	if isolation == "worktree" {
-		isolationNote = "worktree (changes are isolated from the parent session workspace unless explicitly merged later)"
+func runtimeSubagentAllowsTool(def agent.SubagentDefinition, toolName string) bool {
+	if len(def.AllowedTools) == 0 {
+		return true
 	}
-	return fmt.Sprintf(`You are a focused Starxo runtime subagent.
-
-Type: %s
-Workspace: %s
-Isolation: %s
-
-Complete only the delegated task. Use Read/Grep/Glob for inspection, Edit/Write for file changes, and Bash for commands. Keep output concise and include changed files, verification performed, and blockers.`, subagentType, workspacePath, isolationNote)
+	for _, allowed := range def.AllowedTools {
+		if allowed == toolName {
+			return true
+		}
+	}
+	return false
 }

@@ -4,26 +4,71 @@ import (
 	"strings"
 	"testing"
 
+	"starxo/internal/agent"
+	"starxo/internal/config"
 	"starxo/internal/tools"
 )
 
 func TestNormalizeRuntimeAgentInput(t *testing.T) {
+	registry := agent.DefaultSubagentRegistry()
 	input, err := normalizeRuntimeAgentInput(runtimeAgentInput{
 		Prompt:       "  do work  ",
 		SubagentType: "",
 		Isolation:    "",
-	})
+	}, registry)
 	if err != nil {
 		t.Fatalf("normalize runtime agent input: %v", err)
 	}
 	if input.Prompt != "do work" || input.SubagentType != "general" || input.Isolation != "none" {
 		t.Fatalf("unexpected normalized input: %#v", input)
 	}
-	if _, err := normalizeRuntimeAgentInput(runtimeAgentInput{Prompt: "x", SubagentType: "writer"}); err == nil {
+	if _, err := normalizeRuntimeAgentInput(runtimeAgentInput{Prompt: "x", SubagentType: "writer"}, registry); err == nil {
 		t.Fatalf("expected invalid subagent_type to fail")
 	}
-	if _, err := normalizeRuntimeAgentInput(runtimeAgentInput{Prompt: "x", Isolation: "container"}); err == nil {
+	if _, err := normalizeRuntimeAgentInput(runtimeAgentInput{Prompt: "x", Isolation: "container"}, registry); err == nil {
 		t.Fatalf("expected invalid isolation to fail")
+	}
+}
+
+func TestNormalizeRuntimeAgentInputUsesConfiguredRegistry(t *testing.T) {
+	registry := agent.NewSubagentRegistry([]agent.SubagentDefinition{{
+		Name:             "triage",
+		Description:      "Triage work",
+		DefaultIsolation: "worktree",
+	}})
+	input, err := normalizeRuntimeAgentInput(runtimeAgentInput{
+		Prompt:       "inspect",
+		SubagentType: "triage",
+	}, registry)
+	if err != nil {
+		t.Fatalf("normalize configured subagent: %v", err)
+	}
+	if input.SubagentType != "triage" || input.Isolation != "worktree" {
+		t.Fatalf("unexpected normalized configured subagent: %#v", input)
+	}
+}
+
+func TestRuntimeSubagentRegistryFromConfigPreservesPolicy(t *testing.T) {
+	allowBackground := false
+	registry := newRuntimeSubagentRegistry([]config.SubagentDefinitionConfig{{
+		Name:              "review_only",
+		Description:       "Review only",
+		DefaultIsolation:  "worktree",
+		AllowedTools:      []string{"Read", "Grep"},
+		BackgroundAllowed: &allowBackground,
+	}})
+	def, ok := registry.Get("review_only")
+	if !ok {
+		t.Fatalf("expected configured subagent")
+	}
+	if def.BackgroundAllowed {
+		t.Fatalf("expected background execution to be disabled")
+	}
+	if def.DefaultIsolation != "worktree" {
+		t.Fatalf("expected configured default isolation, got %q", def.DefaultIsolation)
+	}
+	if !runtimeSubagentAllowsTool(def, "Read") || runtimeSubagentAllowsTool(def, "Write") {
+		t.Fatalf("expected configured allowed tools to be enforced: %#v", def.AllowedTools)
 	}
 }
 
@@ -43,7 +88,8 @@ func TestFormatRuntimeAgentRunResultIncludesWorktreeMetadata(t *testing.T) {
 }
 
 func TestRuntimeSubagentInstructionMentionsIsolationWorkspace(t *testing.T) {
-	instruction := runtimeSubagentInstruction("code_writer", "/workspace/.starxo/worktrees/agent-1", "worktree")
+	def := agent.DefaultSubagentRegistry().MustGet("code_writer")
+	instruction := agent.RuntimeSubagentPrompt(def, "/workspace/.starxo/worktrees/agent-1", "worktree")
 	if !strings.Contains(instruction, "code_writer") ||
 		!strings.Contains(instruction, "/workspace/.starxo/worktrees/agent-1") ||
 		!strings.Contains(instruction, "worktree") ||
