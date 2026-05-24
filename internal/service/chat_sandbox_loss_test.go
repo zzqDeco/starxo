@@ -68,6 +68,26 @@ func TestUpdateSandboxNilCancelsStartingAgentRuns(t *testing.T) {
 	assert.Equal(t, uint64(11), run.pendingStartBundleGeneration)
 }
 
+func TestSandboxLossReportsIdlePendingInterruptClearedWithoutRepair(t *testing.T) {
+	chat := NewChatService(nil)
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun("sess-idle-interrupt")
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID: runtimeTurnCheckpointID("sess-idle-interrupt"),
+		InterruptID:  "interrupt-idle",
+		RunnerKind:   RunnerKindDefault,
+		ToolCallIDs:  []string{"call-missing-from-history"},
+	}
+	stopped, cleared, repaired := chat.cancelRunsForSandboxLossLocked()
+	chat.mu.Unlock()
+
+	assert.Empty(t, stopped)
+	assert.Equal(t, []string{"sess-idle-interrupt"}, cleared)
+	assert.Empty(t, repaired)
+	assert.Nil(t, run.pendingInterrupt)
+}
+
 func TestUpdateSandboxNonNilKeepsRunningAgentRuns(t *testing.T) {
 	chat := NewChatService(nil)
 	cancelled := false

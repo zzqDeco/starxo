@@ -1,6 +1,7 @@
 package agentctx
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/cloudwego/eino/schema"
@@ -16,6 +17,13 @@ type Engine struct {
 	fileCtx      *FileContext
 	maxTokens    int // approximate token budget for context window
 	systemPrompt string
+}
+
+// RepairResult summarizes synthetic or moved tool results inserted to make
+// assistant tool_call history valid for OpenAI-compatible providers.
+type RepairResult struct {
+	Count       int
+	ToolCallIDs []string
 }
 
 // NewEngine creates a new context engine with the given system prompt and
@@ -96,6 +104,7 @@ func (e *Engine) PrepareMessagesWithCompactFrom(pinnedPrefix []*schema.Message, 
 		}
 		historyMsgs = historyMsgs[historyStart:]
 	}
+	historyMsgs, _ = repairOrphanToolCallsWithReason(historyMsgs, "Error: tool execution was interrupted before this request")
 
 	prefix := make([]*schema.Message, 0, 1+len(pinnedPrefix))
 	prefix = append(prefix, sysMsg)
@@ -181,7 +190,7 @@ func (e *Engine) ExportMessages() []model.PersistedMessage {
 // ImportMessages restores conversation history from persisted messages.
 // Clears existing history first. Also repairs orphaned tool_calls that
 // were persisted without matching tool results (e.g., due to mid-stream crash).
-func (e *Engine) ImportMessages(messages []model.PersistedMessage) {
+func (e *Engine) ImportMessages(messages []model.PersistedMessage) RepairResult {
 	msgs := make([]*schema.Message, 0, len(messages))
 	for _, pm := range messages {
 		msg := &schema.Message{
@@ -202,39 +211,171 @@ func (e *Engine) ImportMessages(messages []model.PersistedMessage) {
 		msgs = append(msgs, msg)
 	}
 
-	// Repair orphaned tool calls before setting history
-	msgs = repairOrphanToolCalls(msgs)
+	msgs, repair := repairOrphanToolCallsWithReason(msgs, "Error: tool execution was interrupted before the session was restored")
 	e.history.SetAll(msgs)
+	return repair
 }
 
-// repairOrphanToolCalls finds tool_call IDs that have no matching tool result
-// message and injects synthetic error responses. This prevents LLM API errors
-// like "tool_calls must be followed by tool messages responding to each tool_call_id".
+// RepairOrphanToolCalls fixes the persisted history in place so assistant
+// tool_calls are immediately followed by matching tool results.
+func (e *Engine) RepairOrphanToolCalls(reason string) RepairResult {
+	msgs := e.history.GetAll()
+	repaired, result := repairOrphanToolCallsWithReason(msgs, reason)
+	if result.Count > 0 {
+		e.history.SetAll(repaired)
+	}
+	return result
+}
+
 func repairOrphanToolCalls(msgs []*schema.Message) []*schema.Message {
-	// Collect all tool_call IDs that are pending (no matching result)
-	pending := make(map[string]bool)
-	for _, msg := range msgs {
+	repaired, _ := repairOrphanToolCallsWithReason(msgs, "Error: tool execution was interrupted")
+	return repaired
+}
+
+type toolResultRef struct {
+	index int
+	msg   *schema.Message
+}
+
+// repairOrphanToolCallsWithReason enforces the OpenAI-compatible invariant that
+// every assistant message with tool_calls is immediately followed by one tool
+// message for each tool_call_id. Existing non-adjacent tool results are moved
+// into the correct position; missing results are synthesized.
+func repairOrphanToolCallsWithReason(msgs []*schema.Message, reason string) ([]*schema.Message, RepairResult) {
+	if len(msgs) == 0 {
+		return msgs, RepairResult{}
+	}
+	if reason == "" {
+		reason = "Error: tool execution was interrupted"
+	}
+
+	toolResults := make(map[string][]toolResultRef)
+	for i, msg := range msgs {
+		if msg == nil || msg.Role != schema.Tool || msg.ToolCallID == "" {
+			continue
+		}
+		toolResults[msg.ToolCallID] = append(toolResults[msg.ToolCallID], toolResultRef{index: i, msg: msg})
+	}
+
+	usedToolResults := make(map[int]bool)
+	out := make([]*schema.Message, 0, len(msgs))
+	result := RepairResult{}
+	recordRepair := func(id string) {
+		if id == "" {
+			return
+		}
+		result.Count++
+		result.ToolCallIDs = append(result.ToolCallIDs, id)
+	}
+
+	for i := 0; i < len(msgs); i++ {
+		if usedToolResults[i] {
+			continue
+		}
+		msg := msgs[i]
+		if msg == nil {
+			continue
+		}
+		if len(msg.ToolCalls) == 0 {
+			if msg.Role == schema.Tool && msg.ToolCallID != "" {
+				// A tool message outside an assistant tool_call group is invalid
+				// for provider APIs. It is either moved by the group repair above
+				// or dropped as stale synthetic output.
+				recordRepair(msg.ToolCallID)
+				continue
+			}
+			out = append(out, msg)
+			continue
+		}
+
+		out = append(out, msg)
+		expected := make([]string, 0, len(msg.ToolCalls))
+		expectedSet := make(map[string]struct{}, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
-			pending[tc.ID] = true
+			if tc.ID == "" {
+				continue
+			}
+			if _, ok := expectedSet[tc.ID]; ok {
+				continue
+			}
+			expectedSet[tc.ID] = struct{}{}
+			expected = append(expected, tc.ID)
 		}
-		if msg.ToolCallID != "" {
-			delete(pending, msg.ToolCallID)
+
+		immediate := make(map[string]*schema.Message, len(expected))
+		j := i + 1
+		for j < len(msgs) {
+			next := msgs[j]
+			if next == nil || next.Role != schema.Tool || next.ToolCallID == "" {
+				break
+			}
+			usedToolResults[j] = true
+			if _, ok := expectedSet[next.ToolCallID]; ok {
+				if _, exists := immediate[next.ToolCallID]; !exists {
+					immediate[next.ToolCallID] = next
+				} else {
+					recordRepair(next.ToolCallID)
+				}
+			} else {
+				recordRepair(next.ToolCallID)
+			}
+			j++
 		}
+
+		for _, id := range expected {
+			if existing := immediate[id]; existing != nil {
+				out = append(out, existing)
+				continue
+			}
+			if moved := firstUnusedToolResultAfter(toolResults[id], i, usedToolResults); moved != nil {
+				usedToolResults[moved.index] = true
+				out = append(out, moved.msg)
+				recordRepair(id)
+				continue
+			}
+			out = append(out, &schema.Message{
+				Role:       schema.Tool,
+				Content:    reason,
+				ToolCallID: id,
+			})
+			recordRepair(id)
+		}
+		i = j - 1
 	}
 
-	if len(pending) == 0 {
-		return msgs
+	if len(result.ToolCallIDs) > 1 {
+		sort.Strings(result.ToolCallIDs)
+		result.ToolCallIDs = compactStrings(result.ToolCallIDs)
+		result.Count = len(result.ToolCallIDs)
 	}
+	return out, result
+}
 
-	// Inject synthetic tool results for orphans
-	for id := range pending {
-		msgs = append(msgs, &schema.Message{
-			Role:       schema.Tool,
-			Content:    "Error: tool execution was interrupted",
-			ToolCallID: id,
-		})
+func firstUnusedToolResultAfter(refs []toolResultRef, assistantIndex int, used map[int]bool) *toolResultRef {
+	for _, ref := range refs {
+		if ref.index <= assistantIndex || used[ref.index] {
+			continue
+		}
+		cp := ref
+		return &cp
 	}
-	return msgs
+	return nil
+}
+
+func compactStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	out := values[:0]
+	last := ""
+	for i, value := range values {
+		if i > 0 && value == last {
+			continue
+		}
+		out = append(out, value)
+		last = value
+	}
+	return out
 }
 
 // MessageCount returns the number of messages in the conversation history.

@@ -498,6 +498,213 @@ func TestProcessEventsForRunPreemptKeepsOlderDuplicateToolCallHistory(t *testing
 	}
 }
 
+func TestProcessEventsForRunInterruptTracksPendingToolCallIDs(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-interrupt-tool-call"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	go func() {
+		gen.Send(&adk.AgentEvent{
+			AgentName: "coding_agent",
+			Output: &adk.AgentOutput{MessageOutput: &adk.MessageVariant{Message: &schema.Message{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{{
+					ID:       "call-ask",
+					Function: schema.FunctionCall{Name: "ask_user", Arguments: `{"questions":["path?"]}`},
+				}},
+			}}},
+		})
+		gen.Send(&adk.AgentEvent{
+			AgentName: "coding_agent",
+			Action: &adk.AgentAction{Interrupted: &adk.InterruptInfo{InterruptContexts: []*adk.InterruptCtx{{
+				ID:   "interrupt-ask",
+				Info: &tools.FollowUpInfo{Questions: []string{"path?"}},
+			}}}},
+		})
+		gen.Close()
+	}()
+
+	_, _, interrupted, _ := chat.processEventsForRun(iter, runtimeTurnCheckpointID(sessionID), run, nil)
+	if !interrupted {
+		t.Fatalf("expected business interrupt")
+	}
+	chat.mu.Lock()
+	pending := run.pendingInterrupt
+	chat.mu.Unlock()
+	if pending == nil {
+		t.Fatalf("expected pending interrupt")
+	}
+	if len(pending.ToolCallIDs) != 1 || pending.ToolCallIDs[0] != "call-ask" {
+		t.Fatalf("expected pending interrupt to record tool call id, got %#v", pending.ToolCallIDs)
+	}
+}
+
+func TestSendMessageSupersedesPendingInterruptRepairsOrphanToolHistory(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	chat.SetContext(context.Background())
+	sessionID := "sess-supersede-interrupt"
+	chat.SetActiveSessionID(sessionID)
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.addMessage(&schema.Message{
+		Role:    schema.Assistant,
+		Content: "need input",
+		ToolCalls: []schema.ToolCall{{
+			ID:       "call-ask",
+			Function: schema.FunctionCall{Name: "ask_user", Arguments: `{"questions":["path?"]}`},
+		}},
+	})
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID:     runtimeTurnCheckpointID(sessionID),
+		InterruptID:      "interrupt-ask",
+		BundleGeneration: 1,
+		RunnerKind:       RunnerKindDefault,
+		Info:             &tools.FollowUpInfo{Questions: []string{"path?"}},
+		ToolCallIDs:      []string{"call-ask"},
+	}
+	chat.installedBundle = &RunnerBundle{
+		Generation:           1,
+		ConfigDigest:         mustConfigDigest(t, chat),
+		DefaultAgent:         runtimeTurnTestAgent{},
+		PlanAgent:            runtimeTurnTestAgent{},
+		LastFreshnessCheckAt: time.Now(),
+	}
+	chat.nextGeneration = 1
+	chat.mu.Unlock()
+
+	if err := chat.SendMessage("write a new standalone file"); err != nil {
+		t.Fatalf("send superseding message: %v", err)
+	}
+	chat.mu.Lock()
+	pending := run.pendingInterrupt
+	chat.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("expected pending interrupt to be cleared")
+	}
+	messages := run.ctxEngine.ExportMessages()
+	assertPersistedToolPairing(t, messages)
+	foundRepair := false
+	for i, msg := range messages {
+		if msg.Role == string(schema.Tool) && msg.ToolCallID == "call-ask" {
+			foundRepair = true
+			if msg.Content != orphanRepairSupersededReason {
+				t.Fatalf("unexpected repair content %q", msg.Content)
+			}
+			if i == 0 || len(messages[i-1].ToolCalls) == 0 {
+				t.Fatalf("repair result is not adjacent to assistant tool call: %#v", messages)
+			}
+		}
+	}
+	if !foundRepair {
+		t.Fatalf("expected synthetic repair result for interrupted ask_user call, got %#v", messages)
+	}
+}
+
+func TestStopGenerationRepairsIdlePendingInterrupt(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-stop-interrupt"
+	chat.SetActiveSessionID(sessionID)
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.addMessage(&schema.Message{
+		Role: schema.Assistant,
+		ToolCalls: []schema.ToolCall{{
+			ID:       "call-stop",
+			Function: schema.FunctionCall{Name: "ask_choice", Arguments: `{}`},
+		}},
+	})
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID: runtimeTurnCheckpointID(sessionID),
+		InterruptID:  "interrupt-stop",
+		RunnerKind:   RunnerKindDefault,
+		ToolCallIDs:  []string{"call-stop"},
+	}
+	chat.mu.Unlock()
+
+	if err := chat.StopGeneration(); err != nil {
+		t.Fatalf("stop generation: %v", err)
+	}
+	messages := run.ctxEngine.ExportMessages()
+	assertPersistedToolPairing(t, messages)
+	found := false
+	for _, msg := range messages {
+		if msg.Role == string(schema.Tool) && msg.ToolCallID == "call-stop" {
+			found = true
+			if msg.Content != orphanRepairStoppedReason {
+				t.Fatalf("unexpected stop repair content %q", msg.Content)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected stop repair result, got %#v", messages)
+	}
+}
+
+func TestRestoreSessionDataRepairsLegacyOrphanToolHistory(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-legacy-orphan"
+	chat.RestoreSessionData(sessionID, &model.SessionData{
+		Version: model.SessionDataVersion,
+		Messages: []model.PersistedMessage{
+			{
+				Role:    string(schema.Assistant),
+				Content: "need input",
+				ToolCalls: []model.PersistedToolCall{{
+					ID: "call-legacy",
+					Function: model.PersistedToolCallFunction{
+						Name:      "ask_user",
+						Arguments: `{"questions":["path?"]}`,
+					},
+				}},
+			},
+			{Role: string(schema.User), Content: "new task"},
+		},
+	})
+
+	snapshot, err := chat.ExportSessionSnapshot(sessionID)
+	if err != nil {
+		t.Fatalf("export snapshot: %v", err)
+	}
+	messages := snapshot.SessionData.Messages
+	assertPersistedToolPairing(t, messages)
+	if len(messages) != 3 {
+		t.Fatalf("expected repaired assistant/tool/user history, got %#v", messages)
+	}
+	if messages[1].Role != string(schema.Tool) || messages[1].ToolCallID != "call-legacy" {
+		t.Fatalf("expected repaired tool result before user message, got %#v", messages)
+	}
+	if messages[2].Role != string(schema.User) || messages[2].Content != "new task" {
+		t.Fatalf("expected user message after repaired tool group, got %#v", messages)
+	}
+}
+
+func assertPersistedToolPairing(t *testing.T, messages []model.PersistedMessage) {
+	t.Helper()
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
+		if msg.Role == string(schema.Tool) && msg.ToolCallID != "" {
+			t.Fatalf("tool result %q at index %d is not attached to an assistant tool call group: %#v", msg.ToolCallID, i, messages)
+		}
+		if len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			i++
+			if i >= len(messages) {
+				t.Fatalf("missing tool result for %q at end of messages: %#v", tc.ID, messages)
+			}
+			result := messages[i]
+			if result.Role != string(schema.Tool) || result.ToolCallID != tc.ID {
+				t.Fatalf("expected tool result for %q at index %d, got %#v in %#v", tc.ID, i, result, messages)
+			}
+		}
+	}
+}
+
 func TestRemoveSessionStopsIdleRuntimeTurnLoop(t *testing.T) {
 	chat := NewChatService(nil)
 	sessionID := "sess-remove-loop"

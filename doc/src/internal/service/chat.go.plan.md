@@ -53,6 +53,7 @@
   - `pendingPlanApproval`
   - `pendingPlanAttachment`
   - `activeObjective`
+- `PendingInterrupt` 记录 interrupt id、bundle generation、runner kind、objective 和触发 interrupt 时尚未完成的 tool call ids。
 - `SessionData.Mode` 是 persisted truth source：
   - `SessionRun.importSessionData(...)` restore 时把 `SessionData.Mode` hydrate 回 `run.mode`
   - `SessionRun.snapshot()` 导出 v4 `SessionData` 时带上 `Mode` 和三类 plan state
@@ -75,6 +76,11 @@
   - 由 `RunStateEvent` 承载 `sessionId/running/currentAgent/mode/hasInterrupt`
   - 在启动准备、真实 running、agent 切换、中断挂起、resume、结束和取消 interrupt 时广播
   - `emitRunState()` 在无 Wails events context（例如 Go 单测）时短路，避免 Wails runtime 对普通 context 触发 fatal
+- interrupt 历史修复：
+  - `ask_user` / `ask_choice` 触发 business interrupt 时，assistant tool-call message 可能已写入 history
+  - 如果用户发新 standalone turn、stop、sandbox lost 等路径清理 pending interrupt，必须先补齐或移动 tool result，满足 provider tool-call pairing
+  - restore 旧 session 时若发现 orphan tool call，会记录日志并异步调度 session save，把修复后的 history 写回
+  - provider 仍返回 `No tool output found` 时，timeline error 会附带 session id 提示，便于定位未覆盖的 repair 路径
 - `ClearHistory()`：
   - 清空消息/显示/streaming/deferred state 与 plan state
   - 清空当前 active session 对应的 todo bucket，不影响其他后台 session 的 todo 状态
