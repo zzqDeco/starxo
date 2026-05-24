@@ -221,7 +221,7 @@ func (r *SessionRun) addMessage(msg *schema.Message) {
 	r.ctxEngine.AddMessage(msg)
 }
 
-func (r *SessionRun) removeToolCallGroupsForIDs(toolCallIDs map[string]pendingRuntimeToolCall) int {
+func (r *SessionRun) removeCurrentTurnToolCallsForIDs(toolCallIDs map[string]pendingRuntimeToolCall, toolMessages, toolResultMessages []*schema.Message) int {
 	if len(toolCallIDs) == 0 {
 		return 0
 	}
@@ -233,24 +233,16 @@ func (r *SessionRun) removeToolCallGroupsForIDs(toolCallIDs map[string]pendingRu
 	for id := range toolCallIDs {
 		removeIDs[id] = struct{}{}
 	}
-	for _, msg := range msgs {
-		if msg == nil {
-			continue
+	turnMessages := make(map[*schema.Message]struct{}, len(toolMessages))
+	for _, msg := range toolMessages {
+		if msg != nil {
+			turnMessages[msg] = struct{}{}
 		}
-		removeGroup := false
-		for _, tc := range msg.ToolCalls {
-			if _, ok := toolCallIDs[tc.ID]; ok {
-				removeGroup = true
-				break
-			}
-		}
-		if !removeGroup {
-			continue
-		}
-		for _, tc := range msg.ToolCalls {
-			if tc.ID != "" {
-				removeIDs[tc.ID] = struct{}{}
-			}
+	}
+	turnResults := make(map[*schema.Message]struct{}, len(toolResultMessages))
+	for _, msg := range toolResultMessages {
+		if msg != nil {
+			turnResults[msg] = struct{}{}
 		}
 	}
 	filtered := make([]*schema.Message, 0, len(msgs))
@@ -260,19 +252,29 @@ func (r *SessionRun) removeToolCallGroupsForIDs(toolCallIDs map[string]pendingRu
 			filtered = append(filtered, msg)
 			continue
 		}
-		drop := false
-		for _, tc := range msg.ToolCalls {
-			if _, ok := removeIDs[tc.ID]; ok {
-				drop = true
-				break
+		if _, isCurrentTurnToolMessage := turnMessages[msg]; isCurrentTurnToolMessage && len(msg.ToolCalls) > 0 {
+			keptCalls := make([]schema.ToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				if _, drop := removeIDs[tc.ID]; drop {
+					continue
+				}
+				keptCalls = append(keptCalls, tc)
+			}
+			if len(keptCalls) != len(msg.ToolCalls) {
+				if len(keptCalls) == 0 && msg.Content == "" {
+					removed++
+					continue
+				}
+				cloned := *msg
+				cloned.ToolCalls = keptCalls
+				msg = &cloned
 			}
 		}
-		if !drop && msg.ToolCallID != "" {
-			_, drop = removeIDs[msg.ToolCallID]
-		}
-		if drop {
-			removed++
-			continue
+		if _, isCurrentTurnToolResult := turnResults[msg]; isCurrentTurnToolResult && msg.ToolCallID != "" {
+			if _, drop := removeIDs[msg.ToolCallID]; drop {
+				removed++
+				continue
+			}
 		}
 		filtered = append(filtered, msg)
 	}
@@ -1372,7 +1374,9 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		s.mu.Unlock()
 
 		if !preempt {
-			s.deleteRuntimeTurnCheckpoint(sessionID)
+			if err := s.deleteRuntimeTurnCheckpoint(sessionID); err != nil {
+				return err
+			}
 		}
 		ok := false
 		if preempt {
@@ -1499,6 +1503,8 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 
 	// Track pending tool_call_ids to detect orphans (tool calls without results)
 	pendingToolCalls := make(map[string]pendingRuntimeToolCall)
+	var currentTurnToolMessages []*schema.Message
+	var currentTurnToolResultMessages []*schema.Message
 
 	sessionID := run.sessionID
 
@@ -1639,11 +1645,13 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				}
 
 				// Store tool call message in session's context history
-				run.addMessage(&schema.Message{
+				toolMsg := &schema.Message{
 					Role:      schema.Assistant,
 					Content:   msg.Content,
 					ToolCalls: msg.ToolCalls,
-				})
+				}
+				run.addMessage(toolMsg)
+				currentTurnToolMessages = append(currentTurnToolMessages, toolMsg)
 				// Track pending tool call IDs
 				for _, tc := range msg.ToolCalls {
 					pendingToolCalls[tc.ID] = pendingRuntimeToolCall{
@@ -1669,8 +1677,14 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 					Timestamp: time.Now().UnixMilli(),
 				}, run)
 
-				// Store tool result in session's context history
-				run.addToolResult(msg.ToolCallID, msg.Content)
+				// Store tool result in session's context history.
+				toolResultMsg := &schema.Message{
+					Role:       schema.Tool,
+					Content:    msg.Content,
+					ToolCallID: msg.ToolCallID,
+				}
+				run.addMessage(toolResultMsg)
+				currentTurnToolResultMessages = append(currentTurnToolResultMessages, toolResultMsg)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
 					if call.name == tools.ToolSearchName {
 						s.recordToolSearchOutputForRun(run, msg)
@@ -1725,7 +1739,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	wasPreempted := runtimeTurnSignalClosed(preempted)
 	if len(pendingToolCalls) > 0 {
 		if wasPreempted {
-			removed := run.removeToolCallGroupsForIDs(pendingToolCalls)
+			removed := run.removeCurrentTurnToolCallsForIDs(pendingToolCalls, currentTurnToolMessages, currentTurnToolResultMessages)
 			logger.Info("[CHAT] Dropped unresolved tool-call history for preempted turn",
 				"pending_tool_calls", len(pendingToolCalls), "removed_messages", removed, "session", sessionID)
 		} else {
@@ -2308,12 +2322,18 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 	}
 	sessionID := run.sessionID
 	item := s.newRuntimeResumeAnswerItem(sessionID, pending, answer)
+	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
 	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
 
 	logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer), "session", sessionID)
 	if ok, _ := loop.Push(item); !ok {
+		s.mu.Lock()
+		if run = s.sessions[sessionID]; run != nil && run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
+		s.mu.Unlock()
 		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
 	s.mu.Lock()
@@ -2322,10 +2342,12 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 	if run.turnLoop != loop {
+		if run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
 		s.mu.Unlock()
 		return fmt.Errorf("runtime turn loop changed for session %s", sessionID)
 	}
-	run.pendingInterrupt = nil
 	s.startRuntimeTurnLoopLocked(sessionID, run, loop)
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
@@ -2351,12 +2373,18 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 	}
 	sessionID := run.sessionID
 	item := s.newRuntimeResumeChoiceItem(sessionID, pending, selectedIndex)
+	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
 	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
 
 	logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex, "session", sessionID)
 	if ok, _ := loop.Push(item); !ok {
+		s.mu.Lock()
+		if run = s.sessions[sessionID]; run != nil && run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
+		s.mu.Unlock()
 		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
 	s.mu.Lock()
@@ -2365,10 +2393,12 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 	if run.turnLoop != loop {
+		if run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
 		s.mu.Unlock()
 		return fmt.Errorf("runtime turn loop changed for session %s", sessionID)
 	}
-	run.pendingInterrupt = nil
 	s.startRuntimeTurnLoopLocked(sessionID, run, loop)
 	s.mu.Unlock()
 	s.emitRunState(sessionID)

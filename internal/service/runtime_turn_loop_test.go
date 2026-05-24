@@ -252,6 +252,31 @@ func (s *runtimeTurnTrackingCheckpointStore) deletedKey(key string) bool {
 var _ compose.CheckPointStore = (*runtimeTurnTrackingCheckpointStore)(nil)
 var _ runtimeCheckpointDeleter = (*runtimeTurnTrackingCheckpointStore)(nil)
 
+type runtimeTurnTombstoneCheckpointStore struct {
+	mu     sync.Mutex
+	values map[string][]byte
+}
+
+func newRuntimeTurnTombstoneCheckpointStore() *runtimeTurnTombstoneCheckpointStore {
+	return &runtimeTurnTombstoneCheckpointStore{values: make(map[string][]byte)}
+}
+
+func (s *runtimeTurnTombstoneCheckpointStore) Get(_ context.Context, key string) ([]byte, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.values[key]
+	return append([]byte{}, v...), ok, nil
+}
+
+func (s *runtimeTurnTombstoneCheckpointStore) Set(_ context.Context, key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[key] = append([]byte{}, value...)
+	return nil
+}
+
+var _ compose.CheckPointStore = (*runtimeTurnTombstoneCheckpointStore)(nil)
+
 func TestSendMessageDeletesStaleRuntimeCheckpointBeforeNormalTurn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	store, err := config.NewStore()
@@ -283,6 +308,68 @@ func TestSendMessageDeletesStaleRuntimeCheckpointBeforeNormalTurn(t *testing.T) 
 	}
 	if !checkpoints.deletedKey(runtimeTurnCheckpointID("sess-stale")) {
 		t.Fatalf("expected normal user turn to delete stale runtime checkpoint")
+	}
+}
+
+func TestDeleteRuntimeTurnCheckpointTombstonesWhenDeleteUnsupported(t *testing.T) {
+	chat := NewChatService(nil)
+	checkpoints := newRuntimeTurnTombstoneCheckpointStore()
+	chat.checkpointStore = checkpoints
+	key := runtimeTurnCheckpointID("sess-tombstone")
+	if err := checkpoints.Set(context.Background(), key, []byte("stale-checkpoint")); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+
+	if err := chat.deleteRuntimeTurnCheckpoint("sess-tombstone"); err != nil {
+		t.Fatalf("delete checkpoint: %v", err)
+	}
+	value, ok, err := checkpoints.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get checkpoint: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected tombstone value to remain present")
+	}
+	if len(value) != 0 {
+		t.Fatalf("expected zero-length tombstone, got %q", string(value))
+	}
+}
+
+func TestRuntimeTurnLoopRecoversUserTurnWhenResumePayloadMissing(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	chat.SetContext(context.Background())
+	sessionID := "sess-resume-superseded"
+	chat.SetActiveSessionID(sessionID)
+	recorder := &runtimeTurnRecordingAgent{calls: make(chan []*schema.Message, 1)}
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	loop := chat.ensureRuntimeTurnLoopLocked(sessionID, run)
+	chat.installedBundle = &RunnerBundle{
+		Generation:           1,
+		ConfigDigest:         mustConfigDigest(t, chat),
+		DefaultAgent:         recorder,
+		PlanAgent:            recorder,
+		LastFreshnessCheckAt: time.Now(),
+	}
+	chat.nextGeneration = 1
+	chat.mu.Unlock()
+
+	replacement := chat.newRuntimeUserTurnItem(sessionID, "replace stale interrupt with a new objective")
+	exit := &adk.TurnLoopExitState[runtimeTurnItem, *schema.Message]{
+		ExitReason:     errRuntimeResumeNeedsNormalTurn,
+		UnhandledItems: []runtimeTurnItem{replacement},
+	}
+	chat.finishRuntimeTurnLoop(sessionID, loop, exit)
+
+	var messages []*schema.Message
+	select {
+	case messages = <-recorder.calls:
+	case <-time.After(time.Second):
+		t.Fatalf("expected superseding user turn to run after stale checkpoint cleanup")
+	}
+	if !runtimeTurnMessagesContain(messages, replacement.UserMessage) {
+		t.Fatalf("expected replacement objective in agent input, got %#v", messages)
 	}
 }
 
@@ -325,6 +412,77 @@ func TestProcessEventsForRunPreemptDropsUnresolvedToolCallHistory(t *testing.T) 
 		if msg.Content == "Error: tool execution failed or was interrupted" {
 			t.Fatalf("expected no synthetic tool failure for preempted turn, got %#v", messages)
 		}
+	}
+}
+
+func TestProcessEventsForRunPreemptKeepsOlderDuplicateToolCallHistory(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-preempt-duplicate"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+	run.addMessage(&schema.Message{
+		Role:    schema.Assistant,
+		Content: "older completed tool call",
+		ToolCalls: []schema.ToolCall{{
+			ID:       "call-preempt",
+			Function: schema.FunctionCall{Name: "Read", Arguments: `{"file_path":"old.txt"}`},
+		}},
+	})
+	run.addMessage(&schema.Message{
+		Role:       schema.Tool,
+		ToolCallID: "call-preempt",
+		Content:    "older result",
+	})
+
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	go func() {
+		gen.Send(&adk.AgentEvent{
+			AgentName: "coding_agent",
+			Output: &adk.AgentOutput{MessageOutput: &adk.MessageVariant{Message: &schema.Message{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{{
+					ID:       "call-preempt",
+					Function: schema.FunctionCall{Name: "Bash", Arguments: `{"command":"sleep 10"}`},
+				}},
+			}}},
+		})
+		gen.Close()
+	}()
+	preempted := make(chan struct{})
+	close(preempted)
+
+	_, _, interrupted, wasPreempted := chat.processEventsForRun(iter, runtimeTurnCheckpointID(sessionID), run, preempted)
+	if interrupted {
+		t.Fatalf("did not expect interrupt")
+	}
+	if !wasPreempted {
+		t.Fatalf("expected preempted turn")
+	}
+	messages := run.ctxEngine.ExportMessages()
+	assistantToolCalls := 0
+	toolResults := 0
+	for _, msg := range messages {
+		if msg.Content == "Error: tool execution failed or was interrupted" {
+			t.Fatalf("expected no synthetic tool failure for preempted turn, got %#v", messages)
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == "call-preempt" {
+				assistantToolCalls++
+				if msg.Content != "older completed tool call" {
+					t.Fatalf("expected only older duplicate tool call to remain, got %#v", messages)
+				}
+			}
+		}
+		if msg.ToolCallID == "call-preempt" {
+			toolResults++
+			if msg.Content != "older result" {
+				t.Fatalf("expected only older duplicate tool result to remain, got %#v", messages)
+			}
+		}
+	}
+	if assistantToolCalls != 1 || toolResults != 1 {
+		t.Fatalf("expected older duplicate call/result to remain exactly once, calls=%d results=%d messages=%#v", assistantToolCalls, toolResults, messages)
 	}
 }
 

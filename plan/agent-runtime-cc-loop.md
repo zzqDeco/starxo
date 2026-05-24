@@ -11,10 +11,11 @@
 - Top-level session execution is now driven by Eino `TurnLoop`; `ChatModelAgent` remains the inner ReAct agent for each turn.
 - TurnLoop owns user turn queueing, safe-point preemption, explicit stop, interrupt checkpointing, and resume dispatch.
 - A fresh non-preempt user turn discards any stale session TurnLoop checkpoint before starting, so old interrupted state cannot hijack a new standalone request into an invalid resume path.
+- If a stale checkpoint still routes into resume while a new user turn is queued, Starxo tombstones the checkpoint and requeues the user turn through the normal input path.
 - A replaced/stale TurnLoop can exit from context cancellation without surfacing a false agent error to the UI.
-- Preempted turns suppress false completion events and remove unresolved tool-call groups instead of injecting synthetic tool failures into the next turn.
+- Preempted turns suppress false completion events and remove only current-turn unresolved tool-call history instead of injecting synthetic tool failures or deleting older completed tool calls with reused IDs.
 - Replacement messages received during startup cancel the startup wait before queueing the new objective, so stale startup work cannot run ahead of the latest turn.
-- Resume keeps `pendingInterrupt` until the resume item is queued and the TurnLoop is ready to run, so failed enqueue attempts remain retryable.
+- Resume consumes `pendingInterrupt` under lock so concurrent resume requests cannot target the same interrupt; failed enqueue attempts restore it for retry.
 - Removing a session stops its persistent TurnLoop, finalizes active run waiters, and deletes its runtime checkpoint.
 - User turns and current objectives are recorded before runner bundle startup so model/config/sandbox initialization failures do not drop the just-submitted request.
 - `<current-objective>` is pinned before model calls so older messages are treated as historical context unless the current turn is a continuation.

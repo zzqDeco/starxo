@@ -23,6 +23,8 @@ const (
 	runtimeTurnStartupPreemptTimeout = 5 * time.Second
 )
 
+var errRuntimeResumeNeedsNormalTurn = errors.New("resume checkpoint superseded by user turn")
+
 type runtimeTurnItem struct {
 	Kind             string
 	SessionID        string
@@ -273,6 +275,9 @@ func (s *ChatService) runtimeTurnLoopGenResume(sessionID string) func(context.Co
 			remaining = append(remaining, item)
 		}
 		if !found {
+			if runtimeTurnItemsContainUser(remaining) {
+				return nil, errRuntimeResumeNeedsNormalTurn
+			}
 			return nil, fmt.Errorf("resume requested without resume payload")
 		}
 		if len(interruptedItems) == 0 {
@@ -497,9 +502,29 @@ func runtimeTurnSignalClosed(ch <-chan struct{}) bool {
 	}
 }
 
+func runtimeTurnItemsContainUser(items []runtimeTurnItem) bool {
+	for _, item := range items {
+		if item.Kind == runtimeTurnKindUser {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTurnUserItems(items []runtimeTurnItem) []runtimeTurnItem {
+	out := make([]runtimeTurnItem, 0, len(items))
+	for _, item := range items {
+		if item.Kind == runtimeTurnKindUser {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop[runtimeTurnItem, *schema.Message], exit *adk.TurnLoopExitState[runtimeTurnItem, *schema.Message]) {
 	var emitDone bool
 	var emitErr error
+	var recoverUserTurns []runtimeTurnItem
 	s.mu.Lock()
 	run := s.sessions[sessionID]
 	currentLoop := run != nil && run.turnLoop == loop
@@ -516,14 +541,40 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 			emitDone = true
 		}
 	}
+	if currentLoop && exit != nil && errors.Is(exit.ExitReason, errRuntimeResumeNeedsNormalTurn) {
+		recoverUserTurns = runtimeTurnUserItems(exit.UnhandledItems)
+		if len(recoverUserTurns) > 0 {
+			emitDone = false
+		}
+	}
 	if currentLoop && exit != nil && exit.ExitReason != nil {
 		var interruptErr *adk.InterruptError
-		if !errors.As(exit.ExitReason, &interruptErr) && exit.StopCause != "user_stop" {
+		supersededByUserTurn := errors.Is(exit.ExitReason, errRuntimeResumeNeedsNormalTurn) && len(recoverUserTurns) > 0
+		if !errors.As(exit.ExitReason, &interruptErr) && !supersededByUserTurn && exit.StopCause != "user_stop" {
 			emitErr = exit.ExitReason
 		}
 	}
 	s.cleanupRetiredBundlesLocked()
 	s.mu.Unlock()
+
+	if len(recoverUserTurns) > 0 {
+		if err := s.deleteRuntimeTurnCheckpoint(sessionID); err != nil {
+			wailsEmit(s.ctx, "agent:error", map[string]interface{}{
+				"sessionId": sessionID,
+				"error":     fmt.Sprintf("failed to discard stale runtime checkpoint: %v", err),
+			})
+			s.emitRunState(sessionID)
+			return
+		}
+		if err := s.enqueueRuntimeTurnItems(sessionID, recoverUserTurns); err != nil {
+			wailsEmit(s.ctx, "agent:error", map[string]interface{}{
+				"sessionId": sessionID,
+				"error":     err.Error(),
+			})
+			s.emitRunState(sessionID)
+		}
+		return
+	}
 
 	if emitErr != nil {
 		wailsEmit(s.ctx, "agent:error", map[string]interface{}{
@@ -538,19 +589,59 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 	}
 }
 
-func (s *ChatService) deleteRuntimeTurnCheckpoint(sessionID string) {
-	if s.checkpointStore == nil {
-		return
+func (s *ChatService) enqueueRuntimeTurnItems(sessionID string, items []runtimeTurnItem) error {
+	if len(items) == 0 {
+		return nil
 	}
-	deleter, ok := s.checkpointStore.(runtimeCheckpointDeleter)
-	if !ok {
-		return
+	s.mu.Lock()
+	run := s.sessions[sessionID]
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
+	for _, item := range items {
+		if item.Kind != runtimeTurnKindUser {
+			continue
+		}
+		if ok, _ := loop.Push(item); !ok {
+			if run.turnLoop == loop {
+				s.resetRuntimeTurnLoopLocked(run)
+			}
+			loop = s.ensureRuntimeTurnLoopLocked(sessionID, run)
+			if ok, _ = loop.Push(item); !ok {
+				s.mu.Unlock()
+				return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
+			}
+		}
+	}
+	if run.turnLoop == loop {
+		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	}
+	s.mu.Unlock()
+	s.emitRunState(sessionID)
+	return nil
+}
+
+func (s *ChatService) deleteRuntimeTurnCheckpoint(sessionID string) error {
+	if s.checkpointStore == nil {
+		return nil
 	}
 	ctx := s.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := deleter.Delete(ctx, runtimeTurnCheckpointID(sessionID)); err != nil {
-		logger.Warn("[CHAT] Failed to delete runtime turn checkpoint", "session", sessionID, "error", err)
+	checkpointID := runtimeTurnCheckpointID(sessionID)
+	if deleter, ok := s.checkpointStore.(runtimeCheckpointDeleter); ok {
+		if err := deleter.Delete(ctx, checkpointID); err == nil {
+			return nil
+		} else {
+			logger.Warn("[CHAT] Failed to delete runtime turn checkpoint; falling back to tombstone", "session", sessionID, "error", err)
+		}
 	}
+	if err := s.checkpointStore.Set(ctx, checkpointID, nil); err != nil {
+		logger.Warn("[CHAT] Failed to tombstone runtime turn checkpoint", "session", sessionID, "error", err)
+		return err
+	}
+	return nil
 }

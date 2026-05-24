@@ -17,6 +17,8 @@
 - running 状态下的新消息通过 `WithPreemptTimeout(AfterToolCalls, 15s)` 进入队列，旧 turn 到安全点后让位给新 objective。
 - business interrupt 由 TurnLoop 保存 checkpoint；`ResumeWithAnswer` / `ResumeWithChoice` push resume item 后重建 loop，通过 `GenResume` 恢复原 interrupted objective，resume turn 正常完成后主动删除 stale checkpoint。
 - 普通新 user turn 在启动前由 `ChatService.SendMessage` 丢弃旧 checkpoint；这样内存 pending interrupt 丢失或 checkpoint 残留时，新请求会走正常 `GenInput` 而不是无 payload 的 `GenResume`。
+- 若 TurnLoop 因 stale checkpoint 进入 `GenResume`，但队列里只有新的 user turn、没有 resume payload，则删除/覆盖旧 checkpoint 并把该 user turn 重新入队到正常 `GenInput` 路径。
+- `deleteRuntimeTurnCheckpoint` 优先使用 store Delete；store 不支持 Delete 或 Delete 失败时写入 zero-length tombstone，因为 Eino TurnLoop 会把空 checkpoint 当作不存在。
 - `StopGeneration` 使用 `WithImmediate + WithSkipCheckpoint`，用户显式停止不会留下可恢复 checkpoint。
 - 被 reset 替换掉的旧 TurnLoop 退出时视为 stale loop，只做后台收敛，不再向 UI 发 `agent:error` / `agent:done`。
 - preempted turn 通过 `TurnContext.Preempted` 识别；该路径只收敛 run state，不写 assistant completion、不触发 done callback。
