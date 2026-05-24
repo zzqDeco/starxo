@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino-ext/components/tool/commandline"
 	"github.com/cloudwego/eino/adk"
@@ -44,7 +45,31 @@ type runtimeAgentRunResult struct {
 	worktree tools.WorktreeOutput
 }
 
-func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, registry *agent.SubagentRegistry) (tools.CatalogEntry, error) {
+type runtimeSubagentRunner struct {
+	now        func() time.Time
+	tasks      *runtimeTaskManager
+	workspaces *runtimeWorkspaceManager
+}
+
+func newRuntimeSubagentRunner(chat *ChatService) runtimeSubagentRunner {
+	if chat == nil {
+		return runtimeSubagentRunner{}
+	}
+	return runtimeSubagentRunner{
+		now:        chat.now,
+		tasks:      chat.runtimeTasks,
+		workspaces: chat.runtimeWorkspaces,
+	}
+}
+
+func (r runtimeSubagentRunner) nowTime() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
+}
+
+func (r runtimeSubagentRunner) NewCatalogEntry(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, registry *agent.SubagentRegistry) (tools.CatalogEntry, error) {
 	if registry == nil {
 		registry = agent.DefaultSubagentRegistry()
 	}
@@ -61,16 +86,16 @@ func (s *ChatService) newRuntimeAgentCatalogEntry(ctx context.Context, mdl einom
 			if normalized.Background && !def.BackgroundAllowed {
 				return runtimeAgentOutput{}, fmt.Errorf("subagent_type %s does not allow background execution", normalized.SubagentType)
 			}
-			agentID := fmt.Sprintf("agent-%d", s.now().UnixNano())
+			agentID := fmt.Sprintf("agent-%d", r.nowTime().UnixNano())
 			description := runtimeFirstNonEmpty(normalized.Description, normalized.SubagentType, "Runtime subagent")
 			run := func(runCtx context.Context) (runtimeAgentRunResult, error) {
-				return s.runRuntimeSubagent(runCtx, mdl, op, provider, ac, agentID, normalized, registry)
+				return r.Run(runCtx, mdl, op, provider, ac, agentID, normalized, registry)
 			}
 			if normalized.Background {
-				if s.runtimeTasks == nil {
+				if r.tasks == nil {
 					return runtimeAgentOutput{}, fmt.Errorf("runtime task manager is not available")
 				}
-				ref, err := s.runtimeTasks.StartAgentTask(ctx, SessionIDFromContext(ctx), description, func(taskCtx context.Context) (string, error) {
+				ref, err := r.tasks.StartAgentTask(ctx, SessionIDFromContext(ctx), description, func(taskCtx context.Context) (string, error) {
 					result, runErr := run(taskCtx)
 					return formatRuntimeAgentRunResult(result), runErr
 				})
@@ -160,15 +185,15 @@ func runtimeAgentToolInfo(registry *agent.SubagentRegistry) *schema.ToolInfo {
 	}
 }
 
-func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, agentID string, input runtimeAgentInput, registry *agent.SubagentRegistry) (runtimeAgentRunResult, error) {
+func (r runtimeSubagentRunner) Run(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, agentID string, input runtimeAgentInput, registry *agent.SubagentRegistry) (runtimeAgentRunResult, error) {
 	worktreeResult := tools.WorktreeOutput{}
 	subAC := ac
 	if input.Isolation == "worktree" {
-		if s.runtimeWorkspaces == nil {
+		if r.workspaces == nil {
 			return runtimeAgentRunResult{}, fmt.Errorf("runtime worktree manager is not available")
 		}
 		var err error
-		worktreeResult, err = s.runtimeWorkspaces.CreateIsolatedWorktree(ctx, op, ac.WorkspacePath, agentID)
+		worktreeResult, err = r.workspaces.CreateIsolatedWorktree(ctx, op, ac.WorkspacePath, agentID)
 		if err != nil {
 			return runtimeAgentRunResult{}, err
 		}
@@ -177,9 +202,9 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	}
 
 	def := registry.MustGet(input.SubagentType)
-	subTools := s.runtimeSubagentTools(provider, def, input.Fork)
+	subTools := r.Tools(provider, def, input.Fork)
 	if len(subTools) == 0 {
-		entries, err := tools.NewRuntimeCoreCatalogEntries(op, subAC.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
+		entries, err := tools.NewRuntimeCoreCatalogEntries(op, subAC.WorkspacePath, r.tasks, r.workspaces)
 		if err != nil {
 			return runtimeAgentRunResult{}, err
 		}
@@ -197,7 +222,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	}
 	subTools = agent.WrapToolsWithEvents(agentID, subTools, subAC)
 
-	mode := s.runtimeSubagentMode(ctx, provider, input.Mode)
+	mode := runtimeSubagentMode(ctx, provider, input.Mode)
 	handlers := []adk.ChatModelAgentMiddleware{tools.NewDynamicMCPSurfaceMiddleware(provider)}
 	toolSearchHandler, err := newEinoV09ToolSearchHandlerForCatalog(
 		ctx,
@@ -254,7 +279,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	return runtimeAgentRunResult{text: result, worktree: worktreeResult}, nil
 }
 
-func (s *ChatService) runtimeSubagentMode(ctx context.Context, provider *deferredMCPProvider, requested string) string {
+func runtimeSubagentMode(ctx context.Context, provider *deferredMCPProvider, requested string) string {
 	switch strings.TrimSpace(requested) {
 	case starmodel.ModePlan:
 		return starmodel.ModePlan
@@ -295,7 +320,7 @@ func runtimeSubagentCatalogEntryAllowed(def agent.SubagentDefinition, fork bool)
 	}
 }
 
-func (s *ChatService) runtimeSubagentTools(provider *deferredMCPProvider, def agent.SubagentDefinition, fork bool) []einotool.BaseTool {
+func (r runtimeSubagentRunner) Tools(provider *deferredMCPProvider, def agent.SubagentDefinition, fork bool) []einotool.BaseTool {
 	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
 		return nil
 	}

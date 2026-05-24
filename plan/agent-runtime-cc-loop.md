@@ -15,6 +15,12 @@
   - set `subagent_type` to create a fresh worker constrained by registry policy
 - Runtime compact persists the active objective along with ToolSearch, permissions, tasks, todos, worktree state, file read state, and diff summaries.
 
+## Refactor Boundary
+- `ChatService.prepareRunnerBundleFromSurface` now delegates runner construction to `runtimeBundleBuilder`, keeping Wails/session lifecycle separate from runtime catalog and middleware assembly.
+- Top-level agent selection is a standalone `buildTopLevelRuntimeAgents(...)` helper, not a `ChatService` method.
+- `Agent` tool execution is handled by `runtimeSubagentRunner`, which receives clock/task/worktree dependencies explicitly instead of reaching through `ChatService`.
+- Generation-bound tool provider code lives in `runtime_tool_provider.go`; Eino v0.9 ToolSearch bridge code lives in `runtime_toolsearch_eino.go`.
+
 ## Validation
 - Added targeted tests for standalone objective isolation, continuation inheritance, compact sidecar filtering, ask guard behavior, Agent fork normalization, and active objective cloning.
 - Required checks:

@@ -107,7 +107,7 @@ func TestRuntimeAgentToolSchemaUsesConfiguredRegistry(t *testing.T) {
 		DefaultIsolation: "worktree",
 		AllowedTools:     []string{"Read", "Grep"},
 	}})
-	entry, err := NewChatService(nil).newRuntimeAgentCatalogEntry(nil, nil, nil, nil, agent.DefaultAgentContext(), registry)
+	entry, err := newRuntimeSubagentRunner(nil).NewCatalogEntry(nil, nil, nil, nil, agent.DefaultAgentContext(), registry)
 	if err != nil {
 		t.Fatalf("new runtime agent entry: %v", err)
 	}
@@ -156,11 +156,11 @@ func TestRuntimeSubagentToolsForkIgnoresDefaultAllowlist(t *testing.T) {
 		AllowedTools: []string{tools.RuntimeToolRead},
 	}
 
-	normalTools := NewChatService(nil).runtimeSubagentTools(provider, def, false)
+	normalTools := newRuntimeSubagentRunner(nil).Tools(provider, def, false)
 	if len(normalTools) != 1 {
 		t.Fatalf("expected non-fork to honor allowlist, got %d tools", len(normalTools))
 	}
-	forkTools := NewChatService(nil).runtimeSubagentTools(provider, def, true)
+	forkTools := newRuntimeSubagentRunner(nil).Tools(provider, def, true)
 	if len(forkTools) != 2 {
 		t.Fatalf("expected fork to inherit all always-loaded context tools, got %d", len(forkTools))
 	}
@@ -216,13 +216,13 @@ func TestRuntimeSubagentModeInheritsParentPlanMode(t *testing.T) {
 
 	provider := &deferredMCPProvider{chat: chat}
 	ctx := contextWithSessionID(context.Background(), sessionID)
-	if got := chat.runtimeSubagentMode(ctx, provider, ""); got != model.ModePlan {
+	if got := runtimeSubagentMode(ctx, provider, ""); got != model.ModePlan {
 		t.Fatalf("expected subagent to inherit parent plan mode, got %q", got)
 	}
 	if got := runtimeSubagentDeepAgentMode(model.ModePlan); got != agent.DeepAgentModePlan {
 		t.Fatalf("expected plan prompt mode, got %q", got)
 	}
-	if got := chat.runtimeSubagentMode(ctx, provider, model.ModeDefault); got != model.ModeDefault {
+	if got := runtimeSubagentMode(ctx, provider, model.ModeDefault); got != model.ModeDefault {
 		t.Fatalf("expected explicit default mode override, got %q", got)
 	}
 }

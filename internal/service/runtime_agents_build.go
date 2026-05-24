@@ -14,7 +14,7 @@ import (
 	"starxo/internal/logger"
 )
 
-func (s *ChatService) buildTopLevelRuntimeAgents(
+func buildTopLevelRuntimeAgents(
 	ctx context.Context,
 	cfg *config.AppConfig,
 	mdl einomodel.ToolCallingChatModel,

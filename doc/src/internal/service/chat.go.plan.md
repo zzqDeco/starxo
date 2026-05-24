@@ -10,8 +10,8 @@
 ## 2. 核心职责
 - 实现 `ChatService`，负责多会话聊天、runner 生命周期、事件流转、中断恢复、mode 切换。
 - 维护共享 runner 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
-- 构建并装配 deferred MCP/runtime surface：MCP action/resource catalog、Eino v0.9 `tool_search` bridge、permission gate、per-model-call late binding、announcement 注入。
-- 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
+- 维护 deferred MCP/runtime surface 的 session state、discovery state 和 permission state；具体 catalog/runner 组装委托给 `runtimeBundleBuilder`。
+- Runtime V2 core/deferred tool catalog、Eino v0.9 `tool_search` bridge、permission gate 和 top-level runner 安装由 `runtime_bundle_builder.go` 承接。
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
@@ -138,8 +138,9 @@
   - 避免 runner 重建时污染正在运行的旧会话
   - provider 构造给 `tool_search` 的 `CurrentLoaded` 使用 `state.CurrentLoadedTools`，包含当前 mode/permission 允许的 always-load runtime tools 和已发现 deferred tools
   - `tool_search` 在 Runtime V2 中始终可见；unknown-tool handler 对 `tool_search` 直接放行，避免空 deferred pool 时误报不可用
+  - provider 实现已移到 `runtime_tool_provider.go`，`chat.go` 只保留 session state 的 owner 角色
 - Runtime V2 core catalog：
-  - runner bundle 安装时先注册 runtime core entries，再注册 MCP entries
+  - `runtimeBundleBuilder` 安装 runner bundle 时先注册 runtime core entries，再注册 MCP entries
   - runtime entries 同样经过 permission wrapper
   - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
   - background `Bash` 任务写入 `runtimeTaskManager`
@@ -156,6 +157,7 @@
   - runtime deferred tools 和 MCP deferred tools 共用 Eino v0.9 ToolSearch、session discovery 和 permission pipeline
   - Eino `tool_search` 结果会回写到 Starxo `DiscoveredToolRecord`，保证 compact/restore 后已发现工具不会丢失
   - Eino ToolSearch 候选集使用 policy-level deferred superset，避免 bundle 构建时冻结 MCP server state；当前 mode 下真实 searchable/loadable 状态仍由 `ToolSearchState`、dynamic surface 和 permission gate 在运行期判断
+  - Eino ToolSearch bridge 已移到 `runtime_toolsearch_eino.go`，避免 Eino middleware 细节继续堆在 `chat.go`
   - Eino `tool_search` JSON 结果和 structured `ToolSearchResult` 都会回写 discovery state
   - `agent.runtime.toolSearchMode` 暂时统一落到 client-side search；Eino model-native deferred retrieval 会绕过 Starxo discovered-tool gate，需等 pre-grant 机制完成后再启用
   - web tools 当前由本地应用进程执行 HTTP 请求，`WebSearch` provider 来自 `agent.webSearch` 配置；其他 runtime tools 使用远端 sandbox operator
