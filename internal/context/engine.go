@@ -67,6 +67,13 @@ func (e *Engine) PrepareMessagesWithPinnedPrefix(pinnedPrefix []*schema.Message)
 // PrepareMessagesWithCompact builds the full message list using token-aware
 // windowing and an optional runtime compact summary.
 func (e *Engine) PrepareMessagesWithCompact(pinnedPrefix []*schema.Message, compact *model.RuntimeContextCompact) []*schema.Message {
+	return e.PrepareMessagesWithCompactFrom(pinnedPrefix, compact, 0)
+}
+
+// PrepareMessagesWithCompactFrom builds the prompt from a bounded history slice.
+// historyStart is used by runtime objective isolation so a standalone user turn
+// cannot accidentally continue older unrelated work.
+func (e *Engine) PrepareMessagesWithCompactFrom(pinnedPrefix []*schema.Message, compact *model.RuntimeContextCompact, historyStart int) []*schema.Message {
 	e.mu.RLock()
 	sysPrompt := e.systemPrompt
 	maxTokens := e.maxTokens
@@ -83,6 +90,12 @@ func (e *Engine) PrepareMessagesWithCompact(pinnedPrefix []*schema.Message, comp
 
 	// Get conversation history and apply windowing.
 	historyMsgs := e.history.GetAll()
+	if historyStart > 0 {
+		if historyStart > len(historyMsgs) {
+			historyStart = len(historyMsgs)
+		}
+		historyMsgs = historyMsgs[historyStart:]
+	}
 
 	prefix := make([]*schema.Message, 0, 1+len(pinnedPrefix))
 	prefix = append(prefix, sysMsg)

@@ -52,6 +52,9 @@ func choice(ctx context.Context, input *ChoiceToolInput) (string, error) {
 	wasInterrupted, _, storedState := tool.GetInterruptState[*ChoiceState](ctx)
 
 	if !wasInterrupted {
+		if msg, ok := RuntimeObjectivePromptGuard(ctx, input.Question); !ok {
+			return msg, nil
+		}
 		// First call: trigger interrupt with options
 		info := &ChoiceInfo{
 			Question: input.Question,

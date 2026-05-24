@@ -136,6 +136,7 @@ type SessionRun struct {
 	planDocument              *model.PlanDocument
 	pendingPlanApproval       *model.PendingPlanApproval
 	pendingPlanAttachment     *model.PendingPlanAttachment
+	activeObjective           *model.RunObjective
 
 	// Run lifecycle
 	running                      bool
@@ -163,6 +164,37 @@ func (r *SessionRun) addUserMessage(content string) {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
 	r.ctxEngine.AddUserMessage(content)
+}
+
+func (r *SessionRun) beginObjective(userMessageID, runID, userMessage string, createdAt int64) *model.RunObjective {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	scope := objectiveScope(userMessage)
+	historyStart := 0
+	if scope == "standalone" {
+		historyStart = r.ctxEngine.MessageCount() - 1
+		if historyStart < 0 {
+			historyStart = 0
+		}
+	}
+	obj := &model.RunObjective{
+		ID:                fmt.Sprintf("obj-%d", createdAt),
+		RunID:             runID,
+		UserMessageID:     userMessageID,
+		Scope:             scope,
+		Objective:         strings.TrimSpace(userMessage),
+		Acceptance:        "Answer the current user request and verify any file or command changes that are part of that request.",
+		CreatedAt:         createdAt,
+		HistoryStartIndex: historyStart,
+	}
+	r.activeObjective = obj
+	return cloneRunObjective(obj)
+}
+
+func (r *SessionRun) currentObjective() *model.RunObjective {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return cloneRunObjective(r.activeObjective)
 }
 
 func (r *SessionRun) addAssistantMessage(content string) {
@@ -196,7 +228,13 @@ func (r *SessionRun) prepareMessages() []*schema.Message {
 func (r *SessionRun) prepareMessagesWithCompact(compact *model.RuntimeContextCompact) []*schema.Message {
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
-	return r.ctxEngine.PrepareMessagesWithCompact(nil, compact)
+	objective := cloneRunObjective(r.activeObjective)
+	pinned := runtimeObjectivePinnedMessages(objective)
+	historyStart := 0
+	if objective != nil && objective.Scope == "standalone" {
+		historyStart = objective.HistoryStartIndex
+	}
+	return r.ctxEngine.PrepareMessagesWithCompactFrom(pinned, scopeCompactForObjective(compact, objective), historyStart)
 }
 
 func (r *SessionRun) clearSessionState() {
@@ -215,6 +253,7 @@ func (r *SessionRun) clearSessionState() {
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
+	r.activeObjective = nil
 }
 
 func (r *SessionRun) setStreamingState(state *model.StreamingState) {
@@ -257,6 +296,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
+	r.activeObjective = nil
 	r.mode = model.ModeDefault
 	if data == nil {
 		return
@@ -266,6 +306,9 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.deferredAnnouncementState = cloneDeferredAnnouncementState(data.DeferredAnnouncementState)
 	r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState)
 	r.runtimeContextCompact = model.CloneRuntimeContextCompact(data.RuntimeContextCompact)
+	if r.runtimeContextCompact != nil {
+		r.activeObjective = cloneRunObjective(r.runtimeContextCompact.ActiveObjective)
+	}
 	r.planDocument = model.ClonePlanDocument(data.PlanDocument)
 	r.pendingPlanApproval = model.ClonePendingPlanApproval(data.PendingPlanApproval)
 	r.pendingPlanAttachment = model.ClonePendingPlanAttachment(data.PendingPlanAttachment)
@@ -1504,14 +1547,19 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		"session", s.activeSessionID,
 	)
 
+	nowMillis := time.Now().UnixMilli()
+	userTurnID := fmt.Sprintf("usr-%d", time.Now().UnixNano())
+	runID := fmt.Sprintf("run-%d", time.Now().UnixNano())
+
 	// Add user message to session's context engine
 	run.addUserMessage(userMessage)
+	objective := run.beginObjective(userTurnID, runID, userMessage, nowMillis)
 
 	// Record user turn in session's timeline collector
 	run.addUserTurn(
-		fmt.Sprintf("usr-%d", time.Now().UnixNano()),
+		userTurnID,
 		userMessage,
-		time.Now().UnixMilli(),
+		nowMillis,
 	)
 
 	// Auto-escalate to plan mode for complex tasks when currently in default mode.
@@ -1582,6 +1630,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	// Create a cancellable context with session identity
 	runCtx, cancel := context.WithCancel(baseCtx)
 	runCtx = contextWithSessionID(runCtx, sessionID)
+	runCtx = tools.ContextWithRuntimeObjective(runCtx, objective)
 	s.mu.Lock()
 	if startCtx.Err() != nil {
 		startCancel()
@@ -1607,7 +1656,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 
 	// Prepare messages
 	messages := s.prepareMessagesForRun(sessionID, run)
-	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
+	checkpointID := runID
 
 	// Launch the agent run in a goroutine
 	go func() {
@@ -2583,6 +2632,7 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 
 	runCtx, cancel := context.WithCancel(s.ctx)
 	runCtx = contextWithSessionID(runCtx, sessionID)
+	runCtx = tools.ContextWithRuntimeObjective(runCtx, run.currentObjective())
 	s.mu.Lock()
 	run.cancelFn = cancel
 	run.running = true
@@ -2704,6 +2754,7 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 
 	runCtx, cancel := context.WithCancel(s.ctx)
 	runCtx = contextWithSessionID(runCtx, sessionID)
+	runCtx = tools.ContextWithRuntimeObjective(runCtx, run.currentObjective())
 	s.mu.Lock()
 	run.cancelFn = cancel
 	run.running = true
@@ -3555,38 +3606,18 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 		planHandlers = append([]adk.ChatModelAgentMiddleware{planToolSearchHandler}, planHandlers...)
 	}
 
-	deepAgentDefault, err := agent.BuildDeepAgentForMode(
-		ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault,
-		defaultHandlers,
-		unknownToolsHandler,
-		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
-		subagentRegistry,
-	)
+	defaultAgent, planAgent, err := s.buildTopLevelRuntimeAgents(ctx, cfg, mdl, op, extraTools, ac, defaultHandlers, planHandlers, unknownToolsHandler, subagentRegistry)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to build default deep agent", err)
-		return nil, fmt.Errorf("failed to build default deep agent: %w", err)
+		return nil, err
 	}
 
-	deepAgentPlan, err := agent.BuildDeepAgentForMode(
-		ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan,
-		planHandlers,
-		unknownToolsHandler,
-		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
-		subagentRegistry,
-	)
+	bundle.DefaultRunner = agent.BuildDefaultRunner(ctx, defaultAgent, s.checkpointStore)
+	bundle.PlanRunner, err = agent.BuildPlanRunner(ctx, mdl, planAgent, ac, s.checkpointStore)
 	if err != nil {
 		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to build plan deep agent", err)
-		return nil, fmt.Errorf("failed to build plan deep agent: %w", err)
-	}
-
-	bundle.DefaultRunner = agent.BuildDefaultRunner(ctx, deepAgentDefault, s.checkpointStore)
-	bundle.PlanRunner, err = agent.BuildPlanRunner(ctx, mdl, deepAgentPlan, ac, s.checkpointStore)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to build plan runner", err)
-		return nil, fmt.Errorf("failed to build plan runner: %w", err)
+		logger.Error("[RUNNER] Failed to build runtime plan runner", err)
+		return nil, fmt.Errorf("failed to build runtime plan runner: %w", err)
 	}
 	bundle.LastFreshnessCheckAt = s.now()
 

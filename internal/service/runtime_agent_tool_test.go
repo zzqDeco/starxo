@@ -20,7 +20,7 @@ func TestNormalizeRuntimeAgentInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize runtime agent input: %v", err)
 	}
-	if input.Prompt != "do work" || input.SubagentType != "general" || input.Isolation != "none" {
+	if input.Prompt != "do work" || input.SubagentType != "general" || input.Isolation != "none" || !input.Fork {
 		t.Fatalf("unexpected normalized input: %#v", input)
 	}
 	if _, err := normalizeRuntimeAgentInput(runtimeAgentInput{Prompt: "x", SubagentType: "writer"}, registry); err == nil {
@@ -44,7 +44,7 @@ func TestNormalizeRuntimeAgentInputUsesConfiguredRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize configured subagent: %v", err)
 	}
-	if input.SubagentType != "triage" || input.Isolation != "worktree" {
+	if input.SubagentType != "triage" || input.Isolation != "worktree" || input.Fork {
 		t.Fatalf("unexpected normalized configured subagent: %#v", input)
 	}
 
@@ -54,8 +54,8 @@ func TestNormalizeRuntimeAgentInputUsesConfiguredRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize default configured subagent: %v", err)
 	}
-	if defaulted.SubagentType != "triage" || defaulted.Isolation != "worktree" {
-		t.Fatalf("expected omitted subagent_type to use registry default, got %#v", defaulted)
+	if defaulted.SubagentType != "triage" || defaulted.Isolation != "worktree" || !defaulted.Fork {
+		t.Fatalf("expected omitted subagent_type to fork with registry default policy, got %#v", defaulted)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestRuntimeAgentToolSchemaUsesConfiguredRegistry(t *testing.T) {
 		t.Fatalf("marshal agent tool schema: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "triage") || !strings.Contains(text, "registry default (triage)") {
+	if !strings.Contains(text, "triage") || !strings.Contains(text, "Omit to fork the current agent context") {
 		t.Fatalf("expected configured subagent metadata in schema, got %s", text)
 	}
 	if strings.Contains(text, "code_writer") || strings.Contains(text, "file_manager") {

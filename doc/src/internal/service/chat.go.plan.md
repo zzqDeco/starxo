@@ -19,6 +19,7 @@
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
 - 管理 Eino v0.9 runtime beta path：默认 Message runtime，显式 `agenticProtocol` 时仅探测 agentic provider 可用性并允许失败回退。
 - 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、后台任务、文件 read state、diff summary、todos、plan 和 worktree state。
+- 管理 current-objective 行为层：每个 user turn 生成 `RunObjective`，standalone 请求隔离旧历史，continuation 请求继承最近上下文。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
 - 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
@@ -51,6 +52,7 @@
   - `planDocument`
   - `pendingPlanApproval`
   - `pendingPlanAttachment`
+  - `activeObjective`
 - `SessionData.Mode` 是 persisted truth source：
   - `SessionRun.importSessionData(...)` restore 时把 `SessionData.Mode` hydrate 回 `run.mode`
   - `SessionRun.snapshot()` 导出 v4 `SessionData` 时带上 `Mode` 和三类 plan state
@@ -142,6 +144,12 @@
   - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
   - background `Bash` 任务写入 `runtimeTaskManager`
   - `Agent` tool 从 `agent.runtime.subagents` 构建动态 subagent registry，按 definition 决定 allowed tools、default isolation 和 background policy
+- Top-level runtime agent：
+  - 默认通过 `BuildRuntimeAgent` 构建 Eino `ChatModelAgent` ReAct loop，模型可直接使用 Read/Edit/Bash/Grep/Glob/Agent 等工具
+  - `agent.runtime.enableBuiltinDeepTransferFallback=true` 时才回退到旧 deep-transfer builder
+  - plan mode 不再默认走 PlanExecute；它是同一 runtime loop 上的 permission/tool-surface 模式
+  - `prepareMessagesForRun(...)` 会注入 `<current-objective>`；standalone objective 只保留本 turn 后的历史，避免旧 debug/release/review 任务被误继续
+  - compact 会保留 `ActiveObjective`，并在 standalone objective 下过滤旧任务、旧 todos 和旧 plan
 - Runtime V2 dynamic/deferred catalog：
   - `Agent` 作为 always-load runtime tool 注册，支持同步/后台子 agent 和 worktree 隔离
   - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册

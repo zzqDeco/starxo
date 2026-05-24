@@ -17,13 +17,14 @@
   - worktree 隔离模式附带 worktree path/branch。
 
 ## 4. 关键实现细节
-- `runtimeAgentInput` 支持 `description`、`prompt`、`subagent_type`、`background`、`isolation`，`model` 和 `mode` 作为后续扩展保留字段。
-- `subagent_type` 会通过 `agent.runtime.subagents` 对应的动态 registry 规范化；省略时使用 registry default。
+- `runtimeAgentInput` 支持 `description`、`prompt`、`subagent_type`、`background`、`isolation`，`model` 和 `mode` 作为后续扩展保留字段；内部 `Fork` 标记区分 omitted `subagent_type` 的 fork 路径。
+- `subagent_type` 会通过 `agent.runtime.subagents` 对应的动态 registry 规范化；省略时 fork 当前 agent context，同时沿用 registry default 的 isolation/policy。
 - `Agent` tool schema 会根据当前 registry 生成 `subagent_type` enum 和说明，避免自定义 registry 时继续提示内置名称。
 - `isolation` 会规范化为 `none` 或 `worktree`；缺省值来自 subagent definition 的 `defaultIsolation`。
 - subagent definition 可限制 `allowedTools`，也可通过 `backgroundAllowed=false` 禁止后台执行。
 - `Agent` 是 always-load runtime tool，但执行仍会经过 permission wrapper。
-- 子 agent 使用同一个 Eino chat model，并按 subagent definition 注入允许的 Runtime V2 core tools；子工具同样走 permission gate 和 timeline event wrapper。
+- 子 agent 使用同一个 Eino chat model，并按 subagent definition 注入允许的 Runtime V2/MCP always-load 工具；子工具同样走 permission gate、workspace guard 和 timeline event wrapper。
+- omitted `subagent_type` 使用 `RuntimeAgentPrompt` fork 当前 objective；explicit `subagent_type` 使用 `RuntimeSubagentPrompt` 创建 fresh worker。
 - `background=true` 时调用 `runtimeTaskManager.StartAgentTask`，任务输出落盘到 runtime task output 文件。
 - `isolation=worktree` 时通过 `runtimeWorkspaceManager.CreateIsolatedWorktree` 创建 git worktree，并用 context-scoped workspace override 只影响当前子 agent；父 session 的 active workspace 不会被临时切走。
 - 同步和后台 Agent 输出都会包含 worktree path/branch，便于后续人工审阅或合并。

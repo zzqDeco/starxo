@@ -9,7 +9,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 ## 核心特性
 
 - **Claude Code 风格 Agent Runtime** — 基于 Eino v0.9，提供直接工具、`ToolSearch`、动态 `Agent` 子 Agent、任务管理、worktree 隔离、Skill 和 AGENTS.md 上下文
-- **双模式运行** — 默认模式（直接执行）+ 计划模式（Planner/Replanner 规划-执行）
+- **双模式运行** — 默认模式使用直接 ReAct 工具循环；计划模式在同一个 runtime loop 上收窄为读取/搜索/规划，直到 `ExitPlanMode` 获批
 - **中断/恢复** — 支持 `ask_user` / `ask_choice` 工具暂停等待用户输入，状态通过 CheckPointStore 保持
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
@@ -33,7 +33,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 |------|------|------|
 | Go | 1.24 | 主语言 |
 | Wails | v2.11 | 桌面框架（Go + WebView） |
-| CloudWeGo Eino | v0.9.0-beta.1 | Agent 框架（ADK, Runner, Deep Agent, ToolSearch/Skill/Reduction/Summarization middleware） |
+| CloudWeGo Eino | v0.9.0-beta.1 | Agent 框架（ADK, ChatModelAgent, Runner, ToolSearch/Skill/Reduction/Summarization middleware） |
 | eino-ext | - | LLM Provider (OpenAI/Ark/Ollama) + MCP + Commandline |
 | golang.org/x/crypto | - | SSH 连接 |
 | pkg/sftp | v1.13 | SFTP 文件传输 |
@@ -63,7 +63,9 @@ starxo/
 │
 ├── internal/
 │   ├── agent/                       # AI Agent 构建与配置
-│   │   ├── deep_agent.go            #   Eino v0.9 顶层 Agent 构建器
+│   │   ├── runtime_agent.go         #   Eino v0.9 ChatModelAgent runtime 构建器
+│   │   ├── runtime_behavior.go      #   current-objective 行为 middleware
+│   │   ├── deep_agent.go            #   旧 deep-transfer fallback Agent 构建器
 │   │   ├── subagents.go             #   动态 runtime 子 Agent 注册表
 │   │   ├── eino_v09_context.go      #   Skill、AGENTS.md、reduction、summarization middleware
 │   │   ├── runner.go                #   Runner 构建（默认模式 + 计划模式）
@@ -78,6 +80,8 @@ starxo/
 │   │
 │   ├── service/                     # Wails 绑定服务（前端 API）
 │   │   ├── chat.go                  #   ChatService：Per-Session Agent 生命周期（SessionRun）、消息收发、流式输出
+│   │   ├── runtime_agents_build.go  #   Runtime agent 构建路径选择
+│   │   ├── runtime_objective.go     #   current-objective prompt/history sidecar
 │   │   ├── runtime_context_compact.go # Runtime V2 上下文压缩状态
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 动态 Agent 工具
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 常驻 language server 管理
@@ -107,6 +111,7 @@ starxo/
 │   │   ├── mcp.go                   #   MCP 服务器连接 + 工具加载
 │   │   ├── followup.go              #   ask_user 中断工具
 │   │   ├── choice.go                #   ask_choice 中断工具
+│   │   ├── runtime_objective.go     #   ask tools 的 current-objective 上下文 guard
 │   │   ├── todos.go                 #   write_todos / update_todo 任务工具
 │   │   ├── notify.go                #   notify_user 通知工具
 │   │   └── custom.go                #   自定义工具助手
@@ -168,7 +173,7 @@ wails dev
 
 顶层 Agent 现在运行在 Eino `v0.9.0-beta.1` 上，使用更小的 always-loaded runtime 工具面。Eino dynamic `tool_search` middleware 负责按需暴露 deferred tools，Starxo 继续负责 catalog 元数据、plan-mode 过滤、权限检查和 discovered-tool 持久化。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
 
-固定 `transfer_to_agent` 子 Agent 路径不再是默认运行时。`Agent` 是唯一委派入口，并通过 `agent.runtime.subagents` 解析 `subagent_type`。内置定义包括 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`；每个定义可限制 allowed tools、默认 isolation、指令和是否允许后台执行。自定义 registry 不会隐式获得无限制的 `general`；空 `subagent_type` 使用配置默认项。旧 deep-transfer 实现仅通过 `agent.runtime.enableBuiltinDeepTransferFallback` 作为调试 fallback 保留。
+固定 `transfer_to_agent` 子 Agent 路径不再是默认运行时。顶层 Agent 是 Eino `ChatModelAgent` ReAct loop，并注入 pinned current-objective sidecar，因此新的 standalone 请求不会继续无关旧任务。`Agent` 是唯一委派入口，并通过 `agent.runtime.subagents` 解析 `subagent_type`。内置定义包括 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`；每个定义可限制 allowed tools、默认 isolation、指令和是否允许后台执行。省略 `subagent_type` 会 fork 当前 Agent 上下文；显式设置 `subagent_type` 会创建受该 definition 约束的 fresh worker。旧 deep-transfer 实现仅通过 `agent.runtime.enableBuiltinDeepTransferFallback` 作为调试 fallback 保留。
 
 当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`WorktreeDiff`、`WorktreeMerge`、`LSP`、`LSPEdit`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`LSPEdit` 通过 permission queue 暴露可写的 language-server rename/format 操作。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
 
