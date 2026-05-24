@@ -77,6 +77,27 @@ func TestObjectiveScopeAvoidsGenericAbovePreviousFalsePositives(t *testing.T) {
 	if got := objectiveScope("continue previous task"); got != "continuation" {
 		t.Fatalf("expected explicit previous task continuation, got %q", got)
 	}
+	if got := objectiveScope("continue."); got != "continuation" {
+		t.Fatalf("expected punctuated continue request to continue, got %q", got)
+	}
+	if got := objectiveScope("go on?"); got != "continuation" {
+		t.Fatalf("expected punctuated go-on request to continue, got %q", got)
+	}
+	if got := objectiveScope("resume"); got != "continuation" {
+		t.Fatalf("expected bare resume request to continue, got %q", got)
+	}
+	if got := objectiveScope("resume previous task"); got != "continuation" {
+		t.Fatalf("expected explicit resume-previous request to continue, got %q", got)
+	}
+	if got := objectiveScope("resume parser design"); got != "standalone" {
+		t.Fatalf("expected resume parser design to remain standalone, got %q", got)
+	}
+	if got := objectiveScope("resume the container service"); got != "standalone" {
+		t.Fatalf("expected resume container service to remain standalone, got %q", got)
+	}
+	if got := objectiveScope("resume last mile implementation"); got != "standalone" {
+		t.Fatalf("expected resume last-mile implementation to remain standalone, got %q", got)
+	}
 }
 
 func TestScopeCompactForStandaloneObjectiveDropsOldActiveState(t *testing.T) {

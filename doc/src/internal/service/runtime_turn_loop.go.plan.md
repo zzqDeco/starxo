@@ -20,6 +20,7 @@
 - 若 TurnLoop 因 stale checkpoint 进入 `GenResume`，但队列里只有新的 user turn、没有 resume payload，则删除/覆盖旧 checkpoint 并把该 user turn 重新入队到正常 `GenInput` 路径。
 - `deleteRuntimeTurnCheckpoint` 优先使用 store Delete；store 不支持 Delete 或 Delete 失败时写入 zero-length tombstone，因为 Eino TurnLoop 会把空 checkpoint 当作不存在。
 - `StopGeneration` 使用 `WithImmediate + WithSkipCheckpoint`，用户显式停止不会留下可恢复 checkpoint。
+- `sandbox_lost` 和 `user_stop` 属于行政性停止原因；TurnLoop exit reason 不再额外 emit `agent:error`，避免和 sandbox loss 主路径重复报错。
 - 被 reset 替换掉的旧 TurnLoop 退出时视为 stale loop，只做后台收敛，不再向 UI 发 `agent:error` / `agent:done`。
 - preempted turn 通过 `TurnContext.Preempted` 识别；该路径只收敛 run state，不写 assistant completion、不触发 done callback。
 - preempted turn 若已有未完成 tool call，会从历史中移除对应 tool-call group，而不是注入“tool execution failed”合成结果。

@@ -15,3 +15,4 @@
 - continuation objective 中引用旧任务的 ask/tool 调用允许通过。
 - `preview` / `stage` 等合法词不会被误判为 `review` / `tag` stale family。
 - `ExitPlanMode` plan 文本里的普通 `review current files` 不会被误判为旧 review 任务，但 `codex review` 等高置信短语仍会被拦截。
+- 当前 objective 明确为 `review this PR` / `prepare a release` 时，对应 review/release 工具调用允许通过。

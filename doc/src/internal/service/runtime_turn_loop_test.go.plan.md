@@ -11,6 +11,7 @@
 
 ## 3. 关键测试覆盖
 - `GenResume` 从 TurnLoop interrupted item 恢复原 objective，并生成对应 interrupt id 的 resume params。
+- `sandbox_lost` / `user_stop` 这类行政性 stop cause 会抑制 TurnLoop exit error，其他错误仍会上报。
 - TurnLoop checkpoint id 保持 session scoped：`runtime-turn:<sessionID>`。
 - `GenInput` 在 bundle 准备失败前已经持久化 user message 和 active objective。
 - startup 阶段收到替换 user turn 时会先取消旧 startup，最终只运行替换 objective。

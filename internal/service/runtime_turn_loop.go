@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -550,7 +551,7 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 	if currentLoop && exit != nil && exit.ExitReason != nil {
 		var interruptErr *adk.InterruptError
 		supersededByUserTurn := errors.Is(exit.ExitReason, errRuntimeResumeNeedsNormalTurn) && len(recoverUserTurns) > 0
-		if !errors.As(exit.ExitReason, &interruptErr) && !supersededByUserTurn && exit.StopCause != "user_stop" {
+		if !errors.As(exit.ExitReason, &interruptErr) && !supersededByUserTurn && !runtimeTurnStopCauseSuppressesError(exit.StopCause) {
 			emitErr = exit.ExitReason
 		}
 	}
@@ -586,6 +587,15 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 	if emitDone {
 		wailsEmit(s.ctx, "agent:done", map[string]string{"sessionId": sessionID})
 		s.emitRunState(sessionID)
+	}
+}
+
+func runtimeTurnStopCauseSuppressesError(cause string) bool {
+	switch strings.TrimSpace(cause) {
+	case "user_stop", "sandbox_lost":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -106,3 +106,27 @@ func TestRuntimeObjectiveToolGuardKeepsHighConfidenceReviewStale(t *testing.T) {
 		t.Fatalf("expected codex review stale call to be rejected, msg=%q", msg)
 	}
 }
+
+func TestRuntimeObjectiveToolGuardAllowsCurrentReviewObjective(t *testing.T) {
+	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
+		ID:        "obj-1",
+		Objective: "review this PR",
+		Scope:     "standalone",
+	})
+
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "Bash", `{"command":"codex review"}`); !ok {
+		t.Fatalf("expected current review objective to allow review tool call, msg=%q", msg)
+	}
+}
+
+func TestRuntimeObjectiveToolGuardAllowsCurrentReleaseObjective(t *testing.T) {
+	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
+		ID:        "obj-1",
+		Objective: "prepare a release",
+		Scope:     "standalone",
+	})
+
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "Bash", `{"command":"gh release create v1.2.3"}`); !ok {
+		t.Fatalf("expected current release objective to allow release tool call, msg=%q", msg)
+	}
+}

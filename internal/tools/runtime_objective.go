@@ -77,18 +77,44 @@ func objectiveQuestionLooksStale(objective, text string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
-	staleFamilies := [][]string{
-		{"failing test", "failing tests", "test failure", "tests failing", "debug failing tests", "测试失败", "失败的测试"},
-		{"release tag", "github release", "publish release", "create release", "发布版本", "发布 release"},
-		{"codex review", "pr review", "review comment", "review comments", "review finding", "review findings"},
+	staleFamilies := []struct {
+		textTerms      []string
+		objectiveTerms []string
+	}{
+		{
+			textTerms: []string{
+				"failing test", "failing tests", "test failure", "tests failing", "debug failing tests", "测试失败", "失败的测试",
+			},
+			objectiveTerms: []string{
+				"failing test", "failing tests", "test failure", "tests failing", "debug failing tests", "测试失败", "失败的测试",
+			},
+		},
+		{
+			textTerms: []string{
+				"release tag", "github release", "gh release", "publish release", "create release", "release create", "发布版本", "发布 release",
+			},
+			objectiveTerms: []string{
+				"release", "release tag", "github release", "gh release", "publish release", "create release", "prepare release", "prepare a release", "发布版本", "发布 release",
+			},
+		},
+		{
+			textTerms: []string{
+				"codex review", "pr review", "review pr", "review this pr", "pull request review", "review comment", "review comments", "review finding", "review findings",
+			},
+			objectiveTerms: []string{
+				"review", "pr review", "review pr", "review this pr", "review this pull request", "review pull request", "pull request review", "review commit", "code review", "codex review", "review comment", "review comments", "review finding", "review findings",
+			},
+		},
 	}
 	for _, family := range staleFamilies {
 		textHit := false
 		objectiveHit := false
-		for _, term := range family {
+		for _, term := range family.textTerms {
 			if containsObjectiveTerm(text, term) {
 				textHit = true
 			}
+		}
+		for _, term := range family.objectiveTerms {
 			if containsObjectiveTerm(objective, term) {
 				objectiveHit = true
 			}

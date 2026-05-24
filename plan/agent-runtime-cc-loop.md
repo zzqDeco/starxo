@@ -13,6 +13,7 @@
 - A fresh non-preempt user turn discards any stale session TurnLoop checkpoint before starting, so old interrupted state cannot hijack a new standalone request into an invalid resume path.
 - If a stale checkpoint still routes into resume while a new user turn is queued, Starxo tombstones the checkpoint and requeues the user turn through the normal input path.
 - A replaced/stale TurnLoop can exit from context cancellation without surfacing a false agent error to the UI.
+- Sandbox-loss/user-stop TurnLoop exits are treated as administrative stops; the dedicated sandbox-loss path owns the user-facing error.
 - Preempted turns suppress false completion events and remove only current-turn unresolved tool-call history instead of injecting synthetic tool failures or deleting older completed tool calls with reused IDs.
 - Replacement messages received during startup cancel the startup wait before queueing the new objective, so stale startup work cannot run ahead of the latest turn.
 - Resume consumes `pendingInterrupt` under lock so concurrent resume requests cannot target the same interrupt; failed enqueue attempts restore it for retry.
@@ -20,6 +21,8 @@
 - User turns and current objectives are recorded before runner bundle startup so model/config/sandbox initialization failures do not drop the just-submitted request.
 - `<current-objective>` is pinned before model calls so older messages are treated as historical context unless the current turn is a continuation.
 - `ask_user` and `ask_choice` reject prompts that clearly pursue stale debug/release/review work unrelated to the active objective.
+- Continuation detection keeps bare `resume` and explicit `resume previous task` as continuation, but treats concrete new requests like `resume parser design` as standalone.
+- Stale review/release guards allow related tools when the current objective itself is a review or release task.
 - `Agent` supports two delegation styles:
   - omit `subagent_type` to fork the current agent context for isolated exploration
   - set `subagent_type` to create a fresh worker constrained by registry policy

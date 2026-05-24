@@ -100,6 +100,18 @@ func TestRuntimeTurnLoopGenResumeUsesInterruptedObjective(t *testing.T) {
 	}
 }
 
+func TestRuntimeTurnStopCauseSuppressesAdministrativeErrors(t *testing.T) {
+	if !runtimeTurnStopCauseSuppressesError("user_stop") {
+		t.Fatalf("expected user_stop to suppress loop exit errors")
+	}
+	if !runtimeTurnStopCauseSuppressesError("sandbox_lost") {
+		t.Fatalf("expected sandbox_lost to suppress loop exit errors")
+	}
+	if runtimeTurnStopCauseSuppressesError("model_error") {
+		t.Fatalf("expected non-administrative stop cause to report loop exit errors")
+	}
+}
+
 func TestRuntimeTurnCheckpointIDIsSessionScoped(t *testing.T) {
 	if got := runtimeTurnCheckpointID("sess-1"); got != "runtime-turn:sess-1" {
 		t.Fatalf("unexpected checkpoint id %q", got)

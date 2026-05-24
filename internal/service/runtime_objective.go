@@ -11,13 +11,12 @@ import (
 )
 
 func objectiveScope(userMessage string) string {
-	msg := strings.ToLower(strings.TrimSpace(userMessage))
+	msg := normalizeObjectiveScopeMessage(userMessage)
 	if msg == "" {
 		return "standalone"
 	}
-	msg = strings.Join(strings.Fields(msg), " ")
 	exactContinuationSignals := map[string]bool{
-		"continue": true, "continue please": true, "go on": true, "proceed": true,
+		"continue": true, "continue please": true, "go on": true, "proceed": true, "resume": true,
 		"next step": true, "what next": true, "do it": true, "do that": true,
 		"do the above": true, "same task": true, "that task": true, "previous task": true,
 		"继续": true, "下一步": true, "下步": true, "接着": true, "继续做": true, "继续执行": true,
@@ -26,7 +25,10 @@ func objectiveScope(userMessage string) string {
 	if exactContinuationSignals[msg] {
 		return "continuation"
 	}
-	if strings.HasPrefix(msg, "continue ") || strings.HasPrefix(msg, "resume ") {
+	if strings.HasPrefix(msg, "continue ") {
+		return "continuation"
+	}
+	if strings.HasPrefix(msg, "resume ") && resumeContinuationIntent(msg) {
 		return "continuation"
 	}
 	if strings.Contains(msg, "the above") && containsAny(msg, "do", "implement", "finish", "complete", "fix", "address", "continue") {
@@ -42,6 +44,21 @@ func objectiveScope(userMessage string) string {
 		return "continuation"
 	}
 	return "standalone"
+}
+
+func normalizeObjectiveScopeMessage(userMessage string) string {
+	msg := strings.ToLower(strings.TrimSpace(userMessage))
+	msg = strings.Trim(msg, " \t\r\n.!?。！？,，;；:：")
+	return strings.Join(strings.Fields(msg), " ")
+}
+
+func resumeContinuationIntent(msg string) bool {
+	return containsAny(msg,
+		"above", "interrupted",
+		"previous task", "previous work", "prior task", "prior work", "last task", "last work", "earlier task", "earlier work",
+		"current task", "current work", "this task", "this work", "that task", "that work", "the task",
+		"where we left", "where you left",
+	)
 }
 
 func containsAny(text string, terms ...string) bool {
