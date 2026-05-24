@@ -101,6 +101,7 @@ func (s *ChatService) refreshRuntimeContextCompact(sessionID string, run *Sessio
 		Todos:            tools.SnapshotTodosForSession(sessionID),
 		PlanDocument:     model.ClonePlanDocument(run.planDocument),
 		Workspace:        workspace,
+		ActiveObjective:  cloneRunObjective(run.activeObjective),
 	}
 	if run.runtimeContextCompact != nil && run.runtimeContextCompact.CreatedAt > 0 {
 		compact.CreatedAt = run.runtimeContextCompact.CreatedAt
@@ -133,7 +134,8 @@ func runtimeCompactHasContent(compact *model.RuntimeContextCompact) bool {
 		len(compact.DiffSummaries) > 0 ||
 		len(compact.Todos) > 0 ||
 		(compact.PlanDocument != nil && strings.TrimSpace(compact.PlanDocument.Markdown) != "") ||
-		(compact.Workspace != nil && compact.Workspace.Active)
+		(compact.Workspace != nil && compact.Workspace.Active) ||
+		(compact.ActiveObjective != nil && strings.TrimSpace(compact.ActiveObjective.Objective) != "")
 }
 
 func buildRuntimeCompactSummary(messages []model.PersistedMessage, compact *model.RuntimeContextCompact) string {

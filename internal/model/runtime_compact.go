@@ -20,6 +20,20 @@ type RuntimeContextCompact struct {
 	Todos                []RuntimeTodoItem        `json:"todos,omitempty"`
 	PlanDocument         *PlanDocument            `json:"planDocument,omitempty"`
 	Workspace            *RuntimeWorkspaceCompact `json:"workspace,omitempty"`
+	ActiveObjective      *RunObjective            `json:"activeObjective,omitempty"`
+}
+
+// RunObjective describes the current user turn the runtime is allowed to act on.
+// Older messages are historical context unless Scope is "continuation".
+type RunObjective struct {
+	ID                string `json:"id"`
+	RunID             string `json:"runId"`
+	UserMessageID     string `json:"userMessageId"`
+	Scope             string `json:"scope"`
+	Objective         string `json:"objective"`
+	Acceptance        string `json:"acceptance,omitempty"`
+	CreatedAt         int64  `json:"createdAt"`
+	HistoryStartIndex int    `json:"historyStartIndex,omitempty"`
 }
 
 // RuntimeToolSearchCompact preserves deferred tool discovery and announcement
@@ -107,6 +121,10 @@ func CloneRuntimeContextCompact(in *RuntimeContextCompact) *RuntimeContextCompac
 	if in.Workspace != nil {
 		cp := *in.Workspace
 		out.Workspace = &cp
+	}
+	if in.ActiveObjective != nil {
+		cp := *in.ActiveObjective
+		out.ActiveObjective = &cp
 	}
 	return &out
 }

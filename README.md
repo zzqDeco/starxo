@@ -9,7 +9,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 ## Features
 
 - **Claude Code-style Agent Runtime** — Eino v0.9 runtime with direct tools, `ToolSearch`, dynamic `Agent` subagents, task management, worktree isolation, Skill, and AGENTS.md context
-- **Dual Execution Modes** — Default mode (direct execution) + Plan mode (Planner/Replanner structured execution)
+- **Dual Execution Modes** — Default mode runs direct ReAct tool use; Plan mode narrows the same runtime loop to read/search/planning until `ExitPlanMode` approval
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
@@ -33,7 +33,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 |------------|---------|---------|
 | Go | 1.24 | Primary language |
 | Wails | v2.11 | Desktop framework (Go + WebView) |
-| CloudWeGo Eino | v0.9.0-beta.1 | Agent framework (ADK, Runner, Deep Agent, ToolSearch/Skill/Reduction/Summarization middleware) |
+| CloudWeGo Eino | v0.9.0-beta.1 | Agent framework (ADK, ChatModelAgent, Runner, ToolSearch/Skill/Reduction/Summarization middleware) |
 | eino-ext | - | LLM Providers (OpenAI/Ark/Ollama) + MCP + Commandline |
 | golang.org/x/crypto | - | SSH connections |
 | pkg/sftp | v1.13 | SFTP file transfer |
@@ -63,7 +63,9 @@ starxo/
 │
 ├── internal/
 │   ├── agent/                       # AI Agent construction & configuration
-│   │   ├── deep_agent.go            #   Eino v0.9 top-level agent builder
+│   │   ├── runtime_agent.go         #   Eino v0.9 ChatModelAgent runtime builder
+│   │   ├── runtime_behavior.go      #   Current-objective behavior middleware
+│   │   ├── deep_agent.go            #   Legacy deep-transfer fallback agent builder
 │   │   ├── subagents.go             #   Dynamic runtime subagent registry
 │   │   ├── eino_v09_context.go      #   Skill, AGENTS.md, reduction, summarization middleware
 │   │   ├── runner.go                #   Runner builders (default + plan mode)
@@ -78,6 +80,8 @@ starxo/
 │   │
 │   ├── service/                     # Wails-bound services (frontend API)
 │   │   ├── chat.go                  #   ChatService: per-session agent lifecycle (SessionRun), messaging, streaming
+│   │   ├── runtime_agents_build.go  #   Runtime agent builder selection
+│   │   ├── runtime_objective.go     #   Current-objective prompt/history sidecar
 │   │   ├── runtime_context_compact.go # Runtime V2 context compact state
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 dynamic Agent tool
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 persistent language server manager
@@ -107,6 +111,7 @@ starxo/
 │   │   ├── mcp.go                   #   MCP server connection + tool loading
 │   │   ├── followup.go              #   ask_user interrupt tool
 │   │   ├── choice.go                #   ask_choice interrupt tool
+│   │   ├── runtime_objective.go     #   Current-objective context guard for ask tools
 │   │   ├── todos.go                 #   write_todos / update_todo task tools
 │   │   ├── notify.go                #   notify_user notification tool
 │   │   └── custom.go                #   Custom tool helper
@@ -168,7 +173,7 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 
 The top-level agent now runs on Eino `v0.9.0-beta.1` and receives a smaller always-loaded runtime tool surface. Eino's dynamic `tool_search` middleware exposes deferred tools on demand while Starxo keeps catalog metadata, plan-mode filtering, permission checks, and discovered-tool persistence. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
 
-The fixed `transfer_to_agent` subagent path is no longer the default runtime. `Agent` is the delegation entry point and resolves `subagent_type` through `agent.runtime.subagents`. Built-ins include `general`, `code_writer`, `code_executor`, `file_manager`, and `reviewer`; each definition can constrain allowed tools, default isolation, instructions, and whether background execution is allowed. Custom registries do not get an implicit unrestricted `general`; empty `subagent_type` uses the configured default. The previous deep-transfer implementation remains behind `agent.runtime.enableBuiltinDeepTransferFallback` for debugging only.
+The fixed `transfer_to_agent` subagent path is no longer the default runtime. The top-level agent is an Eino `ChatModelAgent` ReAct loop with a pinned current-objective sidecar, so new standalone requests do not resume unrelated old tasks. `Agent` is the delegation entry point and resolves `subagent_type` through `agent.runtime.subagents`. Built-ins include `general`, `code_writer`, `code_executor`, `file_manager`, and `reviewer`; each definition can constrain allowed tools, default isolation, instructions, and whether background execution is allowed. Omitting `subagent_type` forks the current agent context; setting it creates a fresh worker constrained by that definition. The previous deep-transfer implementation remains behind `agent.runtime.enableBuiltinDeepTransferFallback` for debugging only.
 
 Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `WorktreeDiff`, `WorktreeMerge`, `LSP`, `LSPEdit`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `LSPEdit` exposes writable language-server rename/format operations through the permission queue. `Agent` can run focused subagents synchronously or in the background, and can request context-scoped worktree isolation for bounded tasks without switching the parent session workspace.
 

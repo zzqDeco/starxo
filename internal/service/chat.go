@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -14,8 +13,6 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
-	einotoolsearch "github.com/cloudwego/eino/adk/middlewares/dynamictool/toolsearch"
-	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -23,7 +20,6 @@ import (
 	"starxo/internal/agent"
 	"starxo/internal/config"
 	agentctx "starxo/internal/context"
-	"starxo/internal/llm"
 	"starxo/internal/logger"
 	"starxo/internal/model"
 	"starxo/internal/sandbox"
@@ -66,6 +62,7 @@ type PendingInterrupt struct {
 	BundleGeneration uint64
 	RunnerKind       RunnerKind
 	Info             any
+	Objective        *model.RunObjective
 }
 
 type RunnerKind string
@@ -83,8 +80,13 @@ type cachedMCPServerSurface struct {
 }
 
 type RunnerBundle struct {
-	Generation                    uint64
-	ConfigDigest                  string
+	Generation   uint64
+	ConfigDigest string
+	DefaultAgent adk.Agent
+	PlanAgent    adk.Agent
+	// Deprecated: top-level session execution is driven by TurnLoop over the
+	// agents above. These fields remain temporarily for older bundle tests and
+	// compatibility with legacy helper paths.
 	DefaultRunner                 *adk.Runner
 	PlanRunner                    *adk.Runner
 	MCPCatalog                    *tools.ToolCatalog
@@ -136,6 +138,7 @@ type SessionRun struct {
 	planDocument              *model.PlanDocument
 	pendingPlanApproval       *model.PendingPlanApproval
 	pendingPlanAttachment     *model.PendingPlanAttachment
+	activeObjective           *model.RunObjective
 
 	// Run lifecycle
 	running                      bool
@@ -143,6 +146,10 @@ type SessionRun struct {
 	cancelFn                     context.CancelFunc
 	startDone                    chan struct{}
 	runDone                      chan struct{}
+	turnLoop                     *adk.TurnLoop[runtimeTurnItem, *schema.Message]
+	turnLoopCancel               context.CancelFunc
+	turnLoopDone                 chan struct{}
+	turnLoopStarted              bool
 	pendingInterrupt             *PendingInterrupt
 	streamingState               *model.StreamingState
 	mode                         string // "default" or "plan"
@@ -165,6 +172,37 @@ func (r *SessionRun) addUserMessage(content string) {
 	r.ctxEngine.AddUserMessage(content)
 }
 
+func (r *SessionRun) beginObjective(userMessageID, runID, userMessage string, createdAt int64) *model.RunObjective {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	scope := objectiveScope(userMessage)
+	historyStart := 0
+	if scope == "standalone" {
+		historyStart = r.ctxEngine.MessageCount() - 1
+		if historyStart < 0 {
+			historyStart = 0
+		}
+	}
+	obj := &model.RunObjective{
+		ID:                fmt.Sprintf("obj-%d", createdAt),
+		RunID:             runID,
+		UserMessageID:     userMessageID,
+		Scope:             scope,
+		Objective:         strings.TrimSpace(userMessage),
+		Acceptance:        "Answer the current user request and verify any file or command changes that are part of that request.",
+		CreatedAt:         createdAt,
+		HistoryStartIndex: historyStart,
+	}
+	r.activeObjective = obj
+	return cloneRunObjective(obj)
+}
+
+func (r *SessionRun) currentObjective() *model.RunObjective {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
+	return cloneRunObjective(r.activeObjective)
+}
+
 func (r *SessionRun) addAssistantMessage(content string) {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
@@ -183,6 +221,69 @@ func (r *SessionRun) addMessage(msg *schema.Message) {
 	r.ctxEngine.AddMessage(msg)
 }
 
+func (r *SessionRun) removeCurrentTurnToolCallsForIDs(toolCallIDs map[string]pendingRuntimeToolCall, toolMessages, toolResultMessages []*schema.Message) int {
+	if len(toolCallIDs) == 0 {
+		return 0
+	}
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	history := r.ctxEngine.History()
+	msgs := history.GetAll()
+	removeIDs := make(map[string]struct{}, len(toolCallIDs))
+	for id := range toolCallIDs {
+		removeIDs[id] = struct{}{}
+	}
+	turnMessages := make(map[*schema.Message]struct{}, len(toolMessages))
+	for _, msg := range toolMessages {
+		if msg != nil {
+			turnMessages[msg] = struct{}{}
+		}
+	}
+	turnResults := make(map[*schema.Message]struct{}, len(toolResultMessages))
+	for _, msg := range toolResultMessages {
+		if msg != nil {
+			turnResults[msg] = struct{}{}
+		}
+	}
+	filtered := make([]*schema.Message, 0, len(msgs))
+	removed := 0
+	for _, msg := range msgs {
+		if msg == nil {
+			filtered = append(filtered, msg)
+			continue
+		}
+		if _, isCurrentTurnToolMessage := turnMessages[msg]; isCurrentTurnToolMessage && len(msg.ToolCalls) > 0 {
+			keptCalls := make([]schema.ToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				if _, drop := removeIDs[tc.ID]; drop {
+					continue
+				}
+				keptCalls = append(keptCalls, tc)
+			}
+			if len(keptCalls) != len(msg.ToolCalls) {
+				if len(keptCalls) == 0 && msg.Content == "" {
+					removed++
+					continue
+				}
+				cloned := *msg
+				cloned.ToolCalls = keptCalls
+				msg = &cloned
+			}
+		}
+		if _, isCurrentTurnToolResult := turnResults[msg]; isCurrentTurnToolResult && msg.ToolCallID != "" {
+			if _, drop := removeIDs[msg.ToolCallID]; drop {
+				removed++
+				continue
+			}
+		}
+		filtered = append(filtered, msg)
+	}
+	if removed > 0 {
+		history.SetAll(filtered)
+	}
+	return removed
+}
+
 func (r *SessionRun) addUserTurn(id, content string, timestamp int64) {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
@@ -196,7 +297,13 @@ func (r *SessionRun) prepareMessages() []*schema.Message {
 func (r *SessionRun) prepareMessagesWithCompact(compact *model.RuntimeContextCompact) []*schema.Message {
 	r.stateMu.RLock()
 	defer r.stateMu.RUnlock()
-	return r.ctxEngine.PrepareMessagesWithCompact(nil, compact)
+	objective := cloneRunObjective(r.activeObjective)
+	pinned := runtimeObjectivePinnedMessages(objective)
+	historyStart := 0
+	if objective != nil && objective.Scope == "standalone" {
+		historyStart = objective.HistoryStartIndex
+	}
+	return r.ctxEngine.PrepareMessagesWithCompactFrom(pinned, scopeCompactForObjective(compact, objective), historyStart)
 }
 
 func (r *SessionRun) clearSessionState() {
@@ -215,6 +322,7 @@ func (r *SessionRun) clearSessionState() {
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
+	r.activeObjective = nil
 }
 
 func (r *SessionRun) setStreamingState(state *model.StreamingState) {
@@ -257,6 +365,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.planDocument = nil
 	r.pendingPlanApproval = nil
 	r.pendingPlanAttachment = nil
+	r.activeObjective = nil
 	r.mode = model.ModeDefault
 	if data == nil {
 		return
@@ -266,6 +375,9 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.deferredAnnouncementState = cloneDeferredAnnouncementState(data.DeferredAnnouncementState)
 	r.mcpInstructionsDeltaState = cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState)
 	r.runtimeContextCompact = model.CloneRuntimeContextCompact(data.RuntimeContextCompact)
+	if r.runtimeContextCompact != nil {
+		r.activeObjective = cloneRunObjective(r.runtimeContextCompact.ActiveObjective)
+	}
 	r.planDocument = model.ClonePlanDocument(data.PlanDocument)
 	r.pendingPlanApproval = model.ClonePendingPlanApproval(data.PendingPlanApproval)
 	r.pendingPlanAttachment = model.ClonePendingPlanAttachment(data.PendingPlanAttachment)
@@ -441,298 +553,6 @@ func cloneMCPInstructionsDeltaState(in *model.MCPInstructionsDeltaState) *model.
 	}
 }
 
-type deferredMCPProvider struct {
-	chat   *ChatService
-	bundle *RunnerBundle
-}
-
-func (p *deferredMCPProvider) MCPHandleSnapshot() []*tools.MCPServerHandle {
-	if p.bundle == nil || len(p.bundle.MCPHandles) == 0 {
-		return nil
-	}
-	out := make([]*tools.MCPServerHandle, len(p.bundle.MCPHandles))
-	copy(out, p.bundle.MCPHandles)
-	return out
-}
-
-func (p *deferredMCPProvider) LookupCatalogEntry(name string) (tools.CatalogEntry, bool) {
-	if p.bundle == nil || p.bundle.MCPCatalog == nil {
-		return tools.CatalogEntry{}, false
-	}
-	return p.bundle.MCPCatalog.LookupExact(name)
-}
-
-func (p *deferredMCPProvider) ToolPermissionContext(ctx context.Context) (tools.ToolPermissionContext, error) {
-	sessionID, mode, _, err := p.sessionState(ctx)
-	if err != nil {
-		return tools.ToolPermissionContext{}, err
-	}
-	return p.permissionContext(sessionID, mode), nil
-}
-
-func (p *deferredMCPProvider) DeferredMCPState(ctx context.Context) (tools.DeferredMCPState, error) {
-	sessionID, mode, discovered, err := p.sessionState(ctx)
-	if err != nil {
-		return tools.DeferredMCPState{}, err
-	}
-	if p.bundle == nil || p.bundle.MCPCatalog == nil {
-		return tools.DeferredMCPState{}, nil
-	}
-	return tools.ComputeDeferredMCPState(p.bundle.MCPCatalog, discovered, p.permissionContext(sessionID, mode)), nil
-}
-
-func (p *deferredMCPProvider) PrepareDeferredSyntheticMessages(ctx context.Context) (*tools.DeferredSyntheticMessages, error) {
-	sessionID, mode, discovered, err := p.sessionState(ctx)
-	if err != nil {
-		return nil, err
-	}
-	permCtx := p.permissionContext(sessionID, mode)
-	state := tools.DeferredMCPState{}
-	if p.bundle != nil && p.bundle.MCPCatalog != nil {
-		state = tools.ComputeDeferredMCPState(p.bundle.MCPCatalog, discovered, permCtx)
-	}
-
-	p.chat.mu.Lock()
-	run, ok := p.chat.sessions[sessionID]
-	p.chat.mu.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("session %s not found", sessionID)
-	}
-
-	currentDigest := ""
-	configSnapshotError := ""
-	if _, digest, err := p.chat.currentConfigSnapshot(); err != nil {
-		configSnapshotError = err.Error()
-	} else {
-		currentDigest = digest
-	}
-
-	bundleConfigDigest := ""
-	var bundleGeneration uint64
-	if p.bundle != nil {
-		bundleConfigDigest = p.bundle.ConfigDigest
-		bundleGeneration = p.bundle.Generation
-	}
-
-	computation := buildDeferredSurfaceComputation(deferredSurfaceDebugInput{
-		CurrentConfigDigest: currentDigest,
-		BundleConfigDigest:  bundleConfigDigest,
-		BundleGeneration:    bundleGeneration,
-		State:               state,
-		PermissionContext:   permCtx,
-		AnnouncementState:   run.deferredAnnouncementStateSnapshot(),
-		InstructionsState:   run.mcpInstructionsDeltaStateSnapshot(),
-		ConfigSnapshotError: configSnapshotError,
-	})
-	logDeferredSurfaceComputed(sessionID, mode, computation.Debug)
-
-	if computation.AnnouncementMessage == nil &&
-		computation.InstructionsMessage == nil &&
-		!computation.UpdateAnnouncement &&
-		!computation.UpdateInstructions {
-		return nil, nil
-	}
-
-	prepared := &tools.DeferredSyntheticMessages{}
-	if computation.AnnouncementMessage != nil {
-		prepared.Messages = append(prepared.Messages, computation.AnnouncementMessage)
-	}
-	if computation.InstructionsMessage != nil {
-		prepared.Messages = append(prepared.Messages, computation.InstructionsMessage)
-	}
-	if computation.UpdateAnnouncement || computation.UpdateInstructions {
-		prepared.Commit = func() {
-			run.applySyntheticDeltaStates(
-				computation.AnnouncementNext,
-				computation.UpdateAnnouncement,
-				computation.InstructionsNext,
-				computation.UpdateInstructions,
-			)
-			logDeferredSurfaceCommitted(
-				sessionID,
-				mode,
-				computation.AnnouncementNext,
-				computation.UpdateAnnouncement,
-				computation.InstructionsNext,
-				computation.UpdateInstructions,
-			)
-		}
-	}
-	return prepared, nil
-}
-
-func (p *deferredMCPProvider) ToolSearchState(ctx context.Context) (tools.ToolSearchState, error) {
-	state, err := p.DeferredMCPState(ctx)
-	if err != nil {
-		return tools.ToolSearchState{}, err
-	}
-	return tools.ToolSearchState{
-		SearchablePool:   state.SearchablePoolForMode,
-		CurrentLoaded:    state.CurrentLoadedTools,
-		PendingMCPServer: state.PendingMCPServers,
-	}, nil
-}
-
-func (p *deferredMCPProvider) AddDiscoveredTools(ctx context.Context, records []model.DiscoveredToolRecord) error {
-	sessionID := SessionIDFromContext(ctx)
-	if sessionID == "" {
-		return fmt.Errorf("sessionID missing from context")
-	}
-
-	changed := false
-	for _, record := range records {
-		if record.CanonicalName == "" {
-			continue
-		}
-		entry, ok := p.LookupCatalogEntry(record.CanonicalName)
-		if !ok || !entry.ShouldDefer || entry.AlwaysLoad {
-			continue
-		}
-		if p.chat.AddDiscoveredTool(sessionID, record) {
-			changed = true
-		}
-	}
-	if !changed {
-		return nil
-	}
-
-	p.chat.mu.Lock()
-	ss := p.chat.sessionService
-	p.chat.mu.Unlock()
-	if ss == nil {
-		return nil
-	}
-	return ss.SaveSessionByID(sessionID)
-}
-
-func (p *deferredMCPProvider) sessionState(ctx context.Context) (string, string, map[string]model.DiscoveredToolRecord, error) {
-	sessionID := SessionIDFromContext(ctx)
-	if sessionID == "" {
-		return "", "", nil, fmt.Errorf("sessionID missing from context")
-	}
-
-	p.chat.mu.Lock()
-	run, ok := p.chat.sessions[sessionID]
-	if !ok {
-		p.chat.mu.Unlock()
-		return "", "", nil, fmt.Errorf("session %s not found", sessionID)
-	}
-	mode := run.mode
-	p.chat.mu.Unlock()
-
-	return sessionID, mode, run.discoveredToolsSnapshot(), nil
-}
-
-func (p *deferredMCPProvider) permissionContext(sessionID, mode string) tools.ToolPermissionContext {
-	servers := make(map[string]tools.MCPServerPermissionState)
-	if p.bundle != nil {
-		for serverName, cache := range p.bundle.CachedSurfaceMetadataByServer {
-			servers[serverName] = tools.MCPServerPermissionState{
-				State:                 tools.MCPServerStateFailed,
-				HasCachedToolMetadata: cache.HasToolMetadata,
-				SupportsResources:     cache.SupportsResources,
-			}
-		}
-		for _, handle := range p.bundle.MCPHandles {
-			if handle == nil || handle.Name == "" {
-				continue
-			}
-			cache := p.bundle.CachedSurfaceMetadataByServer[handle.Name]
-			servers[handle.Name] = tools.MCPServerPermissionState{
-				State:                 handle.State,
-				HasCachedToolMetadata: handle.ToolMetadataReady || len(handle.Tools) > 0 || cache.HasToolMetadata,
-				SupportsResources:     handle.SupportsResources() || cache.SupportsResources,
-			}
-		}
-	}
-	return tools.ToolPermissionContext{
-		SessionID: sessionID,
-		Mode:      mode,
-		Servers:   servers,
-	}
-}
-
-func newDeferredUnknownToolHandler(provider *deferredMCPProvider) func(ctx context.Context, name, input string) (string, error) {
-	return func(ctx context.Context, name, input string) (string, error) {
-		state, err := provider.DeferredMCPState(ctx)
-		if err != nil {
-			return "", err
-		}
-
-		if name == tools.ToolSearchName {
-			return "", nil
-		}
-
-		if entry, ok := provider.LookupCatalogEntry(name); ok {
-			if state.IsCurrentlyLoaded(entry.CanonicalName) {
-				return fmt.Sprintf("tool %s is already loaded; call it by its canonical name %s", name, entry.CanonicalName), nil
-			}
-			if state.IsCurrentlySearchable(entry.CanonicalName) {
-				return fmt.Sprintf("tool %s is available but not currently loaded; use tool_search first", entry.CanonicalName), nil
-			}
-			if decision, ok := state.SearchDecisions[entry.CanonicalName]; ok && decision.Reason != "" {
-				return fmt.Sprintf("tool %s is unavailable in the current mode or runtime: %s", entry.CanonicalName, decision.Reason), nil
-			}
-			return fmt.Sprintf("tool %s is unavailable in the current mode or runtime", entry.CanonicalName), nil
-		}
-
-		return fmt.Sprintf("unknown tool %s", name), nil
-	}
-}
-
-func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvider, mode, toolSearchMode, agenticProtocol string) (adk.ChatModelAgentMiddleware, error) {
-	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
-		return nil, nil
-	}
-	dynamicTools := einoV09ToolSearchCandidates(provider.bundle.MCPCatalog, mode)
-	if len(dynamicTools) == 0 {
-		return nil, nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return einotoolsearch.New(ctx, &einotoolsearch.Config{
-		DynamicTools:       dynamicTools,
-		UseModelToolSearch: useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol),
-	})
-}
-
-func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, mode string) []einotool.BaseTool {
-	if catalog == nil {
-		return nil
-	}
-	entries := catalog.Entries()
-	dynamicTools := make([]einotool.BaseTool, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.ShouldDefer || entry.AlwaysLoad || entry.Tool == nil {
-			continue
-		}
-		if !einoV09PotentiallySearchable(entry, mode) {
-			continue
-		}
-		dynamicTools = append(dynamicTools, entry.Tool)
-	}
-	return dynamicTools
-}
-
-func einoV09PotentiallySearchable(entry tools.CatalogEntry, mode string) bool {
-	if !entry.PermissionSpec.AllowSearch {
-		return false
-	}
-	if mode == "plan" && !entry.ReadOnlyEligible() {
-		return false
-	}
-	return true
-}
-
-func useEinoV09ModelToolSearch(toolSearchMode, agenticProtocol string) bool {
-	// Starxo still gates deferred tool execution through per-session discovery state.
-	// Eino's model-native path puts dynamic tools in DeferredToolInfos, which can let
-	// a model invoke them before Starxo has recorded discovery. Keep client-side
-	// tool_search as the only active path until native search can pre-grant discovery.
-	return false
-}
-
 // ChatService manages chat interactions between the frontend and the AI agent.
 type ChatService struct {
 	ctx context.Context
@@ -838,10 +658,14 @@ func (s *ChatService) cancelRunsForSandboxLossLocked() []string {
 		if run == nil || (!run.running && !run.starting) {
 			continue
 		}
-		if run.cancelFn == nil {
+		if run.turnLoop == nil && run.cancelFn == nil {
 			continue
 		}
-		run.cancelFn()
+		if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("sandbox_lost")...)
+		} else {
+			run.cancelFn()
+		}
 		run.cancelFn = nil
 		run.pendingInterrupt = nil
 		stopped = append(stopped, sessionID)
@@ -1030,6 +854,16 @@ func runnerForKind(bundle *RunnerBundle, kind RunnerKind) *adk.Runner {
 		return bundle.PlanRunner
 	}
 	return bundle.DefaultRunner
+}
+
+func agentForKind(bundle *RunnerBundle, kind RunnerKind) adk.Agent {
+	if bundle == nil {
+		return nil
+	}
+	if kind == RunnerKindPlan {
+		return bundle.PlanAgent
+	}
+	return bundle.DefaultAgent
 }
 
 func bundleKey(generation uint64, digest string) string {
@@ -1332,9 +1166,16 @@ func (s *ChatService) GetOrCreateRun(sessionID string) *SessionRun {
 // RemoveSession removes a session's run state from memory.
 func (s *ChatService) RemoveSession(sessionID string) {
 	s.mu.Lock()
+	hadSession := false
 	if run, ok := s.sessions[sessionID]; ok {
-		if run.cancelFn != nil {
+		hadSession = true
+		if run.turnLoop != nil {
+			s.resetRuntimeTurnLoopLocked(run)
+		} else if run.cancelFn != nil {
 			run.cancelFn()
+		}
+		if run.running || run.starting {
+			s.finishRuntimeTurnLocked(run)
 		}
 		if run.startDone != nil {
 			close(run.startDone)
@@ -1343,9 +1184,12 @@ func (s *ChatService) RemoveSession(sessionID string) {
 		run.starting = false
 		run.pendingStartBundleGeneration = 0
 	}
-	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
 	s.cleanupRetiredBundlesLocked()
+	s.mu.Unlock()
+	if hadSession {
+		s.deleteRuntimeTurnCheckpoint(sessionID)
+	}
 	tools.ClearTodosForSession(sessionID)
 }
 
@@ -1483,200 +1327,95 @@ func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration
 
 // SendMessage processes a user message through the agent and streams results to the frontend.
 func (s *ChatService) SendMessage(userMessage string) error {
-	s.mu.Lock()
-
-	if s.activeSessionID == "" {
-		s.mu.Unlock()
-		return fmt.Errorf("no active session")
-	}
-
-	run := s.activeRun()
-
-	// Per-session concurrent run guard
-	if run.running || run.starting {
-		s.mu.Unlock()
-		return fmt.Errorf("agent is already running in this session")
-	}
-
-	logger.Info("[CHAT] User message received",
-		"length", len(userMessage),
-		"preview", truncateResult(userMessage, 100),
-		"session", s.activeSessionID,
-	)
-
-	// Add user message to session's context engine
-	run.addUserMessage(userMessage)
-
-	// Record user turn in session's timeline collector
-	run.addUserTurn(
-		fmt.Sprintf("usr-%d", time.Now().UnixNano()),
-		userMessage,
-		time.Now().UnixMilli(),
-	)
-
-	// Auto-escalate to plan mode for complex tasks when currently in default mode.
-	// This keeps default mode flexible while enforcing strict orchestration once
-	// plan mode is entered.
-	if run.mode == model.ModeDefault && shouldAutoPlanMode(userMessage) {
-		run.mode = model.ModePlan
-		logger.Info("[CHAT] Auto-switched to plan mode",
-			"session", s.activeSessionID,
-			"reason", "complexity_trigger",
-		)
-		wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
-			Mode:      model.ModePlan,
-			SessionID: s.activeSessionID,
-		})
-	}
-
-	sessionID := run.sessionID
-	mode := run.mode
-	baseCtx := s.ctx
-	if baseCtx == nil {
-		baseCtx = context.Background()
-	}
-	startCtx, startCancel := context.WithCancel(baseCtx)
-	run.starting = true
-	run.cancelFn = startCancel
-	run.startDone = make(chan struct{})
-	s.mu.Unlock()
-	s.emitRunState(sessionID)
-
-	bundle, err := s.ensureBundleReadyForNewRun(startCtx, sessionID)
-	if err != nil {
-		startCancel()
+	for {
 		s.mu.Lock()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		s.emitRunState(sessionID)
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil
-		}
-		logger.Error("[CHAT] Failed to prepare runner bundle", err)
-		wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-			"sessionId": sessionID,
-			"error":     fmt.Sprintf("Failed to build runner: %v", err),
-		})
-		return fmt.Errorf("failed to build runners: %w", err)
-	}
-	if err := startCtx.Err(); err != nil {
-		startCancel()
-		s.mu.Lock()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		s.emitRunState(sessionID)
-		return nil
-	}
-
-	runnerKind := runnerKindForMode(mode)
-	runner := runnerForKind(bundle, runnerKind)
-	if runner == nil {
-		startCancel()
-		s.mu.Lock()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		s.emitRunState(sessionID)
-		return fmt.Errorf("runner %s unavailable for bundle generation %d", runnerKind, bundle.Generation)
-	}
-
-	// Create a cancellable context with session identity
-	runCtx, cancel := context.WithCancel(baseCtx)
-	runCtx = contextWithSessionID(runCtx, sessionID)
-	s.mu.Lock()
-	if startCtx.Err() != nil {
-		startCancel()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		cancel()
-		s.emitRunState(sessionID)
-		return nil
-	}
-	done := make(chan struct{})
-	run, err = s.publishStartupLocked(sessionID, bundle, runnerKind, cancel, done)
-	s.mu.Unlock()
-	if err != nil {
-		startCancel()
-		cancel()
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil
-		}
-		return err
-	}
-	s.emitRunState(sessionID)
-	startCancel()
-
-	// Prepare messages
-	messages := s.prepareMessagesForRun(sessionID, run)
-	checkpointID := fmt.Sprintf("run-%d", time.Now().UnixNano())
-
-	// Launch the agent run in a goroutine
-	go func() {
-		defer close(done)
-		defer func() {
-			s.mu.Lock()
-			run.running = false
-			run.cancelFn = nil
-			run.currentAgent = ""
-			run.activeBundleGeneration = 0
-			run.activeRunnerKind = ""
-			s.cleanupRetiredBundlesLocked()
+		if s.activeSessionID == "" {
 			s.mu.Unlock()
-			s.emitRunState(sessionID)
-		}()
-		defer cancel()
-		defer func() {
-			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-					"sessionId": sessionID,
-					"error":     fmt.Sprintf("Agent panic: %v", r),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-					"sessionId": sessionID,
-				})
+			return fmt.Errorf("no active session")
+		}
+		run := s.activeRun()
+		if run == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("no active session")
+		}
+		sessionID := run.sessionID
+		if run.starting && !run.running {
+			if run.cancelFn != nil {
+				run.cancelFn()
+			} else if run.turnLoop != nil {
+				run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
 			}
-		}()
-
-		logger.Info("[CHAT] Agent run started",
-			"message_count", len(messages),
-			"mode", mode,
+			done := run.startDone
+			logger.Info("[CHAT] Canceling startup before replacing objective", "session", sessionID)
+			s.mu.Unlock()
+			if done != nil {
+				select {
+				case <-done:
+				case <-time.After(runtimeTurnStartupPreemptTimeout):
+					return fmt.Errorf("previous agent startup is still canceling for session %s", sessionID)
+				}
+			}
+			s.emitRunState(sessionID)
+			continue
+		}
+		preempt := run.running
+		clearPendingInterrupt := run.pendingInterrupt != nil && !preempt
+		if clearPendingInterrupt {
+			run.pendingInterrupt = nil
+			s.resetRuntimeTurnLoopLocked(run)
+		}
+		item := s.newRuntimeUserTurnItem(sessionID, userMessage)
+		loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
+		logger.Info("[CHAT] User message received",
+			"length", len(userMessage),
+			"preview", truncateResult(userMessage, 100),
 			"session", sessionID,
 		)
-		startTime := time.Now()
-
-		events := runner.Run(runCtx, messages, adk.WithCheckPointID(checkpointID))
-
-		lastContent, transferCount, interrupted := s.processEventsForRun(events, checkpointID, run)
-
-		if interrupted {
-			return // Don't emit done — waiting for user response
-		}
-
-		// Add final assistant response to session's context engine
-		if lastContent != "" {
-			run.addAssistantMessage(lastContent)
-		}
-
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-			"sessionId": sessionID,
-		})
-
-		logger.Info("[CHAT] Agent run completed",
-			"duration_ms", time.Since(startTime).Milliseconds(),
-			"transfer_count", transferCount,
-			"has_response", lastContent != "",
-			"session", sessionID,
-		)
-
-		// Notify listeners (e.g. session auto-save) with sessionID
-		s.mu.Lock()
-		doneFn := s.onAgentDone
 		s.mu.Unlock()
-		if doneFn != nil {
-			doneFn(sessionID)
-		}
-	}()
 
-	return nil
+		if !preempt {
+			if err := s.deleteRuntimeTurnCheckpoint(sessionID); err != nil {
+				return err
+			}
+		}
+		ok := false
+		if preempt {
+			var ack <-chan struct{}
+			ok, ack = loop.Push(item, adk.WithPreemptTimeout[runtimeTurnItem, *schema.Message](adk.AfterToolCalls, runtimeTurnPreemptTimeout))
+			if ack != nil {
+				go func() {
+					<-ack
+					logger.Info("[CHAT] Runtime turn preempt acknowledged", "session", sessionID)
+				}()
+			}
+		} else {
+			ok, _ = loop.Push(item)
+		}
+		if !ok {
+			s.mu.Lock()
+			run = s.sessions[sessionID]
+			if run == nil {
+				s.mu.Unlock()
+				return fmt.Errorf("session %s not found", sessionID)
+			}
+			if run.turnLoop == loop {
+				s.resetRuntimeTurnLoopLocked(run)
+			}
+			loop = s.ensureRuntimeTurnLoopLocked(sessionID, run)
+			s.mu.Unlock()
+			ok, _ = loop.Push(item)
+		}
+		if !ok {
+			return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
+		}
+		s.mu.Lock()
+		if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
+			s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+		}
+		s.mu.Unlock()
+		s.emitRunState(sessionID)
+		return nil
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1687,7 +1426,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 // session's timeline collector for backend persistence.
 func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 	evt.SessionID = run.sessionID
-	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	wailsEmit(s.ctx, "agent:timeline", evt)
 	if evt.Agent != "" {
 		agentChanged := false
 		s.mu.Lock()
@@ -1718,7 +1457,7 @@ func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 // (for OnToolEvent callbacks where we only have context, not a run reference).
 func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string) {
 	evt.SessionID = sessionID
-	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	wailsEmit(s.ctx, "agent:timeline", evt)
 	s.mu.Lock()
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
@@ -1757,13 +1496,15 @@ func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string
 // processEventsForRun consumes the event stream for a specific session run,
 // emits frontend events, and detects interrupts.
 // Returns the last message content, transfer count, and whether an interrupt occurred.
-func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string, run *SessionRun) (string, int, bool) {
+func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string, run *SessionRun, preempted <-chan struct{}) (string, int, bool, bool) {
 	var allContents []string
 	var transferCount int
 	lastContentByAgent := make(map[string]string) // dedup
 
 	// Track pending tool_call_ids to detect orphans (tool calls without results)
 	pendingToolCalls := make(map[string]pendingRuntimeToolCall)
+	var currentTurnToolMessages []*schema.Message
+	var currentTurnToolResultMessages []*schema.Message
 
 	sessionID := run.sessionID
 
@@ -1807,7 +1548,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 			if event.Action.Interrupted != nil && len(event.Action.Interrupted.InterruptContexts) > 0 {
 				interruptCtx := event.Action.Interrupted.InterruptContexts[0]
 				s.handleInterruptForRun(interruptCtx, checkpointID, run)
-				return strings.Join(allContents, "\n\n"), transferCount, true
+				return strings.Join(allContents, "\n\n"), transferCount, true, runtimeTurnSignalClosed(preempted)
 			}
 
 			if event.Action.TransferToAgent != nil {
@@ -1904,11 +1645,13 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				}
 
 				// Store tool call message in session's context history
-				run.addMessage(&schema.Message{
+				toolMsg := &schema.Message{
 					Role:      schema.Assistant,
 					Content:   msg.Content,
 					ToolCalls: msg.ToolCalls,
-				})
+				}
+				run.addMessage(toolMsg)
+				currentTurnToolMessages = append(currentTurnToolMessages, toolMsg)
 				// Track pending tool call IDs
 				for _, tc := range msg.ToolCalls {
 					pendingToolCalls[tc.ID] = pendingRuntimeToolCall{
@@ -1934,8 +1677,14 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 					Timestamp: time.Now().UnixMilli(),
 				}, run)
 
-				// Store tool result in session's context history
-				run.addToolResult(msg.ToolCallID, msg.Content)
+				// Store tool result in session's context history.
+				toolResultMsg := &schema.Message{
+					Role:       schema.Tool,
+					Content:    msg.Content,
+					ToolCallID: msg.ToolCallID,
+				}
+				run.addMessage(toolResultMsg)
+				currentTurnToolResultMessages = append(currentTurnToolResultMessages, toolResultMsg)
 				if call, ok := pendingToolCalls[msg.ToolCallID]; ok {
 					if call.name == tools.ToolSearchName {
 						s.recordToolSearchOutputForRun(run, msg)
@@ -1987,15 +1736,22 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 
 	// Fix orphaned tool calls: inject synthetic error responses for any tool_call_ids
 	// that were stored but never received a matching tool result.
+	wasPreempted := runtimeTurnSignalClosed(preempted)
 	if len(pendingToolCalls) > 0 {
-		for toolCallID := range pendingToolCalls {
-			logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
-				"tool_call_id", toolCallID, "session", sessionID)
-			run.addToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+		if wasPreempted {
+			removed := run.removeCurrentTurnToolCallsForIDs(pendingToolCalls, currentTurnToolMessages, currentTurnToolResultMessages)
+			logger.Info("[CHAT] Dropped unresolved tool-call history for preempted turn",
+				"pending_tool_calls", len(pendingToolCalls), "removed_messages", removed, "session", sessionID)
+		} else {
+			for toolCallID := range pendingToolCalls {
+				logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
+					"tool_call_id", toolCallID, "session", sessionID)
+				run.addToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+			}
 		}
 	}
 
-	return strings.Join(allContents, "\n\n"), transferCount, false
+	return strings.Join(allContents, "\n\n"), transferCount, false, wasPreempted
 }
 
 func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, msg *schema.Message) {
@@ -2480,6 +2236,7 @@ func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, chec
 		BundleGeneration: run.activeBundleGeneration,
 		RunnerKind:       run.activeRunnerKind,
 		Info:             interruptCtx.Info,
+		Objective:        run.currentObjective(),
 	}
 	run.activeBundleGeneration = 0
 	run.activeRunnerKind = ""
@@ -2554,115 +2311,46 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-	if run.running {
+	if run.running || run.starting {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
-	_, runner, pending, err := s.resolvePendingRunnerLocked(run)
-	if err != nil {
-		if run != nil {
-			run.pendingInterrupt = nil
-			s.cleanupRetiredBundlesLocked()
-		}
+	pending := run.pendingInterrupt
+	if pending == nil {
 		s.mu.Unlock()
-		return err
+		return fmt.Errorf("no pending interrupt to resume")
 	}
-	run.pendingInterrupt = nil
-	run.activeBundleGeneration = pending.BundleGeneration
-	run.activeRunnerKind = pending.RunnerKind
 	sessionID := run.sessionID
+	item := s.newRuntimeResumeAnswerItem(sessionID, pending, answer)
+	run.pendingInterrupt = nil
+	s.resetRuntimeTurnLoopLocked(run)
+	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
 
-	// Build resume data with user's answer
-	resumeData := &tools.FollowUpInfo{
-		UserAnswer: answer,
+	logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer), "session", sessionID)
+	if ok, _ := loop.Push(item); !ok {
+		s.mu.Lock()
+		if run = s.sessions[sessionID]; run != nil && run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
-	if info, ok := pending.Info.(*tools.FollowUpInfo); ok {
-		resumeData.Questions = info.Questions
-	}
-
-	runCtx, cancel := context.WithCancel(s.ctx)
-	runCtx = contextWithSessionID(runCtx, sessionID)
 	s.mu.Lock()
-	run.cancelFn = cancel
-	run.running = true
-	done := make(chan struct{})
-	run.runDone = done
+	if run = s.sessions[sessionID]; run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.turnLoop != loop {
+		if run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("runtime turn loop changed for session %s", sessionID)
+	}
+	s.startRuntimeTurnLoopLocked(sessionID, run, loop)
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
-
-	go func() {
-		defer close(done)
-		defer func() {
-			s.mu.Lock()
-			run.running = false
-			run.cancelFn = nil
-			run.currentAgent = ""
-			run.activeBundleGeneration = 0
-			run.activeRunnerKind = ""
-			s.cleanupRetiredBundlesLocked()
-			s.mu.Unlock()
-			s.emitRunState(sessionID)
-		}()
-		defer cancel()
-		defer func() {
-			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-					"sessionId": sessionID,
-					"error":     fmt.Sprintf("Resume panic: %v", r),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-					"sessionId": sessionID,
-				})
-			}
-		}()
-
-		logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer), "session", sessionID)
-		startTime := time.Now()
-
-		events, err := runner.ResumeWithParams(runCtx, pending.CheckpointID, &adk.ResumeParams{
-			Targets: map[string]any{
-				pending.InterruptID: resumeData,
-			},
-		})
-		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-				"sessionId": sessionID,
-				"error":     fmt.Sprintf("Resume failed: %v", err),
-			})
-			wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-				"sessionId": sessionID,
-			})
-			return
-		}
-
-		lastContent, transferCount, interrupted := s.processEventsForRun(events, pending.CheckpointID, run)
-
-		if interrupted {
-			return
-		}
-
-		if lastContent != "" {
-			run.addAssistantMessage(lastContent)
-		}
-
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-			"sessionId": sessionID,
-		})
-		logger.Info("[CHAT] Resume completed",
-			"duration_ms", time.Since(startTime).Milliseconds(),
-			"transfer_count", transferCount,
-			"session", sessionID,
-		)
-
-		s.mu.Lock()
-		doneFn := s.onAgentDone
-		s.mu.Unlock()
-		if doneFn != nil {
-			doneFn(sessionID)
-		}
-	}()
-
 	return nil
 }
 
@@ -2674,116 +2362,46 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-	if run.running {
+	if run.running || run.starting {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
-	_, runner, pending, err := s.resolvePendingRunnerLocked(run)
-	if err != nil {
-		if run != nil {
-			run.pendingInterrupt = nil
-			s.cleanupRetiredBundlesLocked()
-		}
+	pending := run.pendingInterrupt
+	if pending == nil {
 		s.mu.Unlock()
-		return err
+		return fmt.Errorf("no pending interrupt to resume")
 	}
-	run.pendingInterrupt = nil
-	run.activeBundleGeneration = pending.BundleGeneration
-	run.activeRunnerKind = pending.RunnerKind
 	sessionID := run.sessionID
+	item := s.newRuntimeResumeChoiceItem(sessionID, pending, selectedIndex)
+	run.pendingInterrupt = nil
+	s.resetRuntimeTurnLoopLocked(run)
+	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
 
-	// Build resume data with user's selection
-	resumeData := &tools.ChoiceInfo{
-		Selected: selectedIndex,
+	logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex, "session", sessionID)
+	if ok, _ := loop.Push(item); !ok {
+		s.mu.Lock()
+		if run = s.sessions[sessionID]; run != nil && run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
-	if info, ok := pending.Info.(*tools.ChoiceInfo); ok {
-		resumeData.Question = info.Question
-		resumeData.Options = info.Options
-	}
-
-	runCtx, cancel := context.WithCancel(s.ctx)
-	runCtx = contextWithSessionID(runCtx, sessionID)
 	s.mu.Lock()
-	run.cancelFn = cancel
-	run.running = true
-	done := make(chan struct{})
-	run.runDone = done
+	if run = s.sessions[sessionID]; run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.turnLoop != loop {
+		if run.pendingInterrupt == nil {
+			run.pendingInterrupt = pending
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("runtime turn loop changed for session %s", sessionID)
+	}
+	s.startRuntimeTurnLoopLocked(sessionID, run, loop)
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
-
-	go func() {
-		defer close(done)
-		defer func() {
-			s.mu.Lock()
-			run.running = false
-			run.cancelFn = nil
-			run.currentAgent = ""
-			run.activeBundleGeneration = 0
-			run.activeRunnerKind = ""
-			s.cleanupRetiredBundlesLocked()
-			s.mu.Unlock()
-			s.emitRunState(sessionID)
-		}()
-		defer cancel()
-		defer func() {
-			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-					"sessionId": sessionID,
-					"error":     fmt.Sprintf("Resume panic: %v", r),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-					"sessionId": sessionID,
-				})
-			}
-		}()
-
-		logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex, "session", sessionID)
-		startTime := time.Now()
-
-		events, err := runner.ResumeWithParams(runCtx, pending.CheckpointID, &adk.ResumeParams{
-			Targets: map[string]any{
-				pending.InterruptID: resumeData,
-			},
-		})
-		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-				"sessionId": sessionID,
-				"error":     fmt.Sprintf("Resume failed: %v", err),
-			})
-			wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-				"sessionId": sessionID,
-			})
-			return
-		}
-
-		lastContent, transferCount, interrupted := s.processEventsForRun(events, pending.CheckpointID, run)
-
-		if interrupted {
-			return
-		}
-
-		if lastContent != "" {
-			run.addAssistantMessage(lastContent)
-		}
-
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-			"sessionId": sessionID,
-		})
-		logger.Info("[CHAT] Resume completed",
-			"duration_ms", time.Since(startTime).Milliseconds(),
-			"transfer_count", transferCount,
-			"session", sessionID,
-		)
-
-		s.mu.Lock()
-		doneFn := s.onAgentDone
-		s.mu.Unlock()
-		if doneFn != nil {
-			doneFn(sessionID)
-		}
-	}()
-
 	return nil
 }
 
@@ -2802,6 +2420,8 @@ func (s *ChatService) StopGeneration() error {
 	if run.starting {
 		if run.cancelFn != nil {
 			run.cancelFn()
+		} else if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
 		}
 		done := run.startDone
 		s.mu.Unlock()
@@ -2818,14 +2438,20 @@ func (s *ChatService) StopGeneration() error {
 		sessionID := run.sessionID
 		hadInterrupt := run.pendingInterrupt != nil
 		run.pendingInterrupt = nil
+		if hadInterrupt {
+			s.resetRuntimeTurnLoopLocked(run)
+		}
 		s.cleanupRetiredBundlesLocked()
 		s.mu.Unlock()
 		if hadInterrupt {
+			s.deleteRuntimeTurnCheckpoint(sessionID)
 			s.emitRunState(sessionID)
 		}
 		return nil
 	}
-	if run.cancelFn != nil {
+	if run.turnLoop != nil {
+		run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
+	} else if run.cancelFn != nil {
 		run.cancelFn()
 	}
 	run.pendingInterrupt = nil
@@ -2854,6 +2480,8 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 	if run.starting {
 		if run.cancelFn != nil {
 			run.cancelFn()
+		} else if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
 		}
 		done := run.startDone
 		s.mu.Unlock()
@@ -2867,10 +2495,21 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 		return
 	}
 	if !run.running {
+		hadInterrupt := run.pendingInterrupt != nil
+		run.pendingInterrupt = nil
+		if hadInterrupt {
+			s.resetRuntimeTurnLoopLocked(run)
+		}
 		s.mu.Unlock()
+		if hadInterrupt {
+			s.deleteRuntimeTurnCheckpoint(sessionID)
+			s.emitRunState(sessionID)
+		}
 		return
 	}
-	if run.cancelFn != nil {
+	if run.turnLoop != nil {
+		run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
+	} else if run.cancelFn != nil {
 		run.cancelFn()
 	}
 	run.pendingInterrupt = nil
@@ -2903,12 +2542,14 @@ func (s *ChatService) ClearHistory() error {
 
 	run.clearSessionState()
 	run.pendingInterrupt = nil
+	s.resetRuntimeTurnLoopLocked(run)
 	s.invalidateRunners()
 	s.cleanupRetiredBundlesLocked()
 	sessionID := s.activeSessionID
 	sessionSvc := s.sessionService
 	s.mu.Unlock()
 
+	s.deleteRuntimeTurnCheckpoint(sessionID)
 	tools.ClearTodosForSession(sessionID)
 	if sessionSvc != nil && sessionID != "" {
 		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
@@ -3394,211 +3035,7 @@ func (s *ChatService) prepareRunnerBundleFromSurface(ctx context.Context, cfg *c
 	if s.prepareBundleFromSurfaceFn != nil {
 		return s.prepareBundleFromSurfaceFn(ctx, cfg, digest, surface)
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if cfg == nil {
-		return nil, fmt.Errorf("config is nil")
-	}
-	if surface == nil {
-		return nil, fmt.Errorf("runner bundle surface is nil")
-	}
-	if s.sandbox == nil || !s.sandbox.IsConnected() {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("sandbox is not connected")
-	}
-
-	op := s.sandbox.Operator()
-	if op == nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("sandbox operator is not available")
-	}
-
-	mdl, err := llm.NewChatModel(ctx, cfg.LLM)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to create chat model", err)
-		return nil, fmt.Errorf("failed to create chat model: %w", err)
-	}
-	logger.RunnerEvent("chat_model_created", "type", cfg.LLM.Type, "model", cfg.LLM.Model)
-	effectiveAgenticProtocol := strings.TrimSpace(cfg.Agent.Runtime.AgenticProtocol)
-	if effectiveAgenticProtocol == "" {
-		effectiveAgenticProtocol = llm.AgenticProtocolOff
-	}
-	if protocol := effectiveAgenticProtocol; protocol != "" && protocol != llm.AgenticProtocolOff {
-		if _, agenticErr := llm.NewAgenticModel(ctx, cfg.LLM, protocol); agenticErr != nil {
-			effectiveAgenticProtocol = llm.AgenticProtocolOff
-			logger.Warn("[RUNNER] Agentic beta model disabled; falling back to Message runtime",
-				"protocol", protocol, "error", agenticErr)
-		} else {
-			logger.RunnerEvent("agentic_beta_model_available", "protocol", protocol)
-		}
-	}
-
-	bundle := &RunnerBundle{
-		ConfigDigest:                  digest,
-		MCPHandles:                    surface.Handles,
-		SurfaceRelevantFingerprint:    surface.SurfaceRelevantFingerprint,
-		CachedSurfaceMetadataByServer: cloneSurfaceCache(surface.CachedSurfaceMetadataByServer),
-	}
-	provider := &deferredMCPProvider{chat: s, bundle: bundle}
-	ac := s.buildAgentContext()
-	if s.runtimeLSP != nil {
-		s.runtimeLSP.SetConfig(cfg.Agent.LSP)
-	}
-	subagentRegistry := newRuntimeSubagentRegistry(cfg.Agent.Runtime.Subagents)
-
-	topLevelCatalog := tools.NewToolCatalog()
-	runtimeEntries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build runtime core tools: %w", err)
-	}
-	for _, entry := range runtimeEntries {
-		wrapped := entry
-		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
-		if err := topLevelCatalog.Register(wrapped); err != nil {
-			s.closeMCPHandlesLocked(surface.Handles)
-			return nil, fmt.Errorf("failed to register runtime tool %s: %w", wrapped.CanonicalName, err)
-		}
-	}
-	agentEntry, err := s.newRuntimeAgentCatalogEntry(ctx, mdl, op, provider, ac, subagentRegistry)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build runtime Agent tool: %w", err)
-	}
-	agentEntry.Tool = tools.WrapMCPToolWithPermissionCheck(agentEntry, provider)
-	if err := topLevelCatalog.Register(agentEntry); err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to register runtime Agent tool: %w", err)
-	}
-	runtimeDeferredEntries, err := tools.NewRuntimeDeferredCatalogEntries(op, ac.WorkspacePath, s.runtimeWorkspaces, s.runtimeLSP)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build deferred runtime tools: %w", err)
-	}
-	runtimeWebEntries, err := newRuntimeWebCatalogEntries(cfg.Agent.WebSearch, provider)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build deferred web tools: %w", err)
-	}
-	for _, entry := range append(runtimeDeferredEntries, runtimeWebEntries...) {
-		wrapped := entry
-		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
-		if err := topLevelCatalog.Register(wrapped); err != nil {
-			s.closeMCPHandlesLocked(surface.Handles)
-			return nil, fmt.Errorf("failed to register deferred runtime tool %s: %w", wrapped.CanonicalName, err)
-		}
-	}
-	for _, entry := range surface.ActionCatalog.Entries() {
-		wrapped := entry
-		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
-		if err := topLevelCatalog.Register(wrapped); err != nil {
-			s.closeMCPHandlesLocked(surface.Handles)
-			return nil, fmt.Errorf("failed to register MCP action tool %s: %w", wrapped.CanonicalName, err)
-		}
-	}
-
-	resourceEntries, err := tools.NewMCPResourceCatalogEntries(provider)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build MCP resource tools: %w", err)
-	}
-	for _, entry := range resourceEntries {
-		wrapped := entry
-		wrapped.Tool = tools.WrapMCPToolWithPermissionCheck(wrapped, provider)
-		if err := topLevelCatalog.Register(wrapped); err != nil {
-			s.closeMCPHandlesLocked(surface.Handles)
-			return nil, fmt.Errorf("failed to register MCP resource tool %s: %w", wrapped.CanonicalName, err)
-		}
-	}
-	if s.runtimeOptionsSnapshot().DevDeferredBuiltinSampleEnabled {
-		sampleEntry, err := tools.NewDevDeferredBuiltinSampleEntry()
-		if err != nil {
-			s.closeMCPHandlesLocked(surface.Handles)
-			return nil, fmt.Errorf("failed to build dev deferred builtin sample: %w", err)
-		}
-		sampleEntry.Tool = tools.WrapMCPToolWithPermissionCheck(sampleEntry, provider)
-		if err := topLevelCatalog.Register(sampleEntry); err != nil {
-			s.closeMCPHandlesLocked(surface.Handles)
-			return nil, fmt.Errorf("failed to register dev deferred builtin sample: %w", err)
-		}
-	}
-	bundle.MCPCatalog = topLevelCatalog
-
-	extraTools := make([]einotool.BaseTool, 0, len(topLevelCatalog.CanonicalNames()))
-	for _, entry := range topLevelCatalog.Entries() {
-		if entry.ShouldDefer && !entry.AlwaysLoad {
-			continue
-		}
-		extraTools = append(extraTools, entry.Tool)
-	}
-
-	deferredHandler := tools.NewDynamicMCPSurfaceMiddleware(provider)
-	defaultToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "default", cfg.Agent.Runtime.ToolSearchMode, effectiveAgenticProtocol)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build Eino v0.9 default tool_search bridge: %w", err)
-	}
-	planToolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, "plan", cfg.Agent.Runtime.ToolSearchMode, effectiveAgenticProtocol)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		return nil, fmt.Errorf("failed to build Eino v0.9 plan tool_search bridge: %w", err)
-	}
-	unknownToolsHandler := newDeferredUnknownToolHandler(provider)
-	defaultHandlers := []adk.ChatModelAgentMiddleware{deferredHandler}
-	if defaultToolSearchHandler != nil {
-		defaultHandlers = append([]adk.ChatModelAgentMiddleware{defaultToolSearchHandler}, defaultHandlers...)
-	}
-	planHandlers := []adk.ChatModelAgentMiddleware{deferredHandler}
-	if planToolSearchHandler != nil {
-		planHandlers = append([]adk.ChatModelAgentMiddleware{planToolSearchHandler}, planHandlers...)
-	}
-
-	deepAgentDefault, err := agent.BuildDeepAgentForMode(
-		ctx, mdl, op, extraTools, ac, agent.DeepAgentModeDefault,
-		defaultHandlers,
-		unknownToolsHandler,
-		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
-		subagentRegistry,
-	)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to build default deep agent", err)
-		return nil, fmt.Errorf("failed to build default deep agent: %w", err)
-	}
-
-	deepAgentPlan, err := agent.BuildDeepAgentForMode(
-		ctx, mdl, op, extraTools, ac, agent.DeepAgentModePlan,
-		planHandlers,
-		unknownToolsHandler,
-		cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback,
-		subagentRegistry,
-	)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to build plan deep agent", err)
-		return nil, fmt.Errorf("failed to build plan deep agent: %w", err)
-	}
-
-	bundle.DefaultRunner = agent.BuildDefaultRunner(ctx, deepAgentDefault, s.checkpointStore)
-	bundle.PlanRunner, err = agent.BuildPlanRunner(ctx, mdl, deepAgentPlan, ac, s.checkpointStore)
-	if err != nil {
-		s.closeMCPHandlesLocked(surface.Handles)
-		logger.Error("[RUNNER] Failed to build plan runner", err)
-		return nil, fmt.Errorf("failed to build plan runner: %w", err)
-	}
-	bundle.LastFreshnessCheckAt = s.now()
-
-	for _, handle := range bundle.MCPHandles {
-		if handle == nil || handle.LastError == nil {
-			continue
-		}
-		wailsruntime.EventsEmit(s.ctx, "agent:error",
-			fmt.Sprintf("MCP server %s unavailable (%s): %v", handle.Name, handle.State, handle.LastError))
-	}
-	logger.RunnerEvent("runners_built", "extra_tools", len(extraTools))
-	return bundle, nil
+	return newRuntimeBundleBuilder(s, cfg, digest, surface).Build(ctx)
 }
 
 func (s *ChatService) installRunnerBundleLocked(bundle *RunnerBundle) {

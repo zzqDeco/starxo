@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"starxo/internal/agent"
 	"starxo/internal/config"
+	"starxo/internal/model"
 	"starxo/internal/tools"
 )
 
@@ -20,7 +22,7 @@ func TestNormalizeRuntimeAgentInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize runtime agent input: %v", err)
 	}
-	if input.Prompt != "do work" || input.SubagentType != "general" || input.Isolation != "none" {
+	if input.Prompt != "do work" || input.SubagentType != "general" || input.Isolation != "none" || !input.Fork {
 		t.Fatalf("unexpected normalized input: %#v", input)
 	}
 	if _, err := normalizeRuntimeAgentInput(runtimeAgentInput{Prompt: "x", SubagentType: "writer"}, registry); err == nil {
@@ -44,7 +46,7 @@ func TestNormalizeRuntimeAgentInputUsesConfiguredRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize configured subagent: %v", err)
 	}
-	if input.SubagentType != "triage" || input.Isolation != "worktree" {
+	if input.SubagentType != "triage" || input.Isolation != "worktree" || input.Fork {
 		t.Fatalf("unexpected normalized configured subagent: %#v", input)
 	}
 
@@ -54,8 +56,8 @@ func TestNormalizeRuntimeAgentInputUsesConfiguredRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize default configured subagent: %v", err)
 	}
-	if defaulted.SubagentType != "triage" || defaulted.Isolation != "worktree" {
-		t.Fatalf("expected omitted subagent_type to use registry default, got %#v", defaulted)
+	if defaulted.SubagentType != "triage" || defaulted.Isolation != "worktree" || !defaulted.Fork {
+		t.Fatalf("expected omitted subagent_type to fork with registry default policy, got %#v", defaulted)
 	}
 }
 
@@ -105,7 +107,7 @@ func TestRuntimeAgentToolSchemaUsesConfiguredRegistry(t *testing.T) {
 		DefaultIsolation: "worktree",
 		AllowedTools:     []string{"Read", "Grep"},
 	}})
-	entry, err := NewChatService(nil).newRuntimeAgentCatalogEntry(nil, nil, nil, nil, agent.DefaultAgentContext(), registry)
+	entry, err := newRuntimeSubagentRunner(nil).NewCatalogEntry(nil, nil, nil, nil, agent.DefaultAgentContext(), registry)
 	if err != nil {
 		t.Fatalf("new runtime agent entry: %v", err)
 	}
@@ -122,11 +124,158 @@ func TestRuntimeAgentToolSchemaUsesConfiguredRegistry(t *testing.T) {
 		t.Fatalf("marshal agent tool schema: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "triage") || !strings.Contains(text, "registry default (triage)") {
+	if !strings.Contains(text, "triage") || !strings.Contains(text, "Omit to fork the current agent context") {
 		t.Fatalf("expected configured subagent metadata in schema, got %s", text)
 	}
 	if strings.Contains(text, "code_writer") || strings.Contains(text, "file_manager") {
 		t.Fatalf("agent tool schema leaked builtin subagent names for custom registry: %s", text)
+	}
+}
+
+func TestRuntimeSubagentToolsForkIgnoresDefaultAllowlist(t *testing.T) {
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{
+		{
+			CanonicalName: tools.RuntimeToolRead,
+			AlwaysLoad:    true,
+			Tool:          &stubTool{name: tools.RuntimeToolRead},
+		},
+		{
+			CanonicalName: tools.RuntimeToolWrite,
+			AlwaysLoad:    true,
+			Tool:          &stubTool{name: tools.RuntimeToolWrite},
+		},
+	} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register catalog entry: %v", err)
+		}
+	}
+	provider := &deferredMCPProvider{bundle: &RunnerBundle{MCPCatalog: catalog}}
+	def := agent.SubagentDefinition{
+		Name:         "narrow",
+		AllowedTools: []string{tools.RuntimeToolRead},
+	}
+
+	normalTools := newRuntimeSubagentRunner(nil).Tools(provider, def, false)
+	if len(normalTools) != 1 {
+		t.Fatalf("expected non-fork to honor allowlist, got %d tools", len(normalTools))
+	}
+	forkTools := newRuntimeSubagentRunner(nil).Tools(provider, def, true)
+	if len(forkTools) != 2 {
+		t.Fatalf("expected fork to inherit all always-loaded context tools, got %d", len(forkTools))
+	}
+}
+
+func TestRuntimeSubagentToolSearchCandidatesHonorAllowlist(t *testing.T) {
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{
+		{
+			CanonicalName:  tools.RuntimeToolLSP,
+			ShouldDefer:    true,
+			PermissionSpec: tools.PermissionSpec{AllowSearch: true, AllowExecute: true},
+			Tool:           &stubTool{name: tools.RuntimeToolLSP},
+		},
+		{
+			CanonicalName:  tools.RuntimeToolWebSearch,
+			ShouldDefer:    true,
+			PermissionSpec: tools.PermissionSpec{AllowSearch: true, AllowExecute: true},
+			Tool:           &stubTool{name: tools.RuntimeToolWebSearch},
+		},
+	} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register catalog entry: %v", err)
+		}
+	}
+	def := agent.SubagentDefinition{Name: "reviewer", AllowedTools: []string{tools.RuntimeToolLSP}}
+
+	restricted := einoV09ToolSearchCandidatesFiltered(catalog, "default", runtimeSubagentCatalogEntryAllowed(def, false))
+	if len(restricted) != 1 {
+		t.Fatalf("expected restricted ToolSearch candidates to honor allowlist, got %d", len(restricted))
+	}
+	info, err := restricted[0].Info(context.Background())
+	if err != nil {
+		t.Fatalf("tool info: %v", err)
+	}
+	if info.Name != tools.RuntimeToolLSP {
+		t.Fatalf("expected only LSP candidate, got %q", info.Name)
+	}
+
+	forked := einoV09ToolSearchCandidatesFiltered(catalog, "default", runtimeSubagentCatalogEntryAllowed(def, true))
+	if len(forked) != 2 {
+		t.Fatalf("expected forked ToolSearch to inherit all candidates, got %d", len(forked))
+	}
+}
+
+func TestRuntimeSubagentModeInheritsParentPlanMode(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-plan-subagent"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.mode = model.ModePlan
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	if got := runtimeSubagentMode(ctx, provider, ""); got != model.ModePlan {
+		t.Fatalf("expected subagent to inherit parent plan mode, got %q", got)
+	}
+	if got := runtimeSubagentDeepAgentMode(model.ModePlan); got != agent.DeepAgentModePlan {
+		t.Fatalf("expected plan prompt mode, got %q", got)
+	}
+	if got := runtimeSubagentMode(ctx, provider, model.ModeDefault); got != model.ModePlan {
+		t.Fatalf("expected explicit default not to lower parent plan mode, got %q", got)
+	}
+
+	chat.mu.Lock()
+	run.mode = model.ModeDefault
+	chat.mu.Unlock()
+	if got := runtimeSubagentMode(ctx, provider, model.ModePlan); got != model.ModePlan {
+		t.Fatalf("expected explicit plan mode to restrict default parent session, got %q", got)
+	}
+}
+
+func TestRuntimeSubagentDirectToolsMatchForkPrompt(t *testing.T) {
+	names := map[string]bool{}
+	for _, tool := range runtimeSubagentDirectTools() {
+		info, err := tool.Info(context.Background())
+		if err != nil {
+			t.Fatalf("tool info: %v", err)
+		}
+		names[info.Name] = true
+	}
+	for _, name := range []string{"ask_user", "ask_choice", "notify_user", "write_todos", "update_todo"} {
+		if !names[name] {
+			t.Fatalf("expected fork direct tools to include %s; got %#v", name, names)
+		}
+	}
+}
+
+func TestRuntimeModeOverrideAffectsProviderPermissionState(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-mode-override"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.mode = model.ModeDefault
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat}
+	ctx := contextWithRuntimeModeOverride(contextWithSessionID(context.Background(), sessionID), model.ModePlan)
+	_, mode, _, err := provider.sessionState(ctx)
+	if err != nil {
+		t.Fatalf("session state: %v", err)
+	}
+	if mode != model.ModePlan {
+		t.Fatalf("expected provider to use runtime mode override, got %q", mode)
+	}
+}
+
+func TestRuntimeSubagentWorktreeUsesIsolatedAgentContext(t *testing.T) {
+	ac := agent.DefaultAgentContext()
+	ac.WorkspacePath = "/workspace"
+	worktree := tools.WorktreeOutput{WorktreePath: "/workspace/.starxo/worktrees/agent-1"}
+	subAC := runtimeSubagentAgentContext(ac, worktree)
+	if subAC.WorkspacePath != worktree.WorktreePath || ac.WorkspacePath != "/workspace" {
+		t.Fatalf("expected isolated subagent context without mutating parent, parent=%q sub=%q", ac.WorkspacePath, subAC.WorkspacePath)
 	}
 }
 

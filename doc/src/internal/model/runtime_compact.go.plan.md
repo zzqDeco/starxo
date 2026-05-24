@@ -21,8 +21,10 @@
   - `Todos`
   - `PlanDocument`
   - `Workspace`
+  - `ActiveObjective`: 当前 user turn 的 objective sidecar，保存 runID、scope、acceptance 和 standalone 历史边界
 - `CloneRuntimeContextCompact(...)` 深拷贝所有 slice / nested state。
 
 ## 4. 维护边界
 - model 层不依赖 tools/service，`RuntimeTodoItem` 和 task/workspace compact 类型保持纯数据结构。
 - 新增 compact 字段时必须同步 `CloneRuntimeContextCompact` 和 `NormalizeSessionData`。
+- `ActiveObjective` 是行为层隔离边界；compact 后必须保留，避免长会话恢复时把旧任务当成当前目标。

@@ -170,6 +170,12 @@ func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
 			}},
 			PlanDocument: &PlanDocument{Markdown: "plan"},
 			Workspace:    &RuntimeWorkspaceCompact{Active: true, WorktreePath: "/workspace/.starxo/worktrees/a"},
+			ActiveObjective: &RunObjective{
+				ID:        "obj-1",
+				RunID:     "run-1",
+				Scope:     "standalone",
+				Objective: "current task",
+			},
 		},
 	}
 
@@ -191,6 +197,7 @@ func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
 	normalized.RuntimeContextCompact.Todos[0].DependsOn[0] = "changed"
 	normalized.RuntimeContextCompact.PlanDocument.Markdown = "changed"
 	normalized.RuntimeContextCompact.Workspace.WorktreePath = "changed"
+	normalized.RuntimeContextCompact.ActiveObjective.Objective = "changed"
 
 	orig := data.RuntimeContextCompact
 	if orig.ToolSearch.DiscoveredTools[0].CanonicalName != "WebSearch" ||
@@ -202,7 +209,8 @@ func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
 		orig.DiffSummaries[0].Summary != "edited" ||
 		orig.Todos[0].DependsOn[0] != "todo-0" ||
 		orig.PlanDocument.Markdown != "plan" ||
-		orig.Workspace.WorktreePath != "/workspace/.starxo/worktrees/a" {
+		orig.Workspace.WorktreePath != "/workspace/.starxo/worktrees/a" ||
+		orig.ActiveObjective.Objective != "current task" {
 		t.Fatalf("expected original compact state to stay unchanged, got %#v", orig)
 	}
 }

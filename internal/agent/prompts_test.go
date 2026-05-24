@@ -30,3 +30,16 @@ func TestDeepAgentPromptsUseConfiguredSubagentRegistry(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeForkAgentPromptDoesNotAdvertiseAgentDelegation(t *testing.T) {
+	prompt := RuntimeForkAgentPrompt(DefaultAgentContext(), DeepAgentModePlan)
+	if !strings.Contains(prompt, "Agent delegation is not available inside this fork") {
+		t.Fatalf("expected fork prompt to explain Agent unavailability:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "SUBAGENTS:") || strings.Contains(prompt, "If Agent subagent_type") {
+		t.Fatalf("fork prompt should not advertise recursive Agent delegation:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Mode: plan") || !strings.Contains(prompt, "write_todos/update_todo") {
+		t.Fatalf("fork prompt lost mode or direct tool instructions:\n%s", prompt)
+	}
+}
