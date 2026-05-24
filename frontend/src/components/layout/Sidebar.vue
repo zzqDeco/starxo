@@ -764,6 +764,7 @@ function handleTitlebarDoubleClick() {
   color: var(--accent-rose);
   word-break: break-word;
   line-height: 1.4;
+  white-space: pre-line;
 }
 
 .conn-btn {

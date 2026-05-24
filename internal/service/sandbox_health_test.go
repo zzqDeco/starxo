@@ -142,3 +142,62 @@ func TestSandboxHealthCheckDoesNotDeactivateNewActiveSandboxFromStaleProbe(t *te
 	assert.Equal(t, "sbx-new", svc.activeContainerRegID)
 	assert.Equal(t, 0, deactivated)
 }
+
+func TestDestroyActiveSandboxKeepsSSHManagerAndClearsActiveSandbox(t *testing.T) {
+	svc := NewSandboxService(nil, nil)
+	mgr := &sandbox.SandboxManager{}
+	var deactivated int
+	var destroyedRuntimeID, destroyedWorkspacePath string
+	svc.SetOnContainerDeactivated(func() { deactivated++ })
+	svc.destroySandboxRemote = func(ctx context.Context, gotMgr *sandbox.SandboxManager, runtimeID, workspacePath string) error {
+		require.NotNil(t, ctx)
+		require.Same(t, mgr, gotMgr)
+		destroyedRuntimeID = runtimeID
+		destroyedWorkspacePath = workspacePath
+		return nil
+	}
+	svc.mu.Lock()
+	svc.manager = mgr
+	svc.activeContainerRegID = "reg-1"
+	svc.healthGeneration = 7
+	svc.healthSSHFailures = 1
+	svc.mu.Unlock()
+
+	err := svc.destroyActiveSandbox("reg-1", "sbx-1", "/remote/sbx-1/workspace")
+
+	require.NoError(t, err)
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+	assert.Same(t, mgr, svc.manager)
+	assert.Empty(t, svc.activeContainerRegID)
+	assert.Equal(t, uint64(7), svc.healthGeneration)
+	assert.Equal(t, 0, svc.healthSSHFailures)
+	assert.Equal(t, 1, deactivated)
+	assert.Equal(t, "sbx-1", destroyedRuntimeID)
+	assert.Equal(t, "/remote/sbx-1/workspace", destroyedWorkspacePath)
+}
+
+func TestDestroyActiveSandboxKeepsActiveStateWhenRemoteDestroyFails(t *testing.T) {
+	svc := NewSandboxService(nil, nil)
+	mgr := &sandbox.SandboxManager{}
+	var deactivated int
+	svc.SetOnContainerDeactivated(func() { deactivated++ })
+	svc.destroySandboxRemote = func(context.Context, *sandbox.SandboxManager, string, string) error {
+		return errors.New("remote destroy failed")
+	}
+	svc.mu.Lock()
+	svc.manager = mgr
+	svc.activeContainerRegID = "reg-1"
+	svc.healthGeneration = 7
+	svc.mu.Unlock()
+
+	err := svc.destroyActiveSandbox("reg-1", "sbx-1", "/remote/sbx-1/workspace")
+
+	require.Error(t, err)
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+	assert.Same(t, mgr, svc.manager)
+	assert.Equal(t, "reg-1", svc.activeContainerRegID)
+	assert.Equal(t, uint64(7), svc.healthGeneration)
+	assert.Equal(t, 0, deactivated)
+}

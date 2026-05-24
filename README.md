@@ -202,7 +202,7 @@ wails build
 
 Output goes to `build/bin/`.
 
-Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens. macOS builds declare Local Network access because Starxo connects to LAN sandbox hosts over SSH; allow the system prompt if you use `192.168.x.x` or `.local` remotes.
+Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens. macOS builds use bundle id `com.starxo.app` and declare Local Network access because Starxo connects to LAN sandbox hosts over SSH; allow the system prompt if you use `192.168.x.x` or `.local` remotes. If a signed macOS app reports `no route to host` for a LAN address while Terminal SSH still works, enable Starxo in System Settings > Privacy & Security > Local Network, then quit and reopen the app. If you previously tested an older `com.wails.starxo` build, reset the old Local Network permission or allow the prompt again for the new bundle identity.
 
 ### Tagged Release
 
@@ -215,13 +215,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow builds unsigned macOS, Windows, and Linux packages, checks basic platform bundle resources, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
+The release workflow builds ad-hoc signed macOS packages plus unsigned Windows and Linux packages, checks basic platform bundle resources, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
 
 After the workflow finishes, verify:
 
 - The Release page is public and contains the macOS zip, Windows exe, Windows installer, Linux tarball, and `SHA256SUMS.txt`.
 - `SHA256SUMS.txt` hashes match the downloaded assets.
-- Each platform package launches at least once; unsigned macOS/Windows security prompts are expected for v1.
+- Each platform package launches at least once; macOS is ad-hoc signed but not notarized, and Windows is unsigned, so system security prompts are expected for v1.
 - Settings open correctly, SSH connection testing works, and sandbox runtime detection reports the expected remote runtime state.
 - On a Linux remote, creating a sandbox can write to the workspace and `network=false` blocks outbound network access.
 

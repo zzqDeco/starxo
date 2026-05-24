@@ -127,27 +127,29 @@ func (s *ContainerService) DeactivateContainer() error {
 // DestroyContainer stops, removes, and unregisters a container.
 // Also removes the container from its owning session's container list.
 func (s *ContainerService) DestroyContainer(containerRegID string) error {
-	// Look up the container to find its owning session
-	container, _ := s.containerStore.Get(containerRegID)
+	container, err := s.containerStore.Get(containerRegID)
+	if err != nil {
+		return fmt.Errorf("container not found: %w", err)
+	}
 
-	// If this is the active container, use full disconnect+destroy
+	runtimeID := container.RuntimeID
+	if runtimeID == "" {
+		runtimeID = container.DockerID
+	}
+
 	if s.sandboxService.ActiveContainerRegID() == containerRegID {
-		if err := s.sandboxService.DisconnectAndDestroy(); err != nil {
+		if err := s.sandboxService.destroyActiveSandbox(containerRegID, runtimeID, container.WorkspacePath); err != nil {
 			return err
 		}
 	} else {
-		if mgr := s.sandboxService.Manager(); mgr != nil && container != nil && container.Status != model.ContainerUnavailable {
-			runtimeID := container.RuntimeID
-			if runtimeID == "" {
-				runtimeID = container.DockerID
-			}
+		if mgr := s.sandboxService.Manager(); mgr != nil && container.Status != model.ContainerUnavailable {
 			_ = mgr.DestroySandbox(s.ctx, runtimeID, container.WorkspacePath)
 		}
-		_ = s.containerStore.Remove(containerRegID)
 	}
+	_ = s.containerStore.Remove(containerRegID)
 
 	// Update owning session's container list
-	if container != nil && container.SessionID != "" && s.sessionService != nil {
+	if container.SessionID != "" && s.sessionService != nil {
 		sess, err := s.sessionService.sessionStore.Get(container.SessionID)
 		if err == nil && sess != nil {
 			sess.RemoveContainer(containerRegID)

@@ -9,8 +9,9 @@
 - `RefreshContainerStatus` 使用 runtime workspace 检查状态。
 - `StartContainer`/`ActivateContainer` 激活已有 sandbox。
 - `StopContainer`/`DeactivateContainer` 停用当前 sandbox。
-- `DestroyContainer` 删除 registry，当前连接可访问时同步删除远端 workspace。
+- `DestroyContainer` 删除 registry，当前连接可访问时同步删除远端 workspace；销毁 active sandbox 时只停用 sandbox，不断开 SSH。
 - `DestroyContainer` 成功后发出 `container:destroyed` 事件，让 workspace drawer 等 UI 清除 stale sandbox 状态。
 
 ## 维护要点
 - 旧 Docker 不再启动/停止/销毁，只作为 `unavailable` 记录展示和删除。
+- sandbox 销毁和 SSH 断开是两个不同生命周期动作；普通销毁不得调用 `DisconnectAndDestroy`。

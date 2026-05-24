@@ -202,7 +202,7 @@ wails build
 
 产物输出至 `build/bin/` 目录。
 
-Starxo 会在构建时使用 Wails 的平台原生窗口壳配置。macOS 使用统一隐藏标题栏并跟随系统外观，Windows 跟随系统主题并在可用时使用 Mica，Linux 使用更保守的 GTK/WebKit fallback。Vue 内容区会跟随系统明暗模式，并应用平台化设计 token。macOS 包会声明 Local Network 权限，因为 Starxo 需要通过 SSH 连接局域网 sandbox 主机；如果使用 `192.168.x.x` 或 `.local` 远端，请允许系统弹窗。
+Starxo 会在构建时使用 Wails 的平台原生窗口壳配置。macOS 使用统一隐藏标题栏并跟随系统外观，Windows 跟随系统主题并在可用时使用 Mica，Linux 使用更保守的 GTK/WebKit fallback。Vue 内容区会跟随系统明暗模式，并应用平台化设计 token。macOS 包使用 bundle id `com.starxo.app` 并声明 Local Network 权限，因为 Starxo 需要通过 SSH 连接局域网 sandbox 主机；如果使用 `192.168.x.x` 或 `.local` 远端，请允许系统弹窗。如果签名后的 macOS app 访问局域网地址时报 `no route to host`，但终端 SSH 正常，请在系统设置 > 隐私与安全性 > 本地网络中允许 Starxo，然后退出并重新打开 app。如果之前测试过旧的 `com.wails.starxo` 包，请重置旧 Local Network 权限，或对新的 bundle identity 重新允许弹窗。
 
 ### Tag 发布
 
@@ -215,13 +215,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-发布工作流会构建未签名的 macOS、Windows、Linux 包，检查基础平台 bundle 资源，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
+发布工作流会构建 ad-hoc 签名的 macOS 包，以及未签名的 Windows、Linux 包，检查基础平台 bundle 资源，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
 
 工作流结束后需要检查：
 
 - Release 页面已公开，并包含 macOS zip、Windows exe、Windows installer、Linux tarball 和 `SHA256SUMS.txt`。
 - `SHA256SUMS.txt` 中的哈希能匹配下载后的产物。
-- 三个平台的包至少能启动一次；v1 未签名，macOS/Windows 的系统安全提示属于预期现象。
+- 三个平台的包至少能启动一次；macOS 仅 ad-hoc 签名且未 notarize，Windows 未签名，v1 的系统安全提示属于预期现象。
 - 设置页可正常打开，SSH 连接测试可用，沙箱运行时检测能返回符合远端环境的状态。
 - Linux 远端可以创建 sandbox 并写入 workspace，且 `network=false` 时外联网络被阻断。
 

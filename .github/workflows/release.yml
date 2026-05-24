@@ -144,6 +144,11 @@ jobs:
             wails build -platform "${{ matrix.platform }}" -trimpath
           fi
 
+      - name: Sign macOS app bundle
+        if: matrix.target == 'darwin-universal'
+        shell: bash
+        run: scripts/sign-darwin-app.sh build/bin/starxo.app
+
       - name: Package release assets
         shell: bash
         env:
@@ -159,6 +164,26 @@ jobs:
               test -f build/bin/starxo.app/Contents/Info.plist
               find build/bin/starxo.app/Contents/Resources -maxdepth 1 -type f -iname '*.icns' -print -quit | grep -q .
               /usr/libexec/PlistBuddy -c "Print :CFBundleName" build/bin/starxo.app/Contents/Info.plist
+              bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/bin/starxo.app/Contents/Info.plist)"
+              if [[ "${bundle_id}" != "com.starxo.app" ]]; then
+                echo "::error::macOS bundle id must be com.starxo.app, got ${bundle_id}"
+                exit 1
+              fi
+              codesign --verify --deep --strict build/bin/starxo.app
+              signing_details="$(codesign -dv build/bin/starxo.app 2>&1)"
+              echo "${signing_details}"
+              if ! grep -q "Identifier=com.starxo.app" <<<"${signing_details}"; then
+                echo "::error::macOS app signature is not bound to com.starxo.app"
+                exit 1
+              fi
+              if grep -q "Info.plist=not bound" <<<"${signing_details}"; then
+                echo "::error::macOS app signature does not bind Info.plist"
+                exit 1
+              fi
+              if grep -q "Sealed Resources=none" <<<"${signing_details}"; then
+                echo "::error::macOS app resources are not sealed"
+                exit 1
+              fi
               ditto -c -k --keepParent build/bin/starxo.app "dist/starxo-${VERSION}-darwin-universal.zip"
               ;;
             windows-amd64)
