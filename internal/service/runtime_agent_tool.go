@@ -162,6 +162,7 @@ func runtimeAgentToolInfo(registry *agent.SubagentRegistry) *schema.ToolInfo {
 
 func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.ToolCallingChatModel, op commandline.Operator, provider *deferredMCPProvider, ac agent.AgentContext, agentID string, input runtimeAgentInput, registry *agent.SubagentRegistry) (runtimeAgentRunResult, error) {
 	worktreeResult := tools.WorktreeOutput{}
+	subAC := ac
 	if input.Isolation == "worktree" {
 		if s.runtimeWorkspaces == nil {
 			return runtimeAgentRunResult{}, fmt.Errorf("runtime worktree manager is not available")
@@ -172,12 +173,13 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 			return runtimeAgentRunResult{}, err
 		}
 		ctx = contextWithRuntimeWorkspaceOverride(ctx, worktreeResult.WorktreePath)
+		subAC = runtimeSubagentAgentContext(ac, worktreeResult)
 	}
 
 	def := registry.MustGet(input.SubagentType)
-	subTools := s.runtimeSubagentTools(provider, def)
+	subTools := s.runtimeSubagentTools(provider, def, input.Fork)
 	if len(subTools) == 0 {
-		entries, err := tools.NewRuntimeCoreCatalogEntries(op, ac.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
+		entries, err := tools.NewRuntimeCoreCatalogEntries(op, subAC.WorkspacePath, s.runtimeTasks, s.runtimeWorkspaces)
 		if err != nil {
 			return runtimeAgentRunResult{}, err
 		}
@@ -185,7 +187,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 			if entry.CanonicalName == tools.RuntimeToolAgent {
 				continue
 			}
-			if !runtimeSubagentAllowsTool(def, entry.CanonicalName) {
+			if !input.Fork && !runtimeSubagentAllowsTool(def, entry.CanonicalName) {
 				continue
 			}
 			wrapped := entry
@@ -193,7 +195,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 			subTools = append(subTools, wrapped.Tool)
 		}
 	}
-	subTools = agent.WrapToolsWithEvents(agentID, subTools, ac)
+	subTools = agent.WrapToolsWithEvents(agentID, subTools, subAC)
 
 	mode := "default"
 	if strings.TrimSpace(input.Mode) == starmodel.ModePlan {
@@ -207,7 +209,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	if toolSearchHandler != nil {
 		handlers = append([]adk.ChatModelAgentMiddleware{toolSearchHandler}, handlers...)
 	}
-	contextHandlers, err := agent.NewEinoV09ContextMiddlewares(ctx, mdl, op, ac)
+	contextHandlers, err := agent.NewEinoV09ContextMiddlewares(ctx, mdl, op, subAC)
 	if err != nil {
 		return runtimeAgentRunResult{}, err
 	}
@@ -216,7 +218,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	instruction := agent.RuntimeSubagentPrompt(def, currentRuntimeAgentWorkspace(ac.WorkspacePath, worktreeResult), input.Isolation)
 	prompt := input.Prompt
 	if input.Fork {
-		instruction = agent.RuntimeAgentPrompt(ac, agent.DeepAgentModeDefault, registry)
+		instruction = agent.RuntimeAgentPrompt(subAC, agent.DeepAgentModeDefault, registry)
 		if objective, ok := tools.RuntimeObjectiveFromContext(ctx); ok {
 			prompt = fmt.Sprintf("Forked task for the current objective:\n\nCurrent objective: %s\n\nDelegated task: %s", objective.Objective, input.Prompt)
 		}
@@ -248,7 +250,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	return runtimeAgentRunResult{text: result, worktree: worktreeResult}, nil
 }
 
-func (s *ChatService) runtimeSubagentTools(provider *deferredMCPProvider, def agent.SubagentDefinition) []einotool.BaseTool {
+func (s *ChatService) runtimeSubagentTools(provider *deferredMCPProvider, def agent.SubagentDefinition, fork bool) []einotool.BaseTool {
 	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
 		return nil
 	}
@@ -261,7 +263,7 @@ func (s *ChatService) runtimeSubagentTools(provider *deferredMCPProvider, def ag
 		if entry.ShouldDefer && !entry.AlwaysLoad {
 			continue
 		}
-		if !runtimeSubagentAllowsTool(def, entry.CanonicalName) {
+		if !fork && !runtimeSubagentAllowsTool(def, entry.CanonicalName) {
 			continue
 		}
 		if entry.Tool != nil {
@@ -346,6 +348,13 @@ func currentRuntimeAgentWorkspace(defaultWorkspace string, worktree tools.Worktr
 		return worktree.WorktreePath
 	}
 	return defaultWorkspace
+}
+
+func runtimeSubagentAgentContext(ac agent.AgentContext, worktree tools.WorktreeOutput) agent.AgentContext {
+	if strings.TrimSpace(worktree.WorktreePath) != "" {
+		ac.WorkspacePath = worktree.WorktreePath
+	}
+	return ac
 }
 
 func runtimeSubagentAllowsTool(def agent.SubagentDefinition, toolName string) bool {

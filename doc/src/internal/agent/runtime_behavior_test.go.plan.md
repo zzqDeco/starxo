@@ -10,3 +10,4 @@
 
 ## 3. 覆盖点
 - 当前 objective 与旧任务无关时，明显 stale 的 Bash/tool 参数会被 middleware 拦截，不会执行真实 endpoint。
+- 用户消息里正常讨论 `<current-objective>` 字符串时不会被当成 synthetic objective message 删除。

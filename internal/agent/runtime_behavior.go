@@ -111,7 +111,7 @@ func isRuntimeObjectiveMessage(msg *schema.Message) bool {
 			return true
 		}
 	}
-	return strings.Contains(msg.Content, "<current-objective>")
+	return false
 }
 
 func oneLineRuntimeObjective(text string) string {

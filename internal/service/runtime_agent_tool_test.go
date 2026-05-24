@@ -130,6 +130,50 @@ func TestRuntimeAgentToolSchemaUsesConfiguredRegistry(t *testing.T) {
 	}
 }
 
+func TestRuntimeSubagentToolsForkIgnoresDefaultAllowlist(t *testing.T) {
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{
+		{
+			CanonicalName: tools.RuntimeToolRead,
+			AlwaysLoad:    true,
+			Tool:          &stubTool{name: tools.RuntimeToolRead},
+		},
+		{
+			CanonicalName: tools.RuntimeToolWrite,
+			AlwaysLoad:    true,
+			Tool:          &stubTool{name: tools.RuntimeToolWrite},
+		},
+	} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register catalog entry: %v", err)
+		}
+	}
+	provider := &deferredMCPProvider{bundle: &RunnerBundle{MCPCatalog: catalog}}
+	def := agent.SubagentDefinition{
+		Name:         "narrow",
+		AllowedTools: []string{tools.RuntimeToolRead},
+	}
+
+	normalTools := NewChatService(nil).runtimeSubagentTools(provider, def, false)
+	if len(normalTools) != 1 {
+		t.Fatalf("expected non-fork to honor allowlist, got %d tools", len(normalTools))
+	}
+	forkTools := NewChatService(nil).runtimeSubagentTools(provider, def, true)
+	if len(forkTools) != 2 {
+		t.Fatalf("expected fork to inherit all always-loaded context tools, got %d", len(forkTools))
+	}
+}
+
+func TestRuntimeSubagentWorktreeUsesIsolatedAgentContext(t *testing.T) {
+	ac := agent.DefaultAgentContext()
+	ac.WorkspacePath = "/workspace"
+	worktree := tools.WorktreeOutput{WorktreePath: "/workspace/.starxo/worktrees/agent-1"}
+	subAC := runtimeSubagentAgentContext(ac, worktree)
+	if subAC.WorkspacePath != worktree.WorktreePath || ac.WorkspacePath != "/workspace" {
+		t.Fatalf("expected isolated subagent context without mutating parent, parent=%q sub=%q", ac.WorkspacePath, subAC.WorkspacePath)
+	}
+}
+
 func TestFormatRuntimeAgentRunResultIncludesWorktreeMetadata(t *testing.T) {
 	out := formatRuntimeAgentRunResult(runtimeAgentRunResult{
 		text: "done\n",

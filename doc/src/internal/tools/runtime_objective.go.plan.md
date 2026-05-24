@@ -12,9 +12,10 @@
 ## 3. 关键实现细节
 - `ContextWithRuntimeObjective(...)` 克隆 objective 后写入 context，避免调用方继续修改原指针。
 - `RuntimeObjectiveFromContext(...)` 读取时也返回克隆。
-- `RuntimeObjectivePromptGuard(...)` 对明显属于旧 debug/release/review 任务的问题 fail closed，返回 structured text error 给模型。
-- `RuntimeObjectiveToolGuard(...)` 对明显属于旧任务的工具参数 fail closed，供 ChatModelAgent middleware 在工具执行前拦截。
+- `RuntimeObjectivePromptGuard(...)` 对明显属于旧 debug/release/review 任务的问题 fail closed，返回 structured text error 给模型；continuation objective 会跳过 stale guard。
+- `RuntimeObjectiveToolGuard(...)` 对明显属于旧任务的工具参数 fail closed，供 ChatModelAgent middleware 在工具执行前拦截；continuation objective 会跳过 stale guard。
+- stale keyword 判断对 ASCII term 使用 token/word 边界，避免 `preview` 命中 `review`、`stage` 命中 `tag`。
 
 ## 4. 维护边界
 - guard 是行为防线，不是完整语义分类器；只拦截高置信 stale task 家族。
-- 新增 stale family 时要避免误伤当前 objective 的合法追问。
+- 新增 stale family 时要避免误伤当前 objective 的合法追问；短英文词必须保持边界匹配。

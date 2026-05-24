@@ -12,3 +12,5 @@
 - 与当前 objective 无关的旧测试/debug 追问会被拒绝。
 - 与当前 objective 相关的问题允许继续触发 ask tool interrupt。
 - 与当前 objective 无关的旧任务工具调用会被拒绝。
+- continuation objective 中引用旧任务的 ask/tool 调用允许通过。
+- `preview` / `stage` 等合法词不会被误判为 `review` / `tag` stale family。

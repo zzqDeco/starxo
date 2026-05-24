@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/schema"
@@ -14,16 +15,56 @@ func objectiveScope(userMessage string) string {
 	if msg == "" {
 		return "standalone"
 	}
-	continuationSignals := []string{
-		"continue", "next step", "what next", "do the above", "above", "previous", "that task", "same task",
-		"继续", "下一步", "下步", "上面", "上述", "刚才", "之前", "接着", "完成上面", "做完上面",
+	msg = strings.Join(strings.Fields(msg), " ")
+	exactContinuationSignals := map[string]bool{
+		"continue": true, "continue please": true, "go on": true, "proceed": true,
+		"next step": true, "what next": true, "do it": true, "do that": true,
+		"do the above": true, "same task": true, "that task": true, "previous task": true,
+		"继续": true, "下一步": true, "下步": true, "接着": true, "继续做": true, "继续执行": true,
+		"完成上面": true, "做完上面": true,
 	}
-	for _, signal := range continuationSignals {
-		if strings.Contains(msg, signal) {
-			return "continuation"
-		}
+	if exactContinuationSignals[msg] {
+		return "continuation"
+	}
+	if strings.HasPrefix(msg, "continue ") || strings.HasPrefix(msg, "resume ") {
+		return "continuation"
+	}
+	if strings.Contains(msg, "the above") && containsAny(msg, "do", "implement", "finish", "complete", "fix", "address", "continue") {
+		return "continuation"
+	}
+	if strings.Contains(msg, "previous") && containsAny(msg, "continue", "resume", "task") {
+		return "continuation"
+	}
+	if strings.HasPrefix(msg, "继续") || strings.HasPrefix(msg, "接着") || strings.HasPrefix(msg, "下一步") {
+		return "continuation"
+	}
+	if containsAny(msg, "上面", "上述", "刚才", "之前") && containsAny(msg, "完成", "做", "修复", "继续", "接着", "按照") {
+		return "continuation"
 	}
 	return "standalone"
+}
+
+func containsAny(text string, terms ...string) bool {
+	for _, term := range terms {
+		if containsContinuationTerm(text, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsContinuationTerm(text, term string) bool {
+	term = strings.TrimSpace(term)
+	if term == "" {
+		return false
+	}
+	for _, r := range term {
+		if r > 127 {
+			return strings.Contains(text, term)
+		}
+	}
+	pattern := `(?:^|[^a-z0-9_])` + regexp.QuoteMeta(term) + `(?:$|[^a-z0-9_])`
+	return regexp.MustCompile(pattern).FindStringIndex(text) != nil
 }
 
 func cloneRunObjective(in *model.RunObjective) *model.RunObjective {
@@ -59,7 +100,9 @@ Only this current objective is active. Earlier messages are historical context u
 		oneLineObjective(objective.Objective),
 		oneLineObjective(objective.Acceptance),
 	)
-	return []*schema.Message{schema.UserMessage(content)}
+	msg := schema.UserMessage(content)
+	msg.Extra = map[string]any{"starxo_current_objective": true}
+	return []*schema.Message{msg}
 }
 
 func scopeCompactForObjective(compact *model.RuntimeContextCompact, objective *model.RunObjective) *model.RuntimeContextCompact {

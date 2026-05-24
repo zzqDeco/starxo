@@ -36,6 +36,21 @@ func TestRuntimeObjectivePromptGuardAllowsRelevantQuestion(t *testing.T) {
 	}
 }
 
+func TestRuntimeObjectivePromptGuardAllowsContinuationReferences(t *testing.T) {
+	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
+		ID:        "obj-1",
+		Objective: "继续",
+		Scope:     "continuation",
+	})
+
+	if msg, ok := RuntimeObjectivePromptGuard(ctx, "Which failing tests should I debug first?"); !ok {
+		t.Fatalf("expected continuation question to be allowed, msg=%q", msg)
+	}
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "Bash", `{"command":"go test ./..."}`); !ok {
+		t.Fatalf("expected continuation tool call to be allowed, msg=%q", msg)
+	}
+}
+
 func TestRuntimeObjectiveToolGuardRejectsStaleToolCall(t *testing.T) {
 	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
 		ID:        "obj-1",
@@ -49,5 +64,20 @@ func TestRuntimeObjectiveToolGuardRejectsStaleToolCall(t *testing.T) {
 	}
 	if !strings.Contains(msg, "Tool call rejected") {
 		t.Fatalf("expected tool rejection message, got %q", msg)
+	}
+}
+
+func TestRuntimeObjectiveGuardUsesWordBoundaries(t *testing.T) {
+	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
+		ID:        "obj-1",
+		Objective: "create preview.txt and show it",
+		Scope:     "standalone",
+	})
+
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "Bash", `{"command":"cat preview.txt"}`); !ok {
+		t.Fatalf("expected preview to avoid matching review, msg=%q", msg)
+	}
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "Bash", `{"command":"git stage preview.txt"}`); !ok {
+		t.Fatalf("expected stage to avoid matching tag, msg=%q", msg)
 	}
 }

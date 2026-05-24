@@ -11,4 +11,5 @@
 ## 3. 覆盖点
 - standalone 新请求不会携带旧任务历史。
 - continuation 请求会继承最近任务上下文。
+- generic `above` / `previous` 文本不会被误判为 continuation。
 - standalone compact 会丢弃旧 active work，同时保留 ToolSearch 和 permission grants。

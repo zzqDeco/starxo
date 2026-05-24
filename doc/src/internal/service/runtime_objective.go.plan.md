@@ -9,11 +9,11 @@
 - 为 ChatService 提供 current-objective sidecar 的分类、克隆、prompt pinned message 和 compact 过滤逻辑。
 
 ## 3. 关键实现细节
-- `objectiveScope(...)` 根据用户文本识别 continuation 请求，例如 `继续`、`下一步`、`above`、`previous`。
+- `objectiveScope(...)` 根据用户文本识别 continuation 请求，例如 `继续`、`下一步`、`do the above`、`continue previous task`。
 - standalone objective 会记录 `HistoryStartIndex`，后续 prompt 只带本 turn 后的历史。
 - `scopeCompactForObjective(...)` 在 standalone 下移除旧 summary、tasks、file read state、diff summary、todos 和 plan，同时保留 ToolSearch、permission grants 和 workspace routing。
 - `runtimeObjectivePinnedMessages(...)` 生成模型可见 `<current-objective>`。
 
 ## 4. 维护边界
-- continuation 信号要保守；过宽会导致旧任务被误恢复，过窄会让用户的“继续”丢失上下文。
+- continuation 信号要保守；泛化词如 `above` / `previous` 不能单独作为 substring 命中，否则会让 standalone 请求误带旧历史。
 - compact 过滤不能删除权限、ToolSearch 或 workspace guard 相关状态。

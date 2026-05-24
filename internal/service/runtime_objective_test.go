@@ -58,6 +58,27 @@ func TestContinuationObjectiveKeepsRecentTaskHistory(t *testing.T) {
 	}
 }
 
+func TestObjectiveScopeAvoidsGenericAbovePreviousFalsePositives(t *testing.T) {
+	if got := objectiveScope("summarize the above section in a new file"); got != "standalone" {
+		t.Fatalf("expected generic above request to remain standalone, got %q", got)
+	}
+	if got := objectiveScope("document the above XML marker"); got != "standalone" {
+		t.Fatalf("expected document above request to remain standalone, got %q", got)
+	}
+	if got := objectiveScope("compare this with the previous implementation"); got != "standalone" {
+		t.Fatalf("expected generic previous request to remain standalone, got %q", got)
+	}
+	if got := objectiveScope("compare this with the previous implementation work"); got != "standalone" {
+		t.Fatalf("expected generic previous work request to remain standalone, got %q", got)
+	}
+	if got := objectiveScope("do the above"); got != "continuation" {
+		t.Fatalf("expected explicit do-the-above request to continue, got %q", got)
+	}
+	if got := objectiveScope("continue previous task"); got != "continuation" {
+		t.Fatalf("expected explicit previous task continuation, got %q", got)
+	}
+}
+
 func TestScopeCompactForStandaloneObjectiveDropsOldActiveState(t *testing.T) {
 	compact := &model.RuntimeContextCompact{
 		Version: model.RuntimeContextCompactVersion,
