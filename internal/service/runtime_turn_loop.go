@@ -473,7 +473,8 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 	var emitErr error
 	s.mu.Lock()
 	run := s.sessions[sessionID]
-	if run != nil && run.turnLoop == loop {
+	currentLoop := run != nil && run.turnLoop == loop
+	if currentLoop {
 		run.turnLoop = nil
 		if run.turnLoopCancel != nil {
 			run.turnLoopCancel()
@@ -486,7 +487,7 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 			emitDone = true
 		}
 	}
-	if exit != nil && exit.ExitReason != nil {
+	if currentLoop && exit != nil && exit.ExitReason != nil {
 		var interruptErr *adk.InterruptError
 		if !errors.As(exit.ExitReason, &interruptErr) && exit.StopCause != "user_stop" {
 			emitErr = exit.ExitReason

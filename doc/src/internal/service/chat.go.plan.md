@@ -92,6 +92,7 @@
   - interrupt 由 TurnLoop checkpoint 保存，resume 使用 interrupted objective 而不是 mutable 当前 session objective
   - user stop 使用 skip-checkpoint，避免显式取消后误恢复旧 turn
   - 非 preempt 的普通新 user turn 会先删除 session 级 TurnLoop checkpoint，避免残留 interrupted checkpoint 把新请求误导入 resume 路径
+  - reset/替换 TurnLoop 后，旧 loop 的 context cancellation 被视为 stale lifecycle，不会再污染前端为错误状态
 - `SessionRun` 在 turn 真正启动前还会记录 `pendingStartBundleGeneration`：
   - 只对最终返回给这次 run 的 bundle 建立临时引用
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`

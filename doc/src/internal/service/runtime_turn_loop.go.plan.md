@@ -16,6 +16,7 @@
 - business interrupt 由 TurnLoop 保存 checkpoint；`ResumeWithAnswer` / `ResumeWithChoice` push resume item 后重建 loop，通过 `GenResume` 恢复原 interrupted objective，resume turn 正常完成后主动删除 stale checkpoint。
 - 普通新 user turn 在启动前由 `ChatService.SendMessage` 丢弃旧 checkpoint；这样内存 pending interrupt 丢失或 checkpoint 残留时，新请求会走正常 `GenInput` 而不是无 payload 的 `GenResume`。
 - `StopGeneration` 使用 `WithImmediate + WithSkipCheckpoint`，用户显式停止不会留下可恢复 checkpoint。
+- 被 reset 替换掉的旧 TurnLoop 退出时视为 stale loop，只做后台收敛，不再向 UI 发 `agent:error` / `agent:done`。
 
 ## 4. 维护边界
 - subagent 内部同步执行仍使用局部 runner，本文件只迁移顶层 ChatService session loop。
