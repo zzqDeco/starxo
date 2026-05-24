@@ -20,6 +20,8 @@
 - Top-level agent selection is a standalone `buildTopLevelRuntimeAgents(...)` helper, not a `ChatService` method.
 - `Agent` tool execution is handled by `runtimeSubagentRunner`, which receives clock/task/worktree dependencies explicitly instead of reaching through `ChatService`.
 - Generation-bound tool provider code lives in `runtime_tool_provider.go`; Eino v0.9 ToolSearch bridge code lives in `runtime_toolsearch_eino.go`.
+- Forked subagents use a dedicated `RuntimeForkAgentPrompt` plus direct ask/notify/todo tools; the prompt no longer advertises recursive Agent delegation.
+- Subagent mode is monotonic: explicit plan can tighten default sessions, but explicit default cannot lower a parent plan session. The effective mode is propagated through provider and permission contexts.
 
 ## Validation
 - Added targeted tests for standalone objective isolation, continuation inheritance, compact sidecar filtering, ask guard behavior, Agent fork normalization, and active objective cloning.

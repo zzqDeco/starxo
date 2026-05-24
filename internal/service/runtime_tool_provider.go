@@ -3,10 +3,30 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"starxo/internal/model"
 	"starxo/internal/tools"
 )
+
+type runtimeModeOverrideCtxKey struct{}
+
+func contextWithRuntimeModeOverride(ctx context.Context, mode string) context.Context {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, runtimeModeOverrideCtxKey{}, mode)
+}
+
+func runtimeModeOverrideFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	mode, ok := ctx.Value(runtimeModeOverrideCtxKey{}).(string)
+	mode = strings.TrimSpace(mode)
+	return mode, ok && mode != ""
+}
 
 type deferredMCPProvider struct {
 	chat   *ChatService
@@ -186,6 +206,9 @@ func (p *deferredMCPProvider) sessionState(ctx context.Context) (string, string,
 	}
 	mode := run.mode
 	p.chat.mu.Unlock()
+	if override, ok := runtimeModeOverrideFromContext(ctx); ok {
+		mode = override
+	}
 
 	return sessionID, mode, run.discoveredToolsSnapshot(), nil
 }

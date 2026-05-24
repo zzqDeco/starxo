@@ -40,6 +40,9 @@ func (p *deferredMCPProvider) RequestToolPermission(ctx context.Context, entry t
 			run.stateMu.RUnlock()
 		}
 	}
+	if override, ok := runtimeModeOverrideFromContext(ctx); ok {
+		mode = override
+	}
 	return p.chat.requestToolPermission(ctx, sessionID, mode, entry, argumentsInJSON)
 }
 

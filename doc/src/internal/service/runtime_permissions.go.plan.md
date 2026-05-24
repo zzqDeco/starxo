@@ -21,6 +21,7 @@
 
 ## 4. 关键实现细节
 - read-only trusted 工具直接 allow once，不进入审批队列。
+- 工具调用 context 中存在 runtime mode override 时，审批队列使用该 override 而不是原始 session mode；用于保证 subagent plan/default 约束与 provider/tool surface 一致。
 - 已存在 `allow_session` grant 的工具直接放行。
 - 无 Wails UI context 时 fail-closed，避免后台测试或 headless 运行静默执行危险工具。
 - 每个请求生成 `perm-<timestamp>` request id，并把请求挂入 `permissionRequests` map。

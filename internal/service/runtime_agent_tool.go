@@ -220,9 +220,13 @@ func (r runtimeSubagentRunner) Run(ctx context.Context, mdl einomodel.ToolCallin
 			subTools = append(subTools, wrapped.Tool)
 		}
 	}
+	if input.Fork {
+		subTools = append(runtimeSubagentDirectTools(), subTools...)
+	}
 	subTools = agent.WrapToolsWithEvents(agentID, subTools, subAC)
 
 	mode := runtimeSubagentMode(ctx, provider, input.Mode)
+	ctx = contextWithRuntimeModeOverride(ctx, mode)
 	handlers := []adk.ChatModelAgentMiddleware{tools.NewDynamicMCPSurfaceMiddleware(provider)}
 	toolSearchHandler, err := newEinoV09ToolSearchHandlerForCatalog(
 		ctx,
@@ -247,7 +251,7 @@ func (r runtimeSubagentRunner) Run(ctx context.Context, mdl einomodel.ToolCallin
 	instruction := agent.RuntimeSubagentPrompt(def, currentRuntimeAgentWorkspace(ac.WorkspacePath, worktreeResult), input.Isolation)
 	prompt := input.Prompt
 	if input.Fork {
-		instruction = agent.RuntimeAgentPrompt(subAC, runtimeSubagentDeepAgentMode(mode), registry)
+		instruction = agent.RuntimeForkAgentPrompt(subAC, runtimeSubagentDeepAgentMode(mode))
 		if objective, ok := tools.RuntimeObjectiveFromContext(ctx); ok {
 			prompt = fmt.Sprintf("Forked task for the current objective:\n\nCurrent objective: %s\n\nDelegated task: %s", objective.Objective, input.Prompt)
 		}
@@ -280,16 +284,15 @@ func (r runtimeSubagentRunner) Run(ctx context.Context, mdl einomodel.ToolCallin
 }
 
 func runtimeSubagentMode(ctx context.Context, provider *deferredMCPProvider, requested string) string {
-	switch strings.TrimSpace(requested) {
-	case starmodel.ModePlan:
-		return starmodel.ModePlan
-	case starmodel.ModeDefault:
-		return starmodel.ModeDefault
-	}
+	parentMode := starmodel.ModeDefault
 	if provider != nil {
 		if _, mode, _, err := provider.sessionState(ctx); err == nil && strings.TrimSpace(mode) != "" {
-			return mode
+			parentMode = mode
 		}
+	}
+	requested = strings.TrimSpace(requested)
+	if parentMode == starmodel.ModePlan || requested == starmodel.ModePlan {
+		return starmodel.ModePlan
 	}
 	return starmodel.ModeDefault
 }
@@ -317,6 +320,16 @@ func runtimeSubagentCatalogEntryAllowed(def agent.SubagentDefinition, fork bool)
 			return false
 		}
 		return runtimeSubagentAllowsTool(def, entry.CanonicalName)
+	}
+}
+
+func runtimeSubagentDirectTools() []einotool.BaseTool {
+	return []einotool.BaseTool{
+		tools.NewFollowUpTool(),
+		tools.NewChoiceTool(),
+		tools.NewNotifyUserTool(),
+		tools.NewWriteTodosTool(),
+		tools.NewUpdateTodoTool(),
 	}
 }
 

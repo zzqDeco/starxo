@@ -26,8 +26,10 @@
 - `Agent` 是 always-load runtime tool，但执行仍会经过 permission wrapper。
 - 子 agent 使用同一个 Eino chat model，并按 subagent definition 注入允许的 Runtime V2/MCP always-load 工具；子工具同样走 permission gate、workspace guard 和 timeline event wrapper。
 - non-fork 子 agent 的 Eino ToolSearch 也按同一 `allowedTools` 策略过滤 deferred tools，避免子 agent 通过搜索发现 definition 之外的能力；fork 子 agent 才继承父 agent 的完整可搜索工具面。
-- omitted `subagent_type` 使用 `RuntimeAgentPrompt` fork 当前 objective；explicit `subagent_type` 使用 `RuntimeSubagentPrompt` 创建 fresh worker。
-- fork 子 agent 默认继承父会话 runtime mode；父会话在 plan mode 时，fork prompt 会继续使用 plan-mode 工具约束，除非调用方显式传入 `mode` override。
+- omitted `subagent_type` 使用 `RuntimeForkAgentPrompt` fork 当前 objective；该 prompt 不再暴露递归 `Agent` 委派，但会明确列出 fork 可用的 ask/notify/todo/direct runtime 工具。
+- fork 子 agent 额外注入 ask_user、ask_choice、notify_user、write_todos、update_todo，避免提示词承诺的直接工具和实际工具池不一致。
+- 子 agent runtime mode 使用“父会话 mode 与调用方 request mode 的更严格值”：父会话在 plan mode 时，显式 `mode=default` 不能降级；默认会话下显式 `mode=plan` 可以进一步收窄。
+- 计算出的子 agent mode 会写入 runtime context override，并被 ToolSearch provider 与 permission queue 读取，确保 prompt、可搜索工具和审批策略一致。
 - worktree isolation 会派生子 agent 专用 `AgentContext.WorkspacePath`，context middleware、tool wrapper 和 prompt 都使用隔离 worktree path，不污染父会话 workspace。
 - `background=true` 时调用 `runtimeTaskManager.StartAgentTask`，任务输出落盘到 runtime task output 文件。
 - `isolation=worktree` 时通过 `runtimeWorkspaceManager.CreateIsolatedWorktree` 创建 git worktree，并用 context-scoped workspace override 只影响当前子 agent；父 session 的 active workspace 不会被临时切走。

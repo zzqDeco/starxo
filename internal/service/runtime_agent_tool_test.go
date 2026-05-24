@@ -222,8 +222,50 @@ func TestRuntimeSubagentModeInheritsParentPlanMode(t *testing.T) {
 	if got := runtimeSubagentDeepAgentMode(model.ModePlan); got != agent.DeepAgentModePlan {
 		t.Fatalf("expected plan prompt mode, got %q", got)
 	}
-	if got := runtimeSubagentMode(ctx, provider, model.ModeDefault); got != model.ModeDefault {
-		t.Fatalf("expected explicit default mode override, got %q", got)
+	if got := runtimeSubagentMode(ctx, provider, model.ModeDefault); got != model.ModePlan {
+		t.Fatalf("expected explicit default not to lower parent plan mode, got %q", got)
+	}
+
+	chat.mu.Lock()
+	run.mode = model.ModeDefault
+	chat.mu.Unlock()
+	if got := runtimeSubagentMode(ctx, provider, model.ModePlan); got != model.ModePlan {
+		t.Fatalf("expected explicit plan mode to restrict default parent session, got %q", got)
+	}
+}
+
+func TestRuntimeSubagentDirectToolsMatchForkPrompt(t *testing.T) {
+	names := map[string]bool{}
+	for _, tool := range runtimeSubagentDirectTools() {
+		info, err := tool.Info(context.Background())
+		if err != nil {
+			t.Fatalf("tool info: %v", err)
+		}
+		names[info.Name] = true
+	}
+	for _, name := range []string{"ask_user", "ask_choice", "notify_user", "write_todos", "update_todo"} {
+		if !names[name] {
+			t.Fatalf("expected fork direct tools to include %s; got %#v", name, names)
+		}
+	}
+}
+
+func TestRuntimeModeOverrideAffectsProviderPermissionState(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-mode-override"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.mode = model.ModeDefault
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat}
+	ctx := contextWithRuntimeModeOverride(contextWithSessionID(context.Background(), sessionID), model.ModePlan)
+	_, mode, _, err := provider.sessionState(ctx)
+	if err != nil {
+		t.Fatalf("session state: %v", err)
+	}
+	if mode != model.ModePlan {
+		t.Fatalf("expected provider to use runtime mode override, got %q", mode)
 	}
 }
 
