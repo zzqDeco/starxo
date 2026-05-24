@@ -55,6 +55,12 @@ const (
 	defaultMaxTokens    = 8000
 )
 
+const (
+	orphanRepairSupersededReason = "Error: tool execution was superseded by a newer user request"
+	orphanRepairStoppedReason    = "Error: tool execution was stopped before the user provided interrupt input"
+	orphanRepairSandboxReason    = "Error: tool execution was stopped because the sandbox connection was lost"
+)
+
 // PendingInterrupt holds the state needed to resume after an interrupt.
 type PendingInterrupt struct {
 	CheckpointID     string
@@ -63,6 +69,7 @@ type PendingInterrupt struct {
 	RunnerKind       RunnerKind
 	Info             any
 	Objective        *model.RunObjective
+	ToolCallIDs      []string
 }
 
 type RunnerKind string
@@ -221,6 +228,12 @@ func (r *SessionRun) addMessage(msg *schema.Message) {
 	r.ctxEngine.AddMessage(msg)
 }
 
+func (r *SessionRun) repairOrphanToolHistory(reason string) agentctx.RepairResult {
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	return r.ctxEngine.RepairOrphanToolCalls(reason)
+}
+
 func (r *SessionRun) removeCurrentTurnToolCallsForIDs(toolCallIDs map[string]pendingRuntimeToolCall, toolMessages, toolResultMessages []*schema.Message) int {
 	if len(toolCallIDs) == 0 {
 		return 0
@@ -341,11 +354,12 @@ func (r *SessionRun) streamingStateSnapshot() *model.StreamingState {
 	return &ss
 }
 
-func (r *SessionRun) importSessionData(data *model.SessionData) {
+func (r *SessionRun) importSessionData(data *model.SessionData) agentctx.RepairResult {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
+	repair := agentctx.RepairResult{}
 	if data != nil && data.Messages != nil {
-		r.ctxEngine.ImportMessages(data.Messages)
+		repair = r.ctxEngine.ImportMessages(data.Messages)
 	} else {
 		r.ctxEngine.ClearHistory()
 	}
@@ -368,7 +382,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 	r.activeObjective = nil
 	r.mode = model.ModeDefault
 	if data == nil {
-		return
+		return repair
 	}
 	r.streamingState = model.CloneStreamingState(data.Streaming)
 	r.mode = data.Mode
@@ -401,6 +415,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) {
 		}
 		r.permissionGrants[grant.ToolName] = grant
 	}
+	return repair
 }
 
 func (r *SessionRun) snapshot() *SessionSnapshot {
@@ -631,10 +646,11 @@ func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, _ *agentctx.E
 // UpdateSandbox updates the sandbox manager reference.
 func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 	var stoppedSessions []string
+	var repairedSessions map[string]agentctx.RepairResult
 	s.mu.Lock()
 	s.sandbox = sbx
 	if sbx == nil {
-		stoppedSessions = s.cancelRunsForSandboxLossLocked()
+		stoppedSessions, repairedSessions = s.cancelRunsForSandboxLossLocked()
 	}
 	s.invalidateRunners()
 	lsp := s.runtimeLSP
@@ -650,12 +666,24 @@ func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 		})
 		s.emitRunState(sessionID)
 	}
+	for sessionID, repair := range repairedSessions {
+		s.saveSessionAfterHistoryRepair(sessionID, repair)
+		s.emitRunState(sessionID)
+	}
 }
 
-func (s *ChatService) cancelRunsForSandboxLossLocked() []string {
+func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, map[string]agentctx.RepairResult) {
 	stopped := make([]string, 0)
+	repaired := make(map[string]agentctx.RepairResult)
 	for sessionID, run := range s.sessions {
 		if run == nil || (!run.running && !run.starting) {
+			if run != nil && run.pendingInterrupt != nil {
+				_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxReason)
+				s.logHistoryRepair(sessionID, "sandbox_lost", repair)
+				if repair.Count > 0 {
+					repaired[sessionID] = repair
+				}
+			}
 			continue
 		}
 		if run.turnLoop == nil && run.cancelFn == nil {
@@ -667,14 +695,65 @@ func (s *ChatService) cancelRunsForSandboxLossLocked() []string {
 			run.cancelFn()
 		}
 		run.cancelFn = nil
-		run.pendingInterrupt = nil
+		_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxReason)
+		s.logHistoryRepair(sessionID, "sandbox_lost", repair)
+		if repair.Count > 0 {
+			repaired[sessionID] = repair
+		}
 		stopped = append(stopped, sessionID)
 	}
 	if len(stopped) > 0 {
 		s.cleanupRetiredBundlesLocked()
 	}
 	sort.Strings(stopped)
-	return stopped
+	return stopped, repaired
+}
+
+func (s *ChatService) clearPendingInterruptLocked(run *SessionRun, reason string) (string, agentctx.RepairResult) {
+	if run == nil || run.pendingInterrupt == nil {
+		if run != nil {
+			return run.sessionID, agentctx.RepairResult{}
+		}
+		return "", agentctx.RepairResult{}
+	}
+	pending := run.pendingInterrupt
+	run.pendingInterrupt = nil
+	repair := run.repairOrphanToolHistory(reason)
+	if repair.Count == 0 && len(pending.ToolCallIDs) > 0 {
+		logger.Info("[CHAT] Cleared pending interrupt without orphan repair",
+			"session", run.sessionID,
+			"interrupt_id", pending.InterruptID,
+			"tool_call_ids", pending.ToolCallIDs,
+		)
+	}
+	return run.sessionID, repair
+}
+
+func (s *ChatService) logHistoryRepair(sessionID, source string, repair agentctx.RepairResult) {
+	if repair.Count == 0 {
+		return
+	}
+	logger.Warn("[CHAT] Repaired orphan tool-call history",
+		"session", sessionID,
+		"source", source,
+		"count", repair.Count,
+		"tool_call_ids", repair.ToolCallIDs,
+	)
+}
+
+func (s *ChatService) saveSessionAfterHistoryRepair(sessionID string, repair agentctx.RepairResult) {
+	if sessionID == "" || repair.Count == 0 {
+		return
+	}
+	s.mu.Lock()
+	sessionSvc := s.sessionService
+	s.mu.Unlock()
+	if sessionSvc == nil {
+		return
+	}
+	if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
+		logger.Warn("[CHAT] Failed to schedule repaired history save", "session", sessionID, "error", err)
+	}
 }
 
 // InvalidateRunner forces runners to be rebuilt on the next message.
@@ -1360,8 +1439,11 @@ func (s *ChatService) SendMessage(userMessage string) error {
 		}
 		preempt := run.running
 		clearPendingInterrupt := run.pendingInterrupt != nil && !preempt
+		var repairSessionID string
+		var repair agentctx.RepairResult
 		if clearPendingInterrupt {
-			run.pendingInterrupt = nil
+			repairSessionID, repair = s.clearPendingInterruptLocked(run, orphanRepairSupersededReason)
+			s.logHistoryRepair(repairSessionID, "new_user_turn", repair)
 			s.resetRuntimeTurnLoopLocked(run)
 		}
 		item := s.newRuntimeUserTurnItem(sessionID, userMessage)
@@ -1372,6 +1454,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 			"session", sessionID,
 		)
 		s.mu.Unlock()
+		s.saveSessionAfterHistoryRepair(repairSessionID, repair)
 
 		if !preempt {
 			if err := s.deleteRuntimeTurnCheckpoint(sessionID); err != nil {
@@ -1536,7 +1619,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 				ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 				Type:      "info",
 				Agent:     event.AgentName,
-				Content:   fmt.Sprintf("Error: %v", event.Err),
+				Content:   runtimeAgentErrorContent(event.Err, sessionID),
 				Timestamp: time.Now().UnixMilli(),
 			}, run)
 			continue
@@ -1547,7 +1630,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 			// Interrupt detection
 			if event.Action.Interrupted != nil && len(event.Action.Interrupted.InterruptContexts) > 0 {
 				interruptCtx := event.Action.Interrupted.InterruptContexts[0]
-				s.handleInterruptForRun(interruptCtx, checkpointID, run)
+				s.handleInterruptForRun(interruptCtx, checkpointID, run, pendingToolCallIDs(pendingToolCalls))
 				return strings.Join(allContents, "\n\n"), transferCount, true, runtimeTurnSignalClosed(preempted)
 			}
 
@@ -1752,6 +1835,31 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 	}
 
 	return strings.Join(allContents, "\n\n"), transferCount, false, wasPreempted
+}
+
+func pendingToolCallIDs(calls map[string]pendingRuntimeToolCall) []string {
+	if len(calls) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(calls))
+	for id := range calls {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func runtimeAgentErrorContent(err error, sessionID string) string {
+	if err == nil {
+		return ""
+	}
+	content := fmt.Sprintf("Error: %v", err)
+	if strings.Contains(err.Error(), "No tool output found") {
+		content += fmt.Sprintf("\nHistory repair failed; please report session id %s.", sessionID)
+	}
+	return content
 }
 
 func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, msg *schema.Message) {
@@ -2228,7 +2336,7 @@ func bashCommandLooksMutating(command string) bool {
 // ---------------------------------------------------------------------------
 
 // handleInterruptForRun processes an interrupt context for a specific session run.
-func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, checkpointID string, run *SessionRun) {
+func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, checkpointID string, run *SessionRun, toolCallIDs []string) {
 	s.mu.Lock()
 	run.pendingInterrupt = &PendingInterrupt{
 		CheckpointID:     checkpointID,
@@ -2237,6 +2345,7 @@ func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, chec
 		RunnerKind:       run.activeRunnerKind,
 		Info:             interruptCtx.Info,
 		Objective:        run.currentObjective(),
+		ToolCallIDs:      append([]string(nil), toolCallIDs...),
 	}
 	run.activeBundleGeneration = 0
 	run.activeRunnerKind = ""
@@ -2270,7 +2379,7 @@ func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, chec
 		evt.Questions = []string{fmt.Sprintf("%v", interruptCtx.Info)}
 	}
 
-	wailsruntime.EventsEmit(s.ctx, "agent:interrupt", evt)
+	wailsEmit(s.ctx, "agent:interrupt", evt)
 	s.emitTimelineForRun(TimelineEvent{
 		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 		Type:      "interrupt",
@@ -2437,12 +2546,14 @@ func (s *ChatService) StopGeneration() error {
 	if !run.running {
 		sessionID := run.sessionID
 		hadInterrupt := run.pendingInterrupt != nil
-		run.pendingInterrupt = nil
+		repairSessionID, repair := s.clearPendingInterruptLocked(run, orphanRepairStoppedReason)
+		s.logHistoryRepair(repairSessionID, "stop_idle", repair)
 		if hadInterrupt {
 			s.resetRuntimeTurnLoopLocked(run)
 		}
 		s.cleanupRetiredBundlesLocked()
 		s.mu.Unlock()
+		s.saveSessionAfterHistoryRepair(repairSessionID, repair)
 		if hadInterrupt {
 			s.deleteRuntimeTurnCheckpoint(sessionID)
 			s.emitRunState(sessionID)
@@ -2454,10 +2565,12 @@ func (s *ChatService) StopGeneration() error {
 	} else if run.cancelFn != nil {
 		run.cancelFn()
 	}
-	run.pendingInterrupt = nil
+	repairSessionID, repair := s.clearPendingInterruptLocked(run, orphanRepairStoppedReason)
+	s.logHistoryRepair(repairSessionID, "stop_running", repair)
 	s.cleanupRetiredBundlesLocked()
 	done := run.runDone
 	s.mu.Unlock()
+	s.saveSessionAfterHistoryRepair(repairSessionID, repair)
 
 	if done != nil {
 		select {
@@ -2496,11 +2609,13 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 	}
 	if !run.running {
 		hadInterrupt := run.pendingInterrupt != nil
-		run.pendingInterrupt = nil
+		repairSessionID, repair := s.clearPendingInterruptLocked(run, orphanRepairStoppedReason)
+		s.logHistoryRepair(repairSessionID, "stop_session_idle", repair)
 		if hadInterrupt {
 			s.resetRuntimeTurnLoopLocked(run)
 		}
 		s.mu.Unlock()
+		s.saveSessionAfterHistoryRepair(repairSessionID, repair)
 		if hadInterrupt {
 			s.deleteRuntimeTurnCheckpoint(sessionID)
 			s.emitRunState(sessionID)
@@ -2512,10 +2627,12 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 	} else if run.cancelFn != nil {
 		run.cancelFn()
 	}
-	run.pendingInterrupt = nil
+	repairSessionID, repair := s.clearPendingInterruptLocked(run, orphanRepairStoppedReason)
+	s.logHistoryRepair(repairSessionID, "stop_session_running", repair)
 	s.cleanupRetiredBundlesLocked()
 	done := run.runDone
 	s.mu.Unlock()
+	s.saveSessionAfterHistoryRepair(repairSessionID, repair)
 
 	if done != nil {
 		select {
@@ -2675,7 +2792,8 @@ func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model
 	tasks := s.runtimeTasks
 	workspaces := s.runtimeWorkspaces
 	s.mu.Unlock()
-	run.importSessionData(data)
+	repair := run.importSessionData(data)
+	s.logHistoryRepair(sessionID, "restore_session", repair)
 	if data != nil && data.RuntimeContextCompact != nil {
 		if tasks != nil {
 			tasks.RestoreCompactTasks(sessionID, data.RuntimeContextCompact.Tasks)
@@ -2686,6 +2804,9 @@ func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model
 		tools.RestoreTodosForSession(sessionID, data.RuntimeContextCompact.Todos)
 	} else {
 		tools.ClearTodosForSession(sessionID)
+	}
+	if repair.Count > 0 {
+		go s.saveSessionAfterHistoryRepair(sessionID, repair)
 	}
 }
 
