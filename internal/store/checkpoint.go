@@ -33,3 +33,10 @@ func (s *inMemoryStore) Get(_ context.Context, key string) ([]byte, bool, error)
 	v, ok := s.mem[key]
 	return v, ok, nil
 }
+
+func (s *inMemoryStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.mem, key)
+	return nil
+}

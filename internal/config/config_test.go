@@ -36,6 +36,13 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Agent defaults
 	assert.Equal(t, 30, cfg.Agent.MaxIterations)
+	assert.Equal(t, "eino_v09", cfg.Agent.Runtime.Engine)
+	assert.Equal(t, "client", cfg.Agent.Runtime.ToolSearchMode)
+	assert.Equal(t, "off", cfg.Agent.Runtime.AgenticProtocol)
+	assert.False(t, cfg.Agent.Runtime.EnableBuiltinDeepTransferFallback)
+	require.Len(t, cfg.Agent.Runtime.Subagents, 5)
+	assert.Equal(t, "general", cfg.Agent.Runtime.Subagents[0].Name)
+	assert.Equal(t, "reviewer", cfg.Agent.Runtime.Subagents[4].Name)
 	require.NotNil(t, cfg.Agent.WebSearch.Enabled)
 	assert.True(t, *cfg.Agent.WebSearch.Enabled)
 	assert.Equal(t, "duckduckgo", cfg.Agent.WebSearch.DefaultProvider)

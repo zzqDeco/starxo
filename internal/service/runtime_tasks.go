@@ -519,7 +519,7 @@ func (s *ChatService) DenyToolPermission(requestID string) error {
 }
 
 func wailsEmit(ctx context.Context, event string, data any) {
-	if ctx == nil {
+	if ctx == nil || ctx.Value("events") == nil {
 		return
 	}
 	// Keep Wails isolated in this helper so tests can call the service methods

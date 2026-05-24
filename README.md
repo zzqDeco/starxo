@@ -8,8 +8,8 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 
 ## Features
 
-- **Deep Agent Architecture** — Orchestrator agent delegates to 3 specialized sub-agents (code_writer / code_executor / file_manager) via `transfer_to_agent`
-- **Dual Execution Modes** — Default mode (direct execution) + Plan mode (Planner/Replanner structured execution)
+- **Claude Code-style Agent Runtime** — Eino v0.9 runtime with direct tools, `ToolSearch`, dynamic `Agent` subagents, task management, worktree isolation, Skill, and AGENTS.md context
+- **Dual Execution Modes** — Default mode runs direct ReAct tool use; Plan mode narrows the same runtime loop to read/search/planning until `ExitPlanMode` approval
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
@@ -33,7 +33,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 |------------|---------|---------|
 | Go | 1.24 | Primary language |
 | Wails | v2.11 | Desktop framework (Go + WebView) |
-| CloudWeGo Eino | v0.7 | Agent framework (ADK, Runner, Deep Agent, PlanExecute) |
+| CloudWeGo Eino | v0.9.0-beta.1 | Agent framework (ADK, ChatModelAgent, Runner, ToolSearch/Skill/Reduction/Summarization middleware) |
 | eino-ext | - | LLM Providers (OpenAI/Ark/Ollama) + MCP + Commandline |
 | golang.org/x/crypto | - | SSH connections |
 | pkg/sftp | v1.13 | SFTP file transfer |
@@ -63,12 +63,16 @@ starxo/
 │
 ├── internal/
 │   ├── agent/                       # AI Agent construction & configuration
-│   │   ├── deep_agent.go            #   Deep Agent orchestrator (3 sub-agents)
+│   │   ├── runtime_agent.go         #   Eino v0.9 ChatModelAgent runtime builder
+│   │   ├── runtime_behavior.go      #   Current-objective behavior middleware
+│   │   ├── deep_agent.go            #   Legacy deep-transfer fallback agent builder
+│   │   ├── subagents.go             #   Dynamic runtime subagent registry
+│   │   ├── eino_v09_context.go      #   Skill, AGENTS.md, reduction, summarization middleware
 │   │   ├── runner.go                #   Runner builders (default + plan mode)
 │   │   ├── prompts.go               #   System prompts for all agents
-│   │   ├── codewriter.go            #   code_writer sub-agent
-│   │   ├── codeexecutor.go          #   code_executor sub-agent
-│   │   ├── filemanager.go           #   file_manager sub-agent
+│   │   ├── codewriter.go            #   Legacy transfer fallback code_writer sub-agent
+│   │   ├── codeexecutor.go          #   Legacy transfer fallback code_executor sub-agent
+│   │   ├── filemanager.go           #   Legacy transfer fallback file_manager sub-agent
 │   │   ├── context.go               #   AgentContext (workspace, sandbox, SSH info)
 │   │   ├── plan.go                  #   Plan/Step type definitions
 │   │   ├── plan_wrapper.go          #   Plan state persistence + event emission
@@ -76,6 +80,8 @@ starxo/
 │   │
 │   ├── service/                     # Wails-bound services (frontend API)
 │   │   ├── chat.go                  #   ChatService: per-session agent lifecycle (SessionRun), messaging, streaming
+│   │   ├── runtime_agents_build.go  #   Runtime agent builder selection
+│   │   ├── runtime_objective.go     #   Current-objective prompt/history sidecar
 │   │   ├── runtime_context_compact.go # Runtime V2 context compact state
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 dynamic Agent tool
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 persistent language server manager
@@ -105,13 +111,14 @@ starxo/
 │   │   ├── mcp.go                   #   MCP server connection + tool loading
 │   │   ├── followup.go              #   ask_user interrupt tool
 │   │   ├── choice.go                #   ask_choice interrupt tool
+│   │   ├── runtime_objective.go     #   Current-objective context guard for ask tools
 │   │   ├── todos.go                 #   write_todos / update_todo task tools
 │   │   ├── notify.go                #   notify_user notification tool
 │   │   └── custom.go                #   Custom tool helper
 │   │
 │   ├── config/                      # Configuration management
 │   ├── context/                     # Context engine (history, file context, windowing)
-│   ├── llm/                         # LLM provider factory
+│   ├── llm/                         # LLM provider factory + optional agentic beta adapters
 │   ├── model/                       # Data models (Message, Session, sandbox registry)
 │   ├── storage/                     # Persistence (sessions, sandboxes)
 │   ├── store/                       # CheckPointStore (interrupt/resume state)
@@ -164,7 +171,9 @@ Launches with Vite HMR for frontend hot reload and Go backend hot reload. Fronte
 
 ### Agent Runtime V2
 
-The top-level agent now receives a smaller always-loaded runtime tool surface and can use `ToolSearch` to discover deferred tools on demand. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
+The top-level agent now runs on Eino `v0.9.0-beta.1` and receives a smaller always-loaded runtime tool surface. Eino's dynamic `tool_search` middleware exposes deferred tools on demand while Starxo keeps catalog metadata, plan-mode filtering, permission checks, and discovered-tool persistence. Core tools include `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep`, `TaskOutput`, `TaskStop`, `ExitPlanMode`, and `Agent`; legacy names such as `read_file` and `shell_execute` remain aliases.
+
+The fixed `transfer_to_agent` subagent path is no longer the default runtime. The top-level agent is an Eino `ChatModelAgent` ReAct loop with a pinned current-objective sidecar, so new standalone requests do not resume unrelated old tasks. `Agent` is the delegation entry point and resolves `subagent_type` through `agent.runtime.subagents`. Built-ins include `general`, `code_writer`, `code_executor`, `file_manager`, and `reviewer`; each definition can constrain allowed tools, default isolation, instructions, and whether background execution is allowed. Omitting `subagent_type` forks the current agent context; setting it creates a fresh worker constrained by that definition. The previous deep-transfer implementation remains behind `agent.runtime.enableBuiltinDeepTransferFallback` for debugging only.
 
 Deferred runtime tools currently include `EnterWorktree`, `ExitWorktree`, `WorktreeDiff`, `WorktreeMerge`, `LSP`, `LSPEdit`, `Skill`, `NotebookEdit`, `WebFetch`, and `WebSearch`. `LSP` uses a persistent language server per session/workspace/language when the remote sandbox has one installed (`gopls`, `typescript-language-server`, `pyright-langserver`, or `rust-analyzer`), and falls back to `rg`/`sed` when it cannot use a server. `LSPEdit` exposes writable language-server rename/format operations through the permission queue. `Agent` can run focused subagents synchronously or in the background, and can request context-scoped worktree isolation for bounded tasks without switching the parent session workspace.
 
@@ -184,7 +193,11 @@ Risky tool calls are routed through the Runtime V2 permission queue. The desktop
 
 Background Bash and Agent jobs can be inspected from the Runtime Tasks panel. The panel lists tasks for the active session, refreshes task status/output, supports copying output, and can stop running tasks through the Runtime V2 task APIs.
 
-Long sessions use token-aware context compaction. Starxo keeps recent turns in full and injects a compact runtime summary that preserves discovered tools, session permission grants, task output pointers, file read ranges, recent edit summaries, todos, plan state, and active worktree routing. Full message history remains persisted in `session_data.json`.
+Long sessions use token-aware context compaction. Starxo keeps recent turns in full and injects a compact runtime summary that preserves discovered tools, session permission grants, task output pointers, file read ranges, recent edit summaries, todos, plan state, and active worktree routing. Eino v0.9 summarization/reduction middleware stores large tool results under `.starxo/tool-results`, while Starxo's sidecar compact state keeps the runtime bookkeeping that must survive summarization. Full message history remains persisted in `session_data.json`.
+
+Skill middleware loads workspace-local `.starxo/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`. AGENTS.md middleware reads `AGENTS.md` and `.starxo/AGENTS.md` as transient runtime context without writing those instructions into persisted chat history.
+
+The experimental Eino agentic provider path is available through `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto`, but the default remains the existing `*schema.Message` path (`agenticProtocol=off`). If agentic provider setup fails, Starxo logs the failure and falls back to the Message runtime. `agent.runtime.toolSearchMode=model_native` currently falls back to client-side search until Starxo can pre-grant model-native deferred tool discovery safely.
 
 ### Production Build
 
@@ -194,7 +207,7 @@ wails build
 
 Output goes to `build/bin/`.
 
-Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens. macOS builds declare Local Network access because Starxo connects to LAN sandbox hosts over SSH; allow the system prompt if you use `192.168.x.x` or `.local` remotes.
+Starxo uses Wails platform-native shell settings at build time. macOS uses a unified hidden titlebar and system appearance, Windows follows the system theme with Mica where available, and Linux uses a conservative GTK/WebKit fallback. The Vue UI follows system light/dark mode and applies platform-specific design tokens. macOS builds use bundle id `com.starxo.app` and declare Local Network access because Starxo connects to LAN sandbox hosts over SSH; allow the system prompt if you use `192.168.x.x` or `.local` remotes. If a signed macOS app reports `no route to host` for a LAN address while Terminal SSH still works, enable Starxo in System Settings > Privacy & Security > Local Network, then quit and reopen the app. If you previously tested an older `com.wails.starxo` build, reset the old Local Network permission or allow the prompt again for the new bundle identity.
 
 ### Tagged Release
 
@@ -207,13 +220,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow builds unsigned macOS, Windows, and Linux packages, checks basic platform bundle resources, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
+The release workflow builds ad-hoc signed macOS packages plus unsigned Windows and Linux packages, checks basic platform bundle resources, uploads them to the GitHub Release, and generates `SHA256SUMS.txt`.
 
 After the workflow finishes, verify:
 
 - The Release page is public and contains the macOS zip, Windows exe, Windows installer, Linux tarball, and `SHA256SUMS.txt`.
 - `SHA256SUMS.txt` hashes match the downloaded assets.
-- Each platform package launches at least once; unsigned macOS/Windows security prompts are expected for v1.
+- Each platform package launches at least once; macOS is ad-hoc signed but not notarized, and Windows is unsigned, so system security prompts are expected for v1.
 - Settings open correctly, SSH connection testing works, and sandbox runtime detection reports the expected remote runtime state.
 - On a Linux remote, creating a sandbox can write to the workspace and `network=false` blocks outbound network access.
 
@@ -257,6 +270,8 @@ The Sandbox settings tab can run a full remote diagnostics pass before saving se
 Normal Linux package dependencies can be installed with the Install runtime button. Host security changes such as `sysctl` or AppArmor adjustments are never executed automatically; Starxo only displays copyable commands so the operator can review and run them manually.
 
 Sandbox creation reports each setup step, including Python venv creation, pip upgrade, and package installation. Python bootstrap commands obey `commandTimeoutSec`; pip failures include remote network, index, and proxy guidance, and incomplete sandbox directories are cleaned up best-effort. The runtime terminal executes one command at a time in the active sandbox workspace and is disabled when no sandbox is active.
+
+Runtime health checks separate SSH liveness from active sandbox availability. A transient sandbox command failure no longer drops the SSH connection; if the active sandbox disappears, Starxo deactivates it and stops any affected agent run with a clear error.
 
 ## Data Storage
 

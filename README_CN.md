@@ -8,8 +8,8 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 
 ## 核心特性
 
-- **Deep Agent 架构** — 主智能体协调 3 个专用子智能体（code_writer / code_executor / file_manager），通过 `transfer_to_agent` 实现任务委派
-- **双模式运行** — 默认模式（直接执行）+ 计划模式（Planner/Replanner 规划-执行）
+- **Claude Code 风格 Agent Runtime** — 基于 Eino v0.9，提供直接工具、`ToolSearch`、动态 `Agent` 子 Agent、任务管理、worktree 隔离、Skill 和 AGENTS.md 上下文
+- **双模式运行** — 默认模式使用直接 ReAct 工具循环；计划模式在同一个 runtime loop 上收窄为读取/搜索/规划，直到 `ExitPlanMode` 获批
 - **中断/恢复** — 支持 `ask_user` / `ask_choice` 工具暂停等待用户输入，状态通过 CheckPointStore 保持
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
@@ -33,7 +33,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 |------|------|------|
 | Go | 1.24 | 主语言 |
 | Wails | v2.11 | 桌面框架（Go + WebView） |
-| CloudWeGo Eino | v0.7 | Agent 框架（ADK, Runner, Deep Agent, PlanExecute） |
+| CloudWeGo Eino | v0.9.0-beta.1 | Agent 框架（ADK, ChatModelAgent, Runner, ToolSearch/Skill/Reduction/Summarization middleware） |
 | eino-ext | - | LLM Provider (OpenAI/Ark/Ollama) + MCP + Commandline |
 | golang.org/x/crypto | - | SSH 连接 |
 | pkg/sftp | v1.13 | SFTP 文件传输 |
@@ -63,12 +63,16 @@ starxo/
 │
 ├── internal/
 │   ├── agent/                       # AI Agent 构建与配置
-│   │   ├── deep_agent.go            #   Deep Agent 主编排器（3 子 Agent）
+│   │   ├── runtime_agent.go         #   Eino v0.9 ChatModelAgent runtime 构建器
+│   │   ├── runtime_behavior.go      #   current-objective 行为 middleware
+│   │   ├── deep_agent.go            #   旧 deep-transfer fallback Agent 构建器
+│   │   ├── subagents.go             #   动态 runtime 子 Agent 注册表
+│   │   ├── eino_v09_context.go      #   Skill、AGENTS.md、reduction、summarization middleware
 │   │   ├── runner.go                #   Runner 构建（默认模式 + 计划模式）
 │   │   ├── prompts.go               #   所有 Agent 系统提示词
-│   │   ├── codewriter.go            #   code_writer 子 Agent
-│   │   ├── codeexecutor.go          #   code_executor 子 Agent
-│   │   ├── filemanager.go           #   file_manager 子 Agent
+│   │   ├── codewriter.go            #   旧 transfer fallback code_writer 子 Agent
+│   │   ├── codeexecutor.go          #   旧 transfer fallback code_executor 子 Agent
+│   │   ├── filemanager.go           #   旧 transfer fallback file_manager 子 Agent
 │   │   ├── context.go               #   AgentContext（工作空间、沙箱、SSH 信息）
 │   │   ├── plan.go                  #   Plan/Step 类型定义
 │   │   ├── plan_wrapper.go          #   计划状态持久化 + 事件发射
@@ -76,6 +80,8 @@ starxo/
 │   │
 │   ├── service/                     # Wails 绑定服务（前端 API）
 │   │   ├── chat.go                  #   ChatService：Per-Session Agent 生命周期（SessionRun）、消息收发、流式输出
+│   │   ├── runtime_agents_build.go  #   Runtime agent 构建路径选择
+│   │   ├── runtime_objective.go     #   current-objective prompt/history sidecar
 │   │   ├── runtime_context_compact.go # Runtime V2 上下文压缩状态
 │   │   ├── runtime_agent_tool.go    #   Runtime V2 动态 Agent 工具
 │   │   ├── runtime_lsp_manager.go   #   Runtime V2 常驻 language server 管理
@@ -105,13 +111,14 @@ starxo/
 │   │   ├── mcp.go                   #   MCP 服务器连接 + 工具加载
 │   │   ├── followup.go              #   ask_user 中断工具
 │   │   ├── choice.go                #   ask_choice 中断工具
+│   │   ├── runtime_objective.go     #   ask tools 的 current-objective 上下文 guard
 │   │   ├── todos.go                 #   write_todos / update_todo 任务工具
 │   │   ├── notify.go                #   notify_user 通知工具
 │   │   └── custom.go                #   自定义工具助手
 │   │
 │   ├── config/                      # 配置管理
 │   ├── context/                     # 上下文引擎（历史、文件上下文、窗口化）
-│   ├── llm/                         # LLM Provider 工厂
+│   ├── llm/                         # LLM Provider 工厂 + 可选 agentic beta adapter
 │   ├── model/                       # 数据模型（Message、Session、沙箱注册表）
 │   ├── storage/                     # 持久化存储（会话、沙箱）
 │   ├── store/                       # CheckPointStore（中断恢复状态）
@@ -164,7 +171,9 @@ wails dev
 
 ### Agent Runtime V2
 
-顶层 Agent 现在使用更小的 always-loaded runtime 工具面，并通过 `ToolSearch` 按需发现 deferred tools。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
+顶层 Agent 现在运行在 Eino `v0.9.0-beta.1` 上，使用更小的 always-loaded runtime 工具面。Eino dynamic `tool_search` middleware 负责按需暴露 deferred tools，Starxo 继续负责 catalog 元数据、plan-mode 过滤、权限检查和 discovered-tool 持久化。核心工具包括 `Read`、`Edit`、`Write`、`Bash`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`；`read_file`、`shell_execute` 等旧工具名继续作为别名保留。
+
+固定 `transfer_to_agent` 子 Agent 路径不再是默认运行时。顶层 Agent 是 Eino `ChatModelAgent` ReAct loop，并注入 pinned current-objective sidecar，因此新的 standalone 请求不会继续无关旧任务。`Agent` 是唯一委派入口，并通过 `agent.runtime.subagents` 解析 `subagent_type`。内置定义包括 `general`、`code_writer`、`code_executor`、`file_manager`、`reviewer`；每个定义可限制 allowed tools、默认 isolation、指令和是否允许后台执行。省略 `subagent_type` 会 fork 当前 Agent 上下文；显式设置 `subagent_type` 会创建受该 definition 约束的 fresh worker。旧 deep-transfer 实现仅通过 `agent.runtime.enableBuiltinDeepTransferFallback` 作为调试 fallback 保留。
 
 当前 deferred runtime tools 包括 `EnterWorktree`、`ExitWorktree`、`WorktreeDiff`、`WorktreeMerge`、`LSP`、`LSPEdit`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。`LSP` 会在远端沙箱安装了对应服务时按 session/workspace/language 复用常驻 language server（`gopls`、`typescript-language-server`、`pyright-langserver`、`rust-analyzer`），不可用时降级到 `rg`/`sed`。`LSPEdit` 通过 permission queue 暴露可写的 language-server rename/format 操作。`Agent` 可同步或后台运行聚焦子任务，也可以为边界清晰的任务请求 context-scoped worktree 隔离，不会切换父会话 workspace。
 
@@ -184,7 +193,11 @@ Runtime worktree 现在具备审阅/合并闭环：`WorktreeDiff` 返回 active 
 
 后台 Bash 和 Agent 任务可在运行任务面板中查看。面板按当前会话列出任务，支持刷新状态/输出、复制输出，并可通过 Runtime V2 task APIs 停止运行中的任务。
 
-长会话使用 token-aware context compaction。Starxo 会完整保留最近轮次，并注入一段 compact runtime summary，用于保留已发现工具、本会话权限、后台任务 output pointer、文件读取范围、最近编辑摘要、todos、plan 状态和 active worktree routing。完整消息历史仍保存在 `session_data.json`。
+长会话使用 token-aware context compaction。Starxo 会完整保留最近轮次，并注入一段 compact runtime summary，用于保留已发现工具、本会话权限、后台任务 output pointer、文件读取范围、最近编辑摘要、todos、plan 状态和 active worktree routing。Eino v0.9 summarization/reduction middleware 会把大工具结果落到 `.starxo/tool-results`，Starxo sidecar compact state 继续保留 summarization 不能丢的 runtime bookkeeping。完整消息历史仍保存在 `session_data.json`。
+
+Skill middleware 会加载工作区内 `.starxo/skills/<name>/SKILL.md` 和 `.claude/skills/<name>/SKILL.md`。AGENTS.md middleware 会把 `AGENTS.md` 与 `.starxo/AGENTS.md` 作为 transient runtime context 注入，不写入持久化聊天历史。
+
+实验性的 Eino agentic provider 路径可通过 `agent.runtime.agenticProtocol=agentic_openai|agentic_ark|auto` 开启，但默认仍是现有 `*schema.Message` 路径（`agenticProtocol=off`）。如果 agentic provider 初始化失败，Starxo 会记录日志并回退到 Message runtime。`agent.runtime.toolSearchMode=model_native` 当前会回退到 client-side search，直到 Starxo 能安全地为 model-native deferred tool discovery 做 pre-grant。
 
 ### 生产构建
 
@@ -194,7 +207,7 @@ wails build
 
 产物输出至 `build/bin/` 目录。
 
-Starxo 会在构建时使用 Wails 的平台原生窗口壳配置。macOS 使用统一隐藏标题栏并跟随系统外观，Windows 跟随系统主题并在可用时使用 Mica，Linux 使用更保守的 GTK/WebKit fallback。Vue 内容区会跟随系统明暗模式，并应用平台化设计 token。macOS 包会声明 Local Network 权限，因为 Starxo 需要通过 SSH 连接局域网 sandbox 主机；如果使用 `192.168.x.x` 或 `.local` 远端，请允许系统弹窗。
+Starxo 会在构建时使用 Wails 的平台原生窗口壳配置。macOS 使用统一隐藏标题栏并跟随系统外观，Windows 跟随系统主题并在可用时使用 Mica，Linux 使用更保守的 GTK/WebKit fallback。Vue 内容区会跟随系统明暗模式，并应用平台化设计 token。macOS 包使用 bundle id `com.starxo.app` 并声明 Local Network 权限，因为 Starxo 需要通过 SSH 连接局域网 sandbox 主机；如果使用 `192.168.x.x` 或 `.local` 远端，请允许系统弹窗。如果签名后的 macOS app 访问局域网地址时报 `no route to host`，但终端 SSH 正常，请在系统设置 > 隐私与安全性 > 本地网络中允许 Starxo，然后退出并重新打开 app。如果之前测试过旧的 `com.wails.starxo` 包，请重置旧 Local Network 权限，或对新的 bundle identity 重新允许弹窗。
 
 ### Tag 发布
 
@@ -207,13 +220,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-发布工作流会构建未签名的 macOS、Windows、Linux 包，检查基础平台 bundle 资源，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
+发布工作流会构建 ad-hoc 签名的 macOS 包，以及未签名的 Windows、Linux 包，检查基础平台 bundle 资源，上传到 GitHub Release，并生成 `SHA256SUMS.txt`。
 
 工作流结束后需要检查：
 
 - Release 页面已公开，并包含 macOS zip、Windows exe、Windows installer、Linux tarball 和 `SHA256SUMS.txt`。
 - `SHA256SUMS.txt` 中的哈希能匹配下载后的产物。
-- 三个平台的包至少能启动一次；v1 未签名，macOS/Windows 的系统安全提示属于预期现象。
+- 三个平台的包至少能启动一次；macOS 仅 ad-hoc 签名且未 notarize，Windows 未签名，v1 的系统安全提示属于预期现象。
 - 设置页可正常打开，SSH 连接测试可用，沙箱运行时检测能返回符合远端环境的状态。
 - Linux 远端可以创建 sandbox 并写入 workspace，且 `network=false` 时外联网络被阻断。
 
@@ -257,6 +270,8 @@ npm run dev
 普通 Linux 包依赖可以通过“安装运行时”按钮安装。`sysctl`、AppArmor 等主机安全策略变更不会自动执行；Starxo 只展示可复制命令，由操作者审阅后手动运行。
 
 创建沙箱时会展示 Python venv 创建、pip 升级、包安装等分步进度。Python bootstrap 命令遵守 `commandTimeoutSec`；pip 失败会提示检查远端网络、pip 源或代理，并 best-effort 清理未完成的新沙箱目录。运行时终端每次在当前 active sandbox workspace 中执行一条命令，没有 active sandbox 时输入会被禁用。
+
+运行时健康检查会区分 SSH liveness 和 active sandbox 可用性。短暂的 sandbox 命令失败不会再直接断开 SSH；如果 active sandbox 消失，Starxo 只停用该沙箱，并用明确错误停止受影响的 agent run。
 
 ## 数据存储
 

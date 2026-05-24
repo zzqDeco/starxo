@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/schema"
 
 	"starxo/internal/config"
+	"starxo/internal/llm"
 	"starxo/internal/model"
 	"starxo/internal/tools"
 )
@@ -604,6 +606,118 @@ func TestDeferredUnknownToolHandlerAllowsToolSearchEvenWithoutDeferredMatches(t 
 	}
 	if got != "" {
 		t.Fatalf("expected tool_search to remain allowed, got %q", got)
+	}
+}
+
+func TestEinoV09ToolSearchCandidatesKeepPolicySuperset(t *testing.T) {
+	entry := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	readOnly := stubDeferredResourceEntry("mcp__alpha__read_resource")
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{entry, readOnly} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register entry: %v", err)
+		}
+	}
+	permCtx := tools.ToolPermissionContext{
+		Mode: "default",
+		Servers: map[string]tools.MCPServerPermissionState{
+			"alpha": {State: tools.MCPServerStatePending, HasCachedToolMetadata: true},
+		},
+	}
+	state := tools.ComputeDeferredMCPState(catalog, nil, permCtx)
+	if len(state.SearchablePoolForMode) != 1 {
+		t.Fatalf("expected cached pending metadata to be searchable, got %#v", state.SearchablePoolForMode)
+	}
+	candidates := einoV09ToolSearchCandidates(catalog, "default")
+	if len(candidates) != 2 {
+		t.Fatalf("expected Eino tool_search candidates to include deferred policy superset, got %d", len(candidates))
+	}
+
+	permCtx.Servers["alpha"] = tools.MCPServerPermissionState{State: tools.MCPServerStatePending}
+	if state := tools.ComputeDeferredMCPState(catalog, nil, permCtx); len(state.SearchablePoolForMode) != 0 {
+		t.Fatalf("expected runtime searchable state to filter pending server without cached metadata, got %#v", state.SearchablePoolForMode)
+	}
+	if candidates := einoV09ToolSearchCandidates(catalog, "default"); len(candidates) != 2 {
+		t.Fatalf("expected Eino schema candidates not to freeze on pending metadata state, got %d", len(candidates))
+	}
+
+	permCtx.Servers["alpha"] = tools.MCPServerPermissionState{State: tools.MCPServerStateDisabled}
+	if state := tools.ComputeDeferredMCPState(catalog, nil, permCtx); len(state.SearchablePoolForMode) != 0 {
+		t.Fatalf("expected runtime searchable state to filter disabled server, got %#v", state.SearchablePoolForMode)
+	}
+	if candidates := einoV09ToolSearchCandidates(catalog, "default"); len(candidates) != 2 {
+		t.Fatalf("expected Eino schema candidates not to freeze on disabled server state, got %d", len(candidates))
+	}
+	if candidates := einoV09ToolSearchCandidates(catalog, "plan"); len(candidates) != 1 {
+		t.Fatalf("expected plan-mode Eino schema candidates to keep only read-only trusted tools, got %d", len(candidates))
+	}
+}
+
+func TestEinoV09ToolSearchModeHonorsAgenticNativeConfig(t *testing.T) {
+	if useEinoV09ModelToolSearch("client", llm.AgenticProtocolOpenAI) {
+		t.Fatalf("client mode must not use model-native tool search")
+	}
+	if useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOff) {
+		t.Fatalf("model_native without agentic protocol must stay on client-side search")
+	}
+	if useEinoV09ModelToolSearch("model_native", llm.AgenticProtocolOpenAI) {
+		t.Fatalf("model_native must stay disabled while Starxo uses discovery-gated deferred loading")
+	}
+	if useEinoV09ModelToolSearch("auto", llm.AgenticProtocolArk) {
+		t.Fatalf("auto must stay on client-side search while Starxo uses discovery-gated deferred loading")
+	}
+}
+
+func TestRecordToolSearchOutputForRunUsesActiveBundleGeneration(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-active-bundle"
+	entry := stubToolSearchCatalogEntry("mcp__old__grep", "old")
+	oldCatalog := tools.NewToolCatalog()
+	if err := oldCatalog.Register(entry); err != nil {
+		t.Fatalf("register old entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.activeBundleGeneration = 1
+	chat.installedBundle = &RunnerBundle{Generation: 2, MCPCatalog: tools.NewToolCatalog()}
+	chat.retiredBundles = []*RunnerBundle{{Generation: 1, MCPCatalog: oldCatalog}}
+	chat.mu.Unlock()
+
+	chat.recordToolSearchOutputForRun(run, schema.ToolMessage(`{"matches":["mcp__old__grep"]}`, "tool-call", schema.WithToolName(tools.ToolSearchName)))
+	discovered := run.discoveredToolsSnapshot()
+	if _, ok := discovered[entry.CanonicalName]; !ok {
+		t.Fatalf("expected discovery to use active retired bundle catalog, got %#v", discovered)
+	}
+}
+
+func TestRecordToolSearchOutputForRunParsesStructuredToolSearchResult(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-structured-tool-search"
+	entry := stubToolSearchCatalogEntry("mcp__alpha__grep", "alpha")
+	catalog := tools.NewToolCatalog()
+	if err := catalog.Register(entry); err != nil {
+		t.Fatalf("register entry: %v", err)
+	}
+
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.activeBundleGeneration = 1
+	chat.installedBundle = &RunnerBundle{Generation: 1, MCPCatalog: catalog}
+	chat.mu.Unlock()
+
+	msg := schema.ToolMessage("", "tool-call", schema.WithToolName(tools.ToolSearchName))
+	msg.UserInputMultiContent = []schema.MessageInputPart{{
+		Type: schema.ChatMessagePartTypeToolSearchResult,
+		ToolSearchResult: &schema.ToolSearchResult{
+			Tools: []*schema.ToolInfo{{Name: entry.CanonicalName}},
+		},
+	}}
+
+	chat.recordToolSearchOutputForRun(run, msg)
+	discovered := run.discoveredToolsSnapshot()
+	if _, ok := discovered[entry.CanonicalName]; !ok {
+		t.Fatalf("expected structured tool_search result to be persisted, got %#v", discovered)
 	}
 }
 

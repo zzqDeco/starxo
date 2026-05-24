@@ -62,9 +62,27 @@ type MCPServerConfig struct {
 }
 
 type AgentConfig struct {
-	MaxIterations int              `json:"maxIterations"`
-	WebSearch     WebSearchConfig  `json:"webSearch"`
-	LSP           RuntimeLSPConfig `json:"lsp"`
+	MaxIterations int                `json:"maxIterations"`
+	Runtime       AgentRuntimeConfig `json:"runtime"`
+	WebSearch     WebSearchConfig    `json:"webSearch"`
+	LSP           RuntimeLSPConfig   `json:"lsp"`
+}
+
+type AgentRuntimeConfig struct {
+	Engine                            string                     `json:"engine"`
+	ToolSearchMode                    string                     `json:"toolSearchMode"`
+	AgenticProtocol                   string                     `json:"agenticProtocol"`
+	EnableBuiltinDeepTransferFallback bool                       `json:"enableBuiltinDeepTransferFallback"`
+	Subagents                         []SubagentDefinitionConfig `json:"subagents,omitempty"`
+}
+
+type SubagentDefinitionConfig struct {
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	Instruction       string   `json:"instruction,omitempty"`
+	AllowedTools      []string `json:"allowedTools,omitempty"`
+	DefaultIsolation  string   `json:"defaultIsolation,omitempty"`
+	BackgroundAllowed *bool    `json:"backgroundAllowed,omitempty"`
 }
 
 type RuntimeLSPConfig struct {
@@ -128,6 +146,13 @@ func DefaultConfig() *AppConfig {
 		LLM: LLMConfig{Type: "openai", Model: "gpt-4o"},
 		Agent: AgentConfig{
 			MaxIterations: 30,
+			Runtime: AgentRuntimeConfig{
+				Engine:                            "eino_v09",
+				ToolSearchMode:                    "client",
+				AgenticProtocol:                   "off",
+				EnableBuiltinDeepTransferFallback: false,
+				Subagents:                         defaultSubagentDefinitions(),
+			},
 			WebSearch: WebSearchConfig{
 				Enabled:         &webSearchEnabled,
 				DefaultProvider: "duckduckgo",
@@ -182,6 +207,18 @@ func NormalizeAppConfig(cfg *AppConfig) {
 	if cfg.Agent.MaxIterations == 0 {
 		cfg.Agent.MaxIterations = defaults.Agent.MaxIterations
 	}
+	if cfg.Agent.Runtime.Engine == "" {
+		cfg.Agent.Runtime.Engine = defaults.Agent.Runtime.Engine
+	}
+	if cfg.Agent.Runtime.ToolSearchMode == "" {
+		cfg.Agent.Runtime.ToolSearchMode = defaults.Agent.Runtime.ToolSearchMode
+	}
+	if cfg.Agent.Runtime.AgenticProtocol == "" {
+		cfg.Agent.Runtime.AgenticProtocol = defaults.Agent.Runtime.AgenticProtocol
+	}
+	if len(cfg.Agent.Runtime.Subagents) == 0 {
+		cfg.Agent.Runtime.Subagents = append([]SubagentDefinitionConfig(nil), defaults.Agent.Runtime.Subagents...)
+	}
 	if cfg.Agent.WebSearch.Enabled == nil {
 		enabled := true
 		cfg.Agent.WebSearch.Enabled = &enabled
@@ -214,4 +251,48 @@ func MigrateLegacyDockerConfig(cfg *AppConfig) {
 		cfg.Sandbox.MemoryLimitMB = cfg.Docker.MemoryLimit
 	}
 	cfg.Sandbox.Network = cfg.Docker.Network
+}
+
+func defaultSubagentDefinitions() []SubagentDefinitionConfig {
+	return []SubagentDefinitionConfig{
+		{
+			Name:              "general",
+			Description:       "General-purpose focused coding subagent for bounded tasks.",
+			AllowedTools:      []string{"Read", "Write", "Edit", "Glob", "Grep", "Bash", "TaskOutput", "TaskStop"},
+			DefaultIsolation:  "none",
+			BackgroundAllowed: boolPtr(true),
+		},
+		{
+			Name:              "code_writer",
+			Description:       "Writes, edits, and refactors code in the sandbox workspace.",
+			AllowedTools:      []string{"Read", "Write", "Edit", "Glob", "Grep", "Bash", "TaskOutput"},
+			DefaultIsolation:  "none",
+			BackgroundAllowed: boolPtr(true),
+		},
+		{
+			Name:              "code_executor",
+			Description:       "Runs commands and scripts, inspects output, and reports failures.",
+			AllowedTools:      []string{"Read", "Glob", "Grep", "Bash", "TaskOutput", "TaskStop"},
+			DefaultIsolation:  "none",
+			BackgroundAllowed: boolPtr(true),
+		},
+		{
+			Name:              "file_manager",
+			Description:       "Handles bulk file exploration and non-code file operations.",
+			AllowedTools:      []string{"Read", "Write", "Edit", "Glob", "Grep"},
+			DefaultIsolation:  "none",
+			BackgroundAllowed: boolPtr(true),
+		},
+		{
+			Name:              "reviewer",
+			Description:       "Reviews code and diffs without applying edits by default.",
+			AllowedTools:      []string{"Read", "Glob", "Grep", "Bash", "TaskOutput"},
+			DefaultIsolation:  "none",
+			BackgroundAllowed: boolPtr(true),
+		},
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

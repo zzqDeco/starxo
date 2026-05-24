@@ -238,6 +238,17 @@ func FormatRuntimeContextCompact(compact *model.RuntimeContextCompact) string {
 		b.WriteString(compact.Summary)
 		b.WriteString("\n")
 	}
+	if compact.ActiveObjective != nil && strings.TrimSpace(compact.ActiveObjective.Objective) != "" {
+		scope := compact.ActiveObjective.Scope
+		if scope == "" {
+			scope = "standalone"
+		}
+		b.WriteString("- Active objective: ")
+		b.WriteString(oneLine(compact.ActiveObjective.Objective, 320))
+		b.WriteString(" (")
+		b.WriteString(scope)
+		b.WriteString(")\n")
+	}
 	if compact.OmittedMessageCount > 0 {
 		b.WriteString(fmt.Sprintf("Earlier conversation messages omitted from the prompt: %d of %d.\n", compact.OmittedMessageCount, compact.OriginalMessageCount))
 	}

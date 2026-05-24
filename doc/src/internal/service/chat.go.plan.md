@@ -8,16 +8,18 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 实现 `ChatService`，负责多会话聊天、runner 生命周期、事件流转、中断恢复、mode 切换。
-- 维护共享 runner 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
-- 构建并装配 deferred MCP surface：MCP action/resource catalog、`tool_search`、permission gate、per-model-call late binding、announcement 注入。
-- 构建 Runtime V2 core tools：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TaskOutput`、`TaskStop`、`ExitPlanMode`、`Agent`，并和 MCP catalog 合并到同一 ToolSearch/permission surface。
+- 实现 `ChatService`，负责多会话聊天、TurnLoop 生命周期、事件流转、中断恢复、mode 切换。
+- 维护共享 runtime bundle 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
+- 维护 deferred MCP/runtime surface 的 session state、discovery state 和 permission state；具体 catalog/runner 组装委托给 `runtimeBundleBuilder`。
+- Runtime V2 core/deferred tool catalog、Eino v0.9 `tool_search` bridge、permission gate 和 top-level runner 安装由 `runtime_bundle_builder.go` 承接。
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
+- 管理 Eino v0.9 runtime beta path：默认 Message runtime，显式 `agenticProtocol` 时仅探测 agentic provider 可用性并允许失败回退。
 - 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、后台任务、文件 read state、diff summary、todos、plan 和 worktree state。
+- 管理 current-objective 行为层：每个 user turn 生成 `RunObjective`，standalone 请求隔离旧历史，continuation 请求继承最近上下文。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
 - 提供 phase-2 observability 入口：best-effort `DeferredSurfaceDebug` 导出、Wails debug API 和启动时锁存的 runtime feature flags。
@@ -50,6 +52,8 @@
   - `planDocument`
   - `pendingPlanApproval`
   - `pendingPlanAttachment`
+  - `activeObjective`
+- `PendingInterrupt` 记录 interrupt id、bundle generation、runner kind、objective 和触发 interrupt 时尚未完成的 tool call ids。
 - `SessionData.Mode` 是 persisted truth source：
   - `SessionRun.importSessionData(...)` restore 时把 `SessionData.Mode` hydrate 回 `run.mode`
   - `SessionRun.snapshot()` 导出 v4 `SessionData` 时带上 `Mode` 和三类 plan state
@@ -72,6 +76,11 @@
   - 由 `RunStateEvent` 承载 `sessionId/running/currentAgent/mode/hasInterrupt`
   - 在启动准备、真实 running、agent 切换、中断挂起、resume、结束和取消 interrupt 时广播
   - `emitRunState()` 在无 Wails events context（例如 Go 单测）时短路，避免 Wails runtime 对普通 context 触发 fatal
+- interrupt 历史修复：
+  - `ask_user` / `ask_choice` 触发 business interrupt 时，assistant tool-call message 可能已写入 history
+  - 如果用户发新 standalone turn、stop、sandbox lost 等路径清理 pending interrupt，必须先补齐或移动 tool result，满足 provider tool-call pairing
+  - restore 旧 session 时若发现 orphan tool call，会记录日志并异步调度 session save，把修复后的 history 写回
+  - provider 仍返回 `No tool output found` 时，timeline error 会附带 session id 提示，便于定位未覆盖的 repair 路径
 - `ClearHistory()`：
   - 清空消息/显示/streaming/deferred state 与 plan state
   - 清空当前 active session 对应的 todo bucket，不影响其他后台 session 的 todo 状态
@@ -83,15 +92,30 @@
   - `activeBundleGeneration`
   - `activeRunnerKind`
   用于运行中引用 bundle；interrupt 挂起后引用转移到 `PendingInterrupt`
-- `SessionRun` 在 run 真正启动前还会记录 `pendingStartBundleGeneration`：
+- `SessionRun` 维护一个可重建 Eino TurnLoop：
+  - normal user turn 在 `GenInput` 里创建 objective、准备 bundle、组装 messages
+  - running 状态下的新消息通过 TurnLoop preempt 进入下一 turn
+  - interrupt 由 TurnLoop checkpoint 保存，resume 使用 interrupted objective 而不是 mutable 当前 session objective
+  - user stop 使用 skip-checkpoint，避免显式取消后误恢复旧 turn
+  - 非 preempt 的普通新 user turn 会先删除 session 级 TurnLoop checkpoint，避免残留 interrupted checkpoint 把新请求误导入 resume 路径
+  - checkpoint store 若不支持 Delete，则用 zero-length tombstone 覆盖旧 checkpoint；新 user turn 删除/覆盖失败时直接返回错误，不继续启动，避免 stale resume state 抢占普通请求
+  - reset/替换 TurnLoop 后，旧 loop 的 context cancellation 被视为 stale lifecycle，不会再污染前端为错误状态
+  - preempt 取消的 turn 不会写入 orphan tool_call 的合成失败结果，也不会发 `agent:done`
+  - preempt cleanup 只作用于当前 turn 刚写入的 tool-call / tool-result message，不扫描全量历史，避免同名 tool_call_id 删除旧的有效历史
+  - starting 状态下收到替换消息时先取消并等待当前 startup 收敛，再入队新 objective，避免旧 startup 在新目标后继续执行
+  - resume 在锁内消费 `pendingInterrupt`，防止重复 resume 同一个 interrupt；若 resume item enqueue 或 loop 校验失败，会恢复 pending interrupt 允许用户重试
+  - `RemoveSession(...)` 会停止 idle/running TurnLoop、关闭 active run completion channel，并删除 session runtime checkpoint，避免 session 删除后残留 goroutine 或等待者卡住
+  - user turn/objective 先于 runner bundle 准备写入内存，bundle 初始化失败不会丢掉用户刚提交的请求
+- `SessionRun` 在 turn 真正启动前还会记录 `pendingStartBundleGeneration`：
   - 只对最终返回给这次 run 的 bundle 建立临时引用
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`
   - 启动放弃、session 删除、runner/context 创建失败时立即清掉并触发 retired cleanup
 - `contextWithSessionID(...)` 是所有 per-model-call deferred 计算的唯一 sessionID 注入入口；下游只能从 `context.Context` 读取，不从 shared runner 或全局 active session 推断。
-- shared runner 已收敛为 `RunnerBundle`：
+- shared runtime bundle 已收敛为 `RunnerBundle`：
   - `Generation`
   - `ConfigDigest`
-  - `DefaultRunner` / `PlanRunner`
+  - `DefaultAgent` / `PlanAgent`
+  - legacy `DefaultRunner` / `PlanRunner` 仅保留兼容旧测试和 helper 路径，顶层 session 执行不再使用
   - `MCPCatalog`
   - `MCPHandles`
   - `LastFreshnessCheckAt`
@@ -135,17 +159,35 @@
   - 避免 runner 重建时污染正在运行的旧会话
   - provider 构造给 `tool_search` 的 `CurrentLoaded` 使用 `state.CurrentLoadedTools`，包含当前 mode/permission 允许的 always-load runtime tools 和已发现 deferred tools
   - `tool_search` 在 Runtime V2 中始终可见；unknown-tool handler 对 `tool_search` 直接放行，避免空 deferred pool 时误报不可用
+  - provider 实现已移到 `runtime_tool_provider.go`，`chat.go` 只保留 session state 的 owner 角色
 - Runtime V2 core catalog：
-  - runner bundle 安装时先注册 runtime core entries，再注册 MCP entries
+  - `runtimeBundleBuilder` 安装 runner bundle 时先注册 runtime core entries，再注册 MCP entries
   - runtime entries 同样经过 permission wrapper
   - plan mode 下 writable entries 会在 deferred state 计算阶段从 visible surface 中剔除
   - background `Bash` 任务写入 `runtimeTaskManager`
+  - `Agent` tool 从 `agent.runtime.subagents` 构建动态 subagent registry，按 definition 决定 allowed tools、default isolation 和 background policy
+- Top-level runtime agent：
+  - 默认通过 `BuildRuntimeAgent` 构建 Eino `ChatModelAgent` ReAct loop，模型可直接使用 Read/Edit/Bash/Grep/Glob/Agent 等工具
+  - `agent.runtime.enableBuiltinDeepTransferFallback=true` 时才回退到旧 deep-transfer builder
+  - plan mode 不再默认走 PlanExecute；它是同一 runtime loop 上的 permission/tool-surface 模式
+  - `prepareMessagesForRun(...)` 会注入 `<current-objective>`；standalone objective 只保留本 turn 后的历史，避免旧 debug/release/review 任务被误继续
+  - compact 会保留 `ActiveObjective`，并在 standalone objective 下过滤旧任务、旧 todos 和旧 plan
 - Runtime V2 dynamic/deferred catalog：
   - `Agent` 作为 always-load runtime tool 注册，支持同步/后台子 agent 和 worktree 隔离
   - `EnterWorktree` / `ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch` 作为 deferred runtime tools 注册
-  - runtime deferred tools 和 MCP deferred tools 共用 ToolSearch、session discovery 和 permission pipeline
+  - runtime deferred tools 和 MCP deferred tools 共用 Eino v0.9 ToolSearch、session discovery 和 permission pipeline
+  - Eino `tool_search` 结果会回写到 Starxo `DiscoveredToolRecord`，保证 compact/restore 后已发现工具不会丢失
+  - Eino ToolSearch 候选集使用 policy-level deferred superset，避免 bundle 构建时冻结 MCP server state；当前 mode 下真实 searchable/loadable 状态仍由 `ToolSearchState`、dynamic surface 和 permission gate 在运行期判断
+  - Eino ToolSearch bridge 已移到 `runtime_toolsearch_eino.go`，避免 Eino middleware 细节继续堆在 `chat.go`
+  - Eino `tool_search` JSON 结果和 structured `ToolSearchResult` 都会回写 discovery state
+  - `agent.runtime.toolSearchMode` 暂时统一落到 client-side search；Eino model-native deferred retrieval 会绕过 Starxo discovered-tool gate，需等 pre-grant 机制完成后再启用
   - web tools 当前由本地应用进程执行 HTTP 请求，`WebSearch` provider 来自 `agent.webSearch` 配置；其他 runtime tools 使用远端 sandbox operator
   - `LSP` tool 会先尝试常驻 language server；server 缺失或启动失败时由 tools 层 fallback 到 `rg`/`sed`
+- Eino v0.9 context middleware：
+  - `summarization` 做 token-aware compact
+  - `reduction` 将大工具结果写入 `.starxo/tool-results`
+  - `skill` 从 `.starxo/skills` 和 `.claude/skills` 发现 `SKILL.md`
+  - `agentsmd` 注入 `AGENTS.md` 和 `.starxo/AGENTS.md` transient context
 - Runtime workspace manager：
   - 按 sessionID 记录 active worktree
   - 后续 Runtime V2 file/search/edit/shell 工具通过 context sessionID 解析当前 workspace
@@ -159,6 +201,12 @@
   - 按 `sessionID + workspacePath + language` 复用远端常驻进程
   - `UpdateSandbox` / `InvalidateRunner` 会关闭所有 LSP server，避免跨 SSH/sandbox 配置复用旧进程
   - 支持 Go/TypeScript/JavaScript/Python/Rust 的 server command 映射
+- Sandbox loss 收敛：
+  - `UpdateSandbox(nil)` 代表 active sandbox 或 SSH connection 已不可用。
+  - 该路径会向所有 `running` / `starting` 的 agent run 发出 cancel，并发出 `agent:error`。
+  - `running` / `starting`、bundle generation 和 startup channel 必须保留到原 run goroutine/startup path 自己 unwind，避免旧 goroutine 清掉新 run 或提前关闭 still-referenced bundle。
+  - 运行态错误文案固定为 `Sandbox connection was lost; the agent run was stopped.`，前端依靠后续 `agent:run_state` 解除 composer working 状态。
+  - `UpdateSandbox(mgr)` 只替换 manager、invalidate runner、关闭 LSP，不取消已有 run。
 - Runtime V2 permission queue：
   - `WrapMCPToolWithPermissionCheck` 覆盖 runtime 与 MCP catalog entries
   - 非 read-only trusted 工具执行前调用 `deferredMCPProvider.RequestToolPermission`

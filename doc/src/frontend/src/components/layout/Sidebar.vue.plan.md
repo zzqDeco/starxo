@@ -22,6 +22,7 @@
   - Connect 按钮调用 `connectionStore.connect()`（仅 SSH 连接）
   - Disconnect 按钮调用 `connectionStore.disconnect()`（仅 SSH 断开）
   - 按钮切换条件改为 `connectionStore.sshConnected`（不再依赖 `isReady`）
+  - 错误文本支持换行展示，用于承载 macOS Local Network 等多行修复指引。
 - **会话项渲染**: 图标 + 标题 + 消息数和时间 + 沙箱状态文本 + 运行态摘要 + 操作菜单
 - **Compact rail**: 仅保留新建、会话图标和 SSH 状态点，隐藏标题、元信息、运行态和连接按钮，避免左侧留下大面积空白。
 - **运行态徽标**:

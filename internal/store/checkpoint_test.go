@@ -51,6 +51,21 @@ func TestSetOverwrite(t *testing.T) {
 	assert.Equal(t, []byte("v2"), val)
 }
 
+func TestDelete(t *testing.T) {
+	s := NewInMemoryStore()
+	ctx := context.Background()
+
+	require.NoError(t, s.Set(ctx, "k", []byte("v")))
+	deleter, ok := s.(interface {
+		Delete(context.Context, string) error
+	})
+	require.True(t, ok)
+	require.NoError(t, deleter.Delete(ctx, "k"))
+	_, found, err := s.Get(ctx, "k")
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
 func TestSetEmptyValue(t *testing.T) {
 	s := NewInMemoryStore()
 	ctx := context.Background()

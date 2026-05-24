@@ -46,6 +46,9 @@ func followUp(ctx context.Context, input *FollowUpToolInput) (string, error) {
 	wasInterrupted, _, storedState := tool.GetInterruptState[*FollowUpState](ctx)
 
 	if !wasInterrupted {
+		if msg, ok := RuntimeObjectivePromptGuard(ctx, strings.Join(input.Questions, "\n")); !ok {
+			return msg, nil
+		}
 		// First call: trigger interrupt with questions
 		info := &FollowUpInfo{Questions: input.Questions}
 		state := &FollowUpState{Questions: input.Questions}

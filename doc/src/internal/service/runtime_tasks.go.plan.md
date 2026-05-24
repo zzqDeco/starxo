@@ -31,7 +31,7 @@
 - `RestoreCompactTasks(...)` 从 compact state 恢复 task 可见性；原本 `running` 的 task 在 reload 后标记为 `failed`，因为进程已不再附着。
 - permission API 方法名仍保留在本文件，但实际队列和 grant 逻辑已下沉到 `runtime_permissions.go`。
 - `GetRuntimeLSPStatus(sessionID)` 也在本文件暴露为 Wails API，读取 runtime LSP manager 当前状态。
-- `wailsEmit` 对 nil context 短路，保证 Go 单测不会触发 Wails runtime fatal。
+- `wailsEmit` 对 nil / 非 Wails runtime context 短路，保证 Go 单测或纯 service 调用不会触发 Wails runtime fatal。
 
 ## 5. 依赖关系
 - 内部依赖: `internal/model`、`internal/tools`

@@ -10,9 +10,17 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"starxo/internal/config"
+	"starxo/internal/logger"
 	"starxo/internal/model"
 	"starxo/internal/sandbox"
 	"starxo/internal/storage"
+)
+
+const (
+	sandboxHealthInterval          = 30 * time.Second
+	sandboxHealthProbeTimeout      = 5 * time.Second
+	sandboxHealthMaxSSHFailures    = 2
+	sandboxConnectionLostAgentText = "Sandbox connection was lost; the agent run was stopped."
 )
 
 // SandboxService manages sandbox lifecycle for the frontend.
@@ -28,6 +36,12 @@ type SandboxService struct {
 	onContainerDeactivated func()
 	// activeContainerRegID tracks the registry ID of the currently connected container
 	activeContainerRegID string
+	healthCancel         context.CancelFunc
+	healthGeneration     uint64
+	healthSSHFailures    int
+	healthSSHProbe       func(context.Context, *sandbox.SandboxManager) error
+	healthSandboxProbe   func(context.Context, *sandbox.SandboxManager) (bool, error)
+	destroySandboxRemote func(context.Context, *sandbox.SandboxManager, string, string) error
 }
 
 // NewSandboxService creates a new SandboxService.
@@ -80,24 +94,22 @@ func (s *SandboxService) SetOnContainerDeactivated(fn func()) {
 // ConnectSSH establishes SSH connection and ensures the lightweight sandbox
 // runtime is available on the remote host.
 func (s *SandboxService) ConnectSSH() error {
-	s.mu.Lock()
-	// Disconnect existing SSH (keep containers alive on remote)
-	if s.manager != nil {
+	if s.Manager() != nil {
 		wailsruntime.EventsEmit(s.ctx, "ssh:progress", SandboxProgressEvent{
 			Step:    "Cleaning up previous connection...",
 			Percent: 0,
 		})
-		if s.activeContainerRegID != "" {
-			s.manager.DetachContainer()
-			s.activeContainerRegID = ""
-		}
-		_ = s.manager.Disconnect(s.ctx)
-		s.manager = nil
+		_ = s.disconnectCurrent("reconnecting", func(ctx context.Context, mgr *sandbox.SandboxManager) error {
+			return mgr.Disconnect(ctx)
+		}, false)
 	}
 
+	s.mu.Lock()
 	cfg := s.store.Get()
 	mgr := sandbox.NewSandboxManager(*cfg)
 	s.manager = mgr
+	s.healthGeneration++
+	generation := s.healthGeneration
 	appCtx := s.ctx
 	s.mu.Unlock()
 
@@ -108,9 +120,7 @@ func (s *SandboxService) ConnectSSH() error {
 			Percent: percent / 2, // 0-50%
 		})
 	}); err != nil {
-		s.mu.Lock()
-		s.manager = nil
-		s.mu.Unlock()
+		s.clearManagerIfCurrent(mgr, generation)
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 
@@ -122,14 +132,11 @@ func (s *SandboxService) ConnectSSH() error {
 		})
 	}); err != nil {
 		_ = mgr.Disconnect(appCtx)
-		s.mu.Lock()
-		s.manager = nil
-		s.mu.Unlock()
+		s.clearManagerIfCurrent(mgr, generation)
 		return fmt.Errorf("sandbox runtime setup failed: %w", err)
 	}
 
-	// Start health monitor in SSH-only mode
-	s.StartHealthMonitor(appCtx)
+	s.startHealthMonitor(generation, appCtx)
 
 	wailsruntime.EventsEmit(appCtx, "ssh:connected", nil)
 	return nil
@@ -137,32 +144,9 @@ func (s *SandboxService) ConnectSSH() error {
 
 // DisconnectSSH closes the SSH connection. Detaches any active container first.
 func (s *SandboxService) DisconnectSSH() error {
-	s.mu.Lock()
-	if s.manager == nil {
-		s.mu.Unlock()
-		return nil
-	}
-
-	// Deactivate container if active (without emitting events since we're disconnecting entirely)
-	var deactivatedCb func()
-	if s.activeContainerRegID != "" {
-		s.manager.DetachContainer()
-		s.activeContainerRegID = ""
-		deactivatedCb = s.onContainerDeactivated
-	}
-
-	err := s.manager.Disconnect(s.ctx)
-	s.manager = nil
-	appCtx := s.ctx
-	s.mu.Unlock()
-
-	// Call callback outside lock to prevent deadlocks
-	if deactivatedCb != nil {
-		deactivatedCb()
-	}
-
-	wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
-	return err
+	return s.disconnectCurrent("manual disconnect", func(ctx context.Context, mgr *sandbox.SandboxManager) error {
+		return mgr.Disconnect(ctx)
+	}, false)
 }
 
 // CreateAndActivateContainer creates a new sandbox on the connected SSH host,
@@ -335,29 +319,62 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 // DeactivateContainer detaches the active container without stopping it.
 // SSH remains connected.
 func (s *SandboxService) DeactivateContainer() error {
-	s.mu.Lock()
-	if s.manager == nil {
-		s.mu.Unlock()
-		return nil
-	}
+	s.markActiveSandboxUnavailable("sandbox deactivated")
+	return nil
+}
 
-	if s.activeContainerRegID == "" {
-		s.mu.Unlock()
-		return nil
-	}
-
-	s.manager.DetachContainer()
-	s.activeContainerRegID = ""
-	deactivatedCb := s.onContainerDeactivated
+func (s *SandboxService) destroyActiveSandbox(containerRegID, runtimeID, workspacePath string) error {
+	s.mu.RLock()
+	mgr := s.manager
+	activeRegID := s.activeContainerRegID
+	destroyRemote := s.destroySandboxRemote
 	appCtx := s.ctx
+	s.mu.RUnlock()
+
+	if mgr == nil {
+		return fmt.Errorf("SSH not connected")
+	}
+	if activeRegID != containerRegID {
+		return fmt.Errorf("sandbox %s is not active", containerRegID)
+	}
+	if runtimeID == "" {
+		return fmt.Errorf("sandbox runtime id is empty")
+	}
+	if destroyRemote == nil {
+		if !mgr.SSHConnected() {
+			return fmt.Errorf("SSH not connected")
+		}
+		destroyRemote = func(ctx context.Context, mgr *sandbox.SandboxManager, id, path string) error {
+			return mgr.DestroySandbox(ctx, id, path)
+		}
+	}
+
+	ctx := appCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := destroyRemote(ctx, mgr, runtimeID, workspacePath); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if s.manager != mgr || s.activeContainerRegID != containerRegID {
+		s.mu.Unlock()
+		return nil
+	}
+	deactivatedCb := s.onContainerDeactivated
+	s.activeContainerRegID = ""
+	s.healthSSHFailures = 0
+	mgr.DetachContainer()
 	s.mu.Unlock()
 
-	// Call callback outside lock to prevent deadlocks
 	if deactivatedCb != nil {
 		deactivatedCb()
 	}
-
-	wailsruntime.EventsEmit(appCtx, "container:deactivated", nil)
+	wailsEmit(appCtx, "container:deactivated", map[string]string{
+		"containerID": containerRegID,
+		"reason":      "sandbox destroyed",
+	})
 	return nil
 }
 
@@ -381,20 +398,24 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 	}
 
 	// If SSH is not connected or connected to a different host, reconnect
-	s.mu.Lock()
+	s.mu.RLock()
 	needsSSH := s.manager == nil || !s.manager.SSHConnected()
+	s.mu.RUnlock()
 	if needsSSH {
-		// Disconnect existing if any
-		if s.manager != nil {
-			_ = s.manager.Disconnect(s.ctx)
-			s.manager = nil
+		if s.Manager() != nil {
+			_ = s.disconnectCurrent("reconnecting", func(ctx context.Context, mgr *sandbox.SandboxManager) error {
+				return mgr.Disconnect(ctx)
+			}, false)
 		}
 
 		cfg := s.store.Get()
 		cfg.SSH.Host = container.SSHHost
 		cfg.SSH.Port = container.SSHPort
 		mgr := sandbox.NewSandboxManager(*cfg)
+		s.mu.Lock()
 		s.manager = mgr
+		s.healthGeneration++
+		generation := s.healthGeneration
 		appCtx := s.ctx
 		s.mu.Unlock()
 
@@ -405,9 +426,7 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 				Percent: percent / 2,
 			})
 		}); err != nil {
-			s.mu.Lock()
-			s.manager = nil
-			s.mu.Unlock()
+			s.clearManagerIfCurrent(mgr, generation)
 			return fmt.Errorf("SSH connection failed: %w", err)
 		}
 
@@ -418,15 +437,12 @@ func (s *SandboxService) ConnectExisting(containerRegID string) error {
 			})
 		}); err != nil {
 			_ = mgr.Disconnect(appCtx)
-			s.mu.Lock()
-			s.manager = nil
-			s.mu.Unlock()
+			s.clearManagerIfCurrent(mgr, generation)
 			return fmt.Errorf("sandbox runtime setup failed: %w", err)
 		}
 
+		s.startHealthMonitor(generation, appCtx)
 		wailsruntime.EventsEmit(appCtx, "ssh:connected", nil)
-	} else {
-		s.mu.Unlock()
 	}
 
 	return s.ActivateContainer(containerRegID)
@@ -439,29 +455,9 @@ func (s *SandboxService) Disconnect() error {
 
 // DisconnectAndDestroy stops and removes the active container, then closes SSH.
 func (s *SandboxService) DisconnectAndDestroy() error {
-	s.mu.Lock()
-	if s.manager == nil {
-		s.mu.Unlock()
-		return nil
-	}
-
-	mgr := s.manager
-	activeRegID := s.activeContainerRegID
-	appCtx := s.ctx
-	s.manager = nil
-	s.activeContainerRegID = ""
-	s.mu.Unlock()
-
-	err := mgr.DisconnectAndDestroy(appCtx)
-
-	// Remove from registry
-	if activeRegID != "" {
-		_ = s.containerStore.Remove(activeRegID)
-		wailsruntime.EventsEmit(appCtx, "container:deactivated", nil)
-	}
-	wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
-
-	return err
+	return s.disconnectCurrent("disconnect and destroy", func(ctx context.Context, mgr *sandbox.SandboxManager) error {
+		return mgr.DisconnectAndDestroy(ctx)
+	}, true)
 }
 
 // GetStatus returns the current sandbox connection status.
@@ -581,62 +577,254 @@ func (s *SandboxService) setupOutputForwarding() {
 }
 
 // StartHealthMonitor launches a background goroutine that periodically checks
-// whether the connected sandbox is still alive. Supports two modes:
-// - SSH-only: pings SSH when no container is active
-// - Full: pings through the operator when a container is active
+// whether SSH is still alive. It is kept for compatibility with older callers;
+// ConnectSSH starts the generation-scoped monitor used by normal runtime flow.
 func (s *SandboxService) StartHealthMonitor(ctx context.Context) {
+	s.mu.Lock()
+	generation := s.healthGeneration
+	s.mu.Unlock()
+	s.startHealthMonitor(generation, ctx)
+}
+
+func (s *SandboxService) startHealthMonitor(generation uint64, parent context.Context) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	s.mu.Lock()
+	if generation != s.healthGeneration {
+		s.mu.Unlock()
+		return
+	}
+	s.stopHealthMonitorLocked()
+	s.healthGeneration = generation
+	healthCtx, cancel := context.WithCancel(parent)
+	s.healthCancel = cancel
+	s.mu.Unlock()
+
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(sandboxHealthInterval)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-healthCtx.Done():
 				return
 			case <-ticker.C:
-				s.healthCheck(ctx)
+				s.healthCheck(generation)
 			}
 		}
 	}()
 }
 
+func (s *SandboxService) stopHealthMonitorLocked() {
+	if s.healthCancel != nil {
+		s.healthCancel()
+		s.healthCancel = nil
+	}
+	s.healthSSHFailures = 0
+}
+
 // healthCheck performs a single health check iteration with short-lived locks.
-func (s *SandboxService) healthCheck(ctx context.Context) {
+func (s *SandboxService) healthCheck(generation uint64) {
 	s.mu.RLock()
 	mgr := s.manager
-	appCtx := s.ctx
+	currentGeneration := s.healthGeneration
+	activeRegID := s.activeContainerRegID
+	sshProbe := s.healthSSHProbe
+	sandboxProbe := s.healthSandboxProbe
 	s.mu.RUnlock()
 
-	if mgr == nil || !mgr.SSHConnected() {
+	if mgr == nil || generation != currentGeneration {
 		return
 	}
-
-	// If there's an active container with an operator, ping through it
-	if mgr.HasActiveContainer() {
-		op := mgr.Operator()
-		if op == nil {
-			return
-		}
-		_, err := op.RunCommand(ctx, []string{"echo", "ping"})
-		if err != nil {
-			// Connection lost
-			s.mu.Lock()
-			s.manager = nil
-			s.activeContainerRegID = ""
-			s.mu.Unlock()
-			wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
-		}
-	} else {
-		// SSH-only mode: check SSH is still alive via the SSH client
-		ssh := mgr.SSH()
-		if ssh == nil {
-			return
-		}
-		_, _, _, err := ssh.RunCommand(ctx, "echo ping")
-		if err != nil {
-			s.mu.Lock()
-			s.manager = nil
-			s.mu.Unlock()
-			wailsruntime.EventsEmit(appCtx, "ssh:disconnected", nil)
-		}
+	if sshProbe == nil {
+		sshProbe = defaultHealthSSHProbe
 	}
+	if sandboxProbe == nil {
+		sandboxProbe = defaultHealthSandboxProbe
+	}
+
+	probeCtx, cancel := context.WithTimeout(context.Background(), sandboxHealthProbeTimeout)
+	err := sshProbe(probeCtx, mgr)
+	cancel()
+	if err != nil {
+		failures := s.recordHealthSSHFailure(generation, mgr, err)
+		if failures >= sandboxHealthMaxSSHFailures {
+			s.markDisconnectedIfCurrent(generation, mgr, "SSH health check failed")
+		}
+		return
+	}
+	s.resetHealthSSHFailures(generation, mgr)
+
+	if activeRegID == "" {
+		return
+	}
+	sandboxCtx, sandboxCancel := context.WithTimeout(context.Background(), sandboxHealthProbeTimeout)
+	exists, err := sandboxProbe(sandboxCtx, mgr)
+	sandboxCancel()
+	if err != nil {
+		logger.Warn("[SANDBOX] Active sandbox health probe failed without dropping SSH", "error", err)
+		return
+	}
+	if !exists {
+		s.markActiveSandboxUnavailableIfCurrent(generation, mgr, activeRegID, "active sandbox workspace is unavailable")
+	}
+}
+
+func (s *SandboxService) recordHealthSSHFailure(generation uint64, mgr *sandbox.SandboxManager, err error) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manager != mgr || s.healthGeneration != generation {
+		return 0
+	}
+	s.healthSSHFailures++
+	logger.Warn("[SANDBOX] SSH health probe failed",
+		"failures", s.healthSSHFailures,
+		"maxFailures", sandboxHealthMaxSSHFailures,
+		"error", err,
+	)
+	return s.healthSSHFailures
+}
+
+func (s *SandboxService) resetHealthSSHFailures(generation uint64, mgr *sandbox.SandboxManager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manager == mgr && s.healthGeneration == generation {
+		s.healthSSHFailures = 0
+	}
+}
+
+func (s *SandboxService) disconnectCurrent(reason string, disconnect func(context.Context, *sandbox.SandboxManager) error, removeContainer bool) error {
+	return s.disconnectCurrentIfCurrent(reason, nil, 0, disconnect, removeContainer)
+}
+
+func (s *SandboxService) disconnectCurrentIfCurrent(reason string, expected *sandbox.SandboxManager, generation uint64, disconnect func(context.Context, *sandbox.SandboxManager) error, removeContainer bool) error {
+	s.mu.Lock()
+	mgr := s.manager
+	if expected != nil && (mgr != expected || s.healthGeneration != generation) {
+		s.mu.Unlock()
+		return nil
+	}
+	if mgr == nil {
+		s.stopHealthMonitorLocked()
+		s.healthGeneration++
+		s.mu.Unlock()
+		return nil
+	}
+	activeRegID := s.activeContainerRegID
+	deactivatedCb := s.onContainerDeactivated
+	appCtx := s.ctx
+	s.stopHealthMonitorLocked()
+	s.healthGeneration++
+	s.manager = nil
+	s.activeContainerRegID = ""
+	s.mu.Unlock()
+
+	ctx := appCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var err error
+	if disconnect != nil {
+		err = disconnect(ctx, mgr)
+	}
+	if activeRegID != "" {
+		if removeContainer && s.containerStore != nil {
+			_ = s.containerStore.Remove(activeRegID)
+		}
+		if deactivatedCb != nil {
+			deactivatedCb()
+		}
+		wailsEmit(appCtx, "container:deactivated", map[string]string{"reason": reason})
+	}
+	wailsEmit(appCtx, "ssh:disconnected", map[string]string{"reason": reason})
+	return err
+}
+
+func (s *SandboxService) markDisconnectedIfCurrent(generation uint64, mgr *sandbox.SandboxManager, reason string) {
+	_ = s.disconnectCurrentIfCurrent(reason, mgr, generation, func(ctx context.Context, mgr *sandbox.SandboxManager) error {
+		return mgr.Disconnect(ctx)
+	}, false)
+}
+
+func (s *SandboxService) clearManagerIfCurrent(mgr *sandbox.SandboxManager, generation uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manager != mgr || s.healthGeneration != generation {
+		return
+	}
+	s.stopHealthMonitorLocked()
+	s.manager = nil
+	s.activeContainerRegID = ""
+	s.healthGeneration++
+}
+
+func (s *SandboxService) markActiveSandboxUnavailable(reason string) {
+	s.mu.RLock()
+	mgr := s.manager
+	generation := s.healthGeneration
+	activeRegID := s.activeContainerRegID
+	s.mu.RUnlock()
+	s.markActiveSandboxUnavailableIfCurrent(generation, mgr, activeRegID, reason)
+}
+
+func (s *SandboxService) markActiveSandboxUnavailableIfCurrent(generation uint64, mgr *sandbox.SandboxManager, expectedActiveRegID, reason string) {
+	s.mu.Lock()
+	if mgr == nil || s.manager != mgr || s.healthGeneration != generation || s.activeContainerRegID == "" {
+		s.mu.Unlock()
+		return
+	}
+	if expectedActiveRegID != "" && s.activeContainerRegID != expectedActiveRegID {
+		s.mu.Unlock()
+		return
+	}
+	activeRegID := s.activeContainerRegID
+	deactivatedCb := s.onContainerDeactivated
+	appCtx := s.ctx
+	s.activeContainerRegID = ""
+	s.healthSSHFailures = 0
+	mgr.DetachContainer()
+	s.mu.Unlock()
+
+	if deactivatedCb != nil {
+		deactivatedCb()
+	}
+	wailsEmit(appCtx, "container:deactivated", map[string]string{
+		"containerID": activeRegID,
+		"reason":      reason,
+	})
+}
+
+func defaultHealthSSHProbe(ctx context.Context, mgr *sandbox.SandboxManager) error {
+	if mgr == nil {
+		return fmt.Errorf("sandbox manager is not available")
+	}
+	ssh := mgr.SSH()
+	if ssh == nil {
+		return fmt.Errorf("SSH client is not available")
+	}
+	_, stderr, exitCode, err := ssh.RunCommand(ctx, "echo ping")
+	if err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("SSH health check failed (exit %d): %s", exitCode, strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
+func defaultHealthSandboxProbe(ctx context.Context, mgr *sandbox.SandboxManager) (bool, error) {
+	if mgr == nil {
+		return false, fmt.Errorf("sandbox manager is not available")
+	}
+	runtime := mgr.Runtime()
+	if runtime == nil {
+		return false, nil
+	}
+	runtimeID := runtime.RuntimeID()
+	workspacePath := runtime.WorkspacePath()
+	if runtimeID == "" || workspacePath == "" {
+		return false, nil
+	}
+	exists, _, err := runtime.InspectSandbox(ctx, runtimeID, workspacePath)
+	return exists, err
 }

@@ -31,7 +31,7 @@ const (
 // and plan mode (as the executor inside planexecute.New()).
 func BuildDeepAgent(ctx context.Context, mdl model.ToolCallingChatModel,
 	op commandline.Operator, extraTools []tool.BaseTool, ac AgentContext) (adk.Agent, error) {
-	return BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, DeepAgentModeDefault, nil, nil)
+	return BuildDeepAgentForMode(ctx, mdl, op, extraTools, ac, DeepAgentModeDefault, nil, nil, false)
 }
 
 // BuildDeepAgentForMode creates the core deep agent with mode-specific direct
@@ -40,22 +40,28 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 	op commandline.Operator, extraTools []tool.BaseTool, ac AgentContext, mode DeepAgentMode,
 	handlers []adk.ChatModelAgentMiddleware,
 	unknownToolsHandler func(ctx context.Context, name, input string) (string, error),
+	enableTransferFallback bool,
+	registries ...*SubagentRegistry,
 ) (adk.Agent, error) {
+	subagentRegistry := resolveSubagentRegistry(registries...)
 
-	// Build sub-agents (no Exit tool — deep agent manages their lifecycle)
-	codeWriter, err := NewCodeWriterAgent(ctx, mdl, op, ac)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create code_writer agent: %w", err)
-	}
+	var subAgents []adk.Agent
+	if enableTransferFallback {
+		codeWriter, err := NewCodeWriterAgent(ctx, mdl, op, ac)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create code_writer agent: %w", err)
+		}
 
-	codeExecutor, err := NewCodeExecutorAgent(ctx, mdl, op, ac)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create code_executor agent: %w", err)
-	}
+		codeExecutor, err := NewCodeExecutorAgent(ctx, mdl, op, ac)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create code_executor agent: %w", err)
+		}
 
-	fileManager, err := NewFileManagerAgent(ctx, mdl, op, ac)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create file_manager agent: %w", err)
+		fileManager, err := NewFileManagerAgent(ctx, mdl, op, ac)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create file_manager agent: %w", err)
+		}
+		subAgents = []adk.Agent{codeWriter, codeExecutor, fileManager}
 	}
 
 	// Direct orchestration tools always available on the top-level agent.
@@ -65,7 +71,7 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 		agenttools.NewNotifyUserTool(),
 	}
 
-	instruction := DeepAgentPrompt(ac)
+	instruction := DeepAgentPrompt(ac, subagentRegistry)
 
 	switch mode {
 	case DeepAgentModePlan:
@@ -75,7 +81,7 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 			agenttools.NewUpdateTodoTool(),
 		)
 		directTools = append(directTools, extraTools...)
-		instruction = DeepAgentPlanPrompt(ac)
+		instruction = DeepAgentPlanPrompt(ac, subagentRegistry)
 	case DeepAgentModeDefault:
 		// In default mode keep existing behavior, including extra tools.
 		directTools = append(directTools,
@@ -87,12 +93,18 @@ func BuildDeepAgentForMode(ctx context.Context, mdl model.ToolCallingChatModel,
 		return nil, fmt.Errorf("unsupported deep agent mode: %s", mode)
 	}
 
+	contextHandlers, err := NewEinoV09ContextMiddlewares(ctx, mdl, op, ac)
+	if err != nil {
+		return nil, err
+	}
+	handlers = append(contextHandlers, handlers...)
+
 	return deep.New(ctx, &deep.Config{
 		Name:        "coding_agent",
-		Description: "Autonomous coding agent with specialized sub-agents for code writing, execution, and file management.",
+		Description: "Autonomous coding agent with Claude Code-style runtime tools and dynamic subagent delegation.",
 		Instruction: instruction,
 		ChatModel:   mdl,
-		SubAgents:   []adk.Agent{codeWriter, codeExecutor, fileManager},
+		SubAgents:   subAgents,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools:               directTools,
