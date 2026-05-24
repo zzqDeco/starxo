@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -84,6 +85,38 @@ func TestRuntimeTurnLoopGenResumeUsesInterruptedObjective(t *testing.T) {
 func TestRuntimeTurnCheckpointIDIsSessionScoped(t *testing.T) {
 	if got := runtimeTurnCheckpointID("sess-1"); got != "runtime-turn:sess-1" {
 		t.Fatalf("unexpected checkpoint id %q", got)
+	}
+}
+
+func TestRuntimeTurnLoopGenInputPersistsUserTurnBeforeBundleFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store, err := config.NewStore()
+	if err != nil {
+		t.Fatalf("new config store: %v", err)
+	}
+	chat := NewChatService(store)
+	sessionID := "sess-bundle-fail"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.activeSessionID = sessionID
+	chat.mu.Unlock()
+	bundleErr := errors.New("bundle setup failed")
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		return nil, bundleErr
+	}
+
+	item := chat.newRuntimeUserTurnItem(sessionID, "write a short note")
+	_, err = chat.runtimeTurnLoopGenInput(sessionID)(context.Background(), nil, []runtimeTurnItem{item})
+	if !errors.Is(err, bundleErr) {
+		t.Fatalf("expected bundle error, got %v", err)
+	}
+	messages := run.ctxEngine.ExportMessages()
+	if len(messages) != 1 || messages[0].Role != string(schema.User) || messages[0].Content != item.UserMessage {
+		t.Fatalf("expected user message to persist before bundle failure, got %#v", messages)
+	}
+	objective := run.currentObjective()
+	if objective == nil || objective.UserMessageID != item.UserTurnID || objective.Objective != item.UserMessage {
+		t.Fatalf("expected objective to persist before bundle failure, got %#v", objective)
 	}
 }
 

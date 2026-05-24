@@ -12,6 +12,7 @@
 ## 3. 关键实现细节
 - 每个 session 维护一个可重建 TurnLoop，checkpoint id 为 `runtime-turn:<sessionID>`。
 - user turn 在 `GenInput` 中完成 bundle 准备、objective 创建、prompt messages 组装和 default/plan agent 选择。
+- user turn / objective 会在 bundle 准备前写入内存历史；即使模型、sandbox 或 config refresh 初始化失败，用户刚提交的请求也不会从 session 状态中丢失。
 - running 状态下的新消息通过 `WithPreemptTimeout(AfterToolCalls, 15s)` 进入队列，旧 turn 到安全点后让位给新 objective。
 - business interrupt 由 TurnLoop 保存 checkpoint；`ResumeWithAnswer` / `ResumeWithChoice` push resume item 后重建 loop，通过 `GenResume` 恢复原 interrupted objective，resume turn 正常完成后主动删除 stale checkpoint。
 - 普通新 user turn 在启动前由 `ChatService.SendMessage` 丢弃旧 checkpoint；这样内存 pending interrupt 丢失或 checkpoint 残留时，新请求会走正常 `GenInput` 而不是无 payload 的 `GenResume`。

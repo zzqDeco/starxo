@@ -196,6 +196,10 @@ func (s *ChatService) runtimeTurnLoopGenInput(sessionID string) func(context.Con
 		s.mu.Unlock()
 		s.emitRunState(sessionID)
 
+		run.addUserMessage(item.UserMessage)
+		objective := run.beginObjective(item.UserTurnID, item.RunID, item.UserMessage, item.CreatedAt)
+		run.addUserTurn(item.UserTurnID, item.UserMessage, item.CreatedAt)
+
 		bundle, err := s.ensureBundleReadyForNewRun(startCtx, sessionID)
 		if err != nil {
 			startCancel()
@@ -205,10 +209,6 @@ func (s *ChatService) runtimeTurnLoopGenInput(sessionID string) func(context.Con
 			s.emitRunState(sessionID)
 			return nil, err
 		}
-
-		run.addUserMessage(item.UserMessage)
-		objective := run.beginObjective(item.UserTurnID, item.RunID, item.UserMessage, item.CreatedAt)
-		run.addUserTurn(item.UserTurnID, item.UserMessage, item.CreatedAt)
 
 		runnerKind := runnerKindForMode(mode)
 		if agentForKind(bundle, runnerKind) == nil {

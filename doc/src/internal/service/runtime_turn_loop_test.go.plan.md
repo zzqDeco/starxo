@@ -12,6 +12,7 @@
 ## 3. 关键测试覆盖
 - `GenResume` 从 TurnLoop interrupted item 恢复原 objective，并生成对应 interrupt id 的 resume params。
 - TurnLoop checkpoint id 保持 session scoped：`runtime-turn:<sessionID>`。
+- `GenInput` 在 bundle 准备失败前已经持久化 user message 和 active objective。
 - 普通 `SendMessage` 在非 preempt 路径会先删除旧 runtime checkpoint，避免 stale checkpoint 导致新消息卡在无 resume payload 的恢复路径。
 - preempted turn 不会留下 unresolved tool-call group 或合成 tool failure。
 - 删除 session 会停止 idle persistent TurnLoop 并移除内存 session。

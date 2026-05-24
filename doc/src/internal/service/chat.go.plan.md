@@ -96,6 +96,7 @@
   - preempt 取消的 turn 不会写入 orphan tool_call 的合成失败结果，也不会发 `agent:done`
   - resume 只有在 resume item 成功进入 TurnLoop 且即将启动时才清空 `pendingInterrupt`，失败时允许用户重试
   - `RemoveSession(...)` 会停止 idle/running TurnLoop 并删除 session runtime checkpoint，避免 session 删除后残留 goroutine
+  - user turn/objective 先于 runner bundle 准备写入内存，bundle 初始化失败不会丢掉用户刚提交的请求
 - `SessionRun` 在 turn 真正启动前还会记录 `pendingStartBundleGeneration`：
   - 只对最终返回给这次 run 的 bundle 建立临时引用
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`
