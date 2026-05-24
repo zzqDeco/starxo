@@ -12,7 +12,7 @@
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
-- 输入来源: `Set` 方法接收 key (string) 和 value ([]byte)
+- 输入来源: `Set` 方法接收 key (string) 和 value ([]byte)，`Delete` 方法接收需要清理的 key
 - 输出结果: `Get` 方法返回 value ([]byte)、存在标志 (bool) 和错误 (error)
 
 ## 4. 关键实现细节
@@ -23,6 +23,7 @@
 - 未导出方法:
   - `(s *inMemoryStore) Set(_ context.Context, key string, value []byte) error` — 存储键值对
   - `(s *inMemoryStore) Get(_ context.Context, key string) ([]byte, bool, error)` — 获取键值对
+  - `(s *inMemoryStore) Delete(_ context.Context, key string) error` — 删除检查点，用于 TurnLoop clean resume / explicit stop 后清理 stale checkpoint
 - Wails 绑定方法: 无
 - 事件发射: 无
 

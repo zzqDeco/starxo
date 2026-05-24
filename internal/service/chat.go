@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -63,6 +62,7 @@ type PendingInterrupt struct {
 	BundleGeneration uint64
 	RunnerKind       RunnerKind
 	Info             any
+	Objective        *model.RunObjective
 }
 
 type RunnerKind string
@@ -80,8 +80,13 @@ type cachedMCPServerSurface struct {
 }
 
 type RunnerBundle struct {
-	Generation                    uint64
-	ConfigDigest                  string
+	Generation   uint64
+	ConfigDigest string
+	DefaultAgent adk.Agent
+	PlanAgent    adk.Agent
+	// Deprecated: top-level session execution is driven by TurnLoop over the
+	// agents above. These fields remain temporarily for older bundle tests and
+	// compatibility with legacy helper paths.
 	DefaultRunner                 *adk.Runner
 	PlanRunner                    *adk.Runner
 	MCPCatalog                    *tools.ToolCatalog
@@ -141,6 +146,10 @@ type SessionRun struct {
 	cancelFn                     context.CancelFunc
 	startDone                    chan struct{}
 	runDone                      chan struct{}
+	turnLoop                     *adk.TurnLoop[runtimeTurnItem, *schema.Message]
+	turnLoopCancel               context.CancelFunc
+	turnLoopDone                 chan struct{}
+	turnLoopStarted              bool
 	pendingInterrupt             *PendingInterrupt
 	streamingState               *model.StreamingState
 	mode                         string // "default" or "plan"
@@ -586,10 +595,14 @@ func (s *ChatService) cancelRunsForSandboxLossLocked() []string {
 		if run == nil || (!run.running && !run.starting) {
 			continue
 		}
-		if run.cancelFn == nil {
+		if run.turnLoop == nil && run.cancelFn == nil {
 			continue
 		}
-		run.cancelFn()
+		if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("sandbox_lost")...)
+		} else {
+			run.cancelFn()
+		}
 		run.cancelFn = nil
 		run.pendingInterrupt = nil
 		stopped = append(stopped, sessionID)
@@ -778,6 +791,16 @@ func runnerForKind(bundle *RunnerBundle, kind RunnerKind) *adk.Runner {
 		return bundle.PlanRunner
 	}
 	return bundle.DefaultRunner
+}
+
+func agentForKind(bundle *RunnerBundle, kind RunnerKind) adk.Agent {
+	if bundle == nil {
+		return nil
+	}
+	if kind == RunnerKindPlan {
+		return bundle.PlanAgent
+	}
+	return bundle.DefaultAgent
 }
 
 func bundleKey(generation uint64, digest string) string {
@@ -1232,204 +1255,70 @@ func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration
 // SendMessage processes a user message through the agent and streams results to the frontend.
 func (s *ChatService) SendMessage(userMessage string) error {
 	s.mu.Lock()
-
 	if s.activeSessionID == "" {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-
 	run := s.activeRun()
-
-	// Per-session concurrent run guard
-	if run.running || run.starting {
+	if run == nil {
 		s.mu.Unlock()
-		return fmt.Errorf("agent is already running in this session")
+		return fmt.Errorf("no active session")
 	}
-
+	sessionID := run.sessionID
+	preempt := run.running || run.starting
+	clearPendingInterrupt := run.pendingInterrupt != nil && !preempt
+	if clearPendingInterrupt {
+		run.pendingInterrupt = nil
+		s.resetRuntimeTurnLoopLocked(run)
+	}
+	item := s.newRuntimeUserTurnItem(sessionID, userMessage)
+	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	logger.Info("[CHAT] User message received",
 		"length", len(userMessage),
 		"preview", truncateResult(userMessage, 100),
-		"session", s.activeSessionID,
+		"session", sessionID,
 	)
-
-	nowMillis := time.Now().UnixMilli()
-	userTurnID := fmt.Sprintf("usr-%d", time.Now().UnixNano())
-	runID := fmt.Sprintf("run-%d", time.Now().UnixNano())
-
-	// Add user message to session's context engine
-	run.addUserMessage(userMessage)
-	objective := run.beginObjective(userTurnID, runID, userMessage, nowMillis)
-
-	// Record user turn in session's timeline collector
-	run.addUserTurn(
-		userTurnID,
-		userMessage,
-		nowMillis,
-	)
-
-	// Auto-escalate to plan mode for complex tasks when currently in default mode.
-	// This keeps default mode flexible while enforcing strict orchestration once
-	// plan mode is entered.
-	if run.mode == model.ModeDefault && shouldAutoPlanMode(userMessage) {
-		run.mode = model.ModePlan
-		logger.Info("[CHAT] Auto-switched to plan mode",
-			"session", s.activeSessionID,
-			"reason", "complexity_trigger",
-		)
-		wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
-			Mode:      model.ModePlan,
-			SessionID: s.activeSessionID,
-		})
-	}
-
-	sessionID := run.sessionID
-	mode := run.mode
-	baseCtx := s.ctx
-	if baseCtx == nil {
-		baseCtx = context.Background()
-	}
-	startCtx, startCancel := context.WithCancel(baseCtx)
-	run.starting = true
-	run.cancelFn = startCancel
-	run.startDone = make(chan struct{})
 	s.mu.Unlock()
-	s.emitRunState(sessionID)
 
-	bundle, err := s.ensureBundleReadyForNewRun(startCtx, sessionID)
-	if err != nil {
-		startCancel()
-		s.mu.Lock()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		s.emitRunState(sessionID)
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil
+	if clearPendingInterrupt {
+		s.deleteRuntimeTurnCheckpoint(sessionID)
+	}
+	ok := false
+	if preempt {
+		var ack <-chan struct{}
+		ok, ack = loop.Push(item, adk.WithPreemptTimeout[runtimeTurnItem, *schema.Message](adk.AfterToolCalls, runtimeTurnPreemptTimeout))
+		if ack != nil {
+			go func() {
+				<-ack
+				logger.Info("[CHAT] Runtime turn preempt acknowledged", "session", sessionID)
+			}()
 		}
-		logger.Error("[CHAT] Failed to prepare runner bundle", err)
-		wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-			"sessionId": sessionID,
-			"error":     fmt.Sprintf("Failed to build runner: %v", err),
-		})
-		return fmt.Errorf("failed to build runners: %w", err)
+	} else {
+		ok, _ = loop.Push(item)
 	}
-	if err := startCtx.Err(); err != nil {
-		startCancel()
+	if !ok {
 		s.mu.Lock()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		s.emitRunState(sessionID)
-		return nil
-	}
-
-	runnerKind := runnerKindForMode(mode)
-	runner := runnerForKind(bundle, runnerKind)
-	if runner == nil {
-		startCancel()
-		s.mu.Lock()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		s.emitRunState(sessionID)
-		return fmt.Errorf("runner %s unavailable for bundle generation %d", runnerKind, bundle.Generation)
-	}
-
-	// Create a cancellable context with session identity
-	runCtx, cancel := context.WithCancel(baseCtx)
-	runCtx = contextWithSessionID(runCtx, sessionID)
-	runCtx = tools.ContextWithRuntimeObjective(runCtx, objective)
-	s.mu.Lock()
-	if startCtx.Err() != nil {
-		startCancel()
-		s.finalizeStartupLocked(sessionID)
-		s.mu.Unlock()
-		cancel()
-		s.emitRunState(sessionID)
-		return nil
-	}
-	done := make(chan struct{})
-	run, err = s.publishStartupLocked(sessionID, bundle, runnerKind, cancel, done)
-	s.mu.Unlock()
-	if err != nil {
-		startCancel()
-		cancel()
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil
-		}
-		return err
-	}
-	s.emitRunState(sessionID)
-	startCancel()
-
-	// Prepare messages
-	messages := s.prepareMessagesForRun(sessionID, run)
-	checkpointID := runID
-
-	// Launch the agent run in a goroutine
-	go func() {
-		defer close(done)
-		defer func() {
-			s.mu.Lock()
-			run.running = false
-			run.cancelFn = nil
-			run.currentAgent = ""
-			run.activeBundleGeneration = 0
-			run.activeRunnerKind = ""
-			s.cleanupRetiredBundlesLocked()
+		run = s.sessions[sessionID]
+		if run == nil {
 			s.mu.Unlock()
-			s.emitRunState(sessionID)
-		}()
-		defer cancel()
-		defer func() {
-			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-					"sessionId": sessionID,
-					"error":     fmt.Sprintf("Agent panic: %v", r),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-					"sessionId": sessionID,
-				})
-			}
-		}()
-
-		logger.Info("[CHAT] Agent run started",
-			"message_count", len(messages),
-			"mode", mode,
-			"session", sessionID,
-		)
-		startTime := time.Now()
-
-		events := runner.Run(runCtx, messages, adk.WithCheckPointID(checkpointID))
-
-		lastContent, transferCount, interrupted := s.processEventsForRun(events, checkpointID, run)
-
-		if interrupted {
-			return // Don't emit done — waiting for user response
+			return fmt.Errorf("session %s not found", sessionID)
 		}
-
-		// Add final assistant response to session's context engine
-		if lastContent != "" {
-			run.addAssistantMessage(lastContent)
+		if run.turnLoop == loop {
+			s.resetRuntimeTurnLoopLocked(run)
 		}
-
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-			"sessionId": sessionID,
-		})
-
-		logger.Info("[CHAT] Agent run completed",
-			"duration_ms", time.Since(startTime).Milliseconds(),
-			"transfer_count", transferCount,
-			"has_response", lastContent != "",
-			"session", sessionID,
-		)
-
-		// Notify listeners (e.g. session auto-save) with sessionID
-		s.mu.Lock()
-		doneFn := s.onAgentDone
+		loop = s.ensureRuntimeTurnLoopLocked(sessionID, run)
 		s.mu.Unlock()
-		if doneFn != nil {
-			doneFn(sessionID)
-		}
-	}()
-
+		ok, _ = loop.Push(item)
+	}
+	if !ok {
+		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
+	}
+	s.mu.Lock()
+	if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
+		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	}
+	s.mu.Unlock()
+	s.emitRunState(sessionID)
 	return nil
 }
 
@@ -2234,6 +2123,7 @@ func (s *ChatService) handleInterruptForRun(interruptCtx *adk.InterruptCtx, chec
 		BundleGeneration: run.activeBundleGeneration,
 		RunnerKind:       run.activeRunnerKind,
 		Info:             interruptCtx.Info,
+		Objective:        run.currentObjective(),
 	}
 	run.activeBundleGeneration = 0
 	run.activeRunnerKind = ""
@@ -2308,116 +2198,32 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-	if run.running {
+	if run.running || run.starting {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
-	_, runner, pending, err := s.resolvePendingRunnerLocked(run)
-	if err != nil {
-		if run != nil {
-			run.pendingInterrupt = nil
-			s.cleanupRetiredBundlesLocked()
-		}
+	pending := run.pendingInterrupt
+	if pending == nil {
 		s.mu.Unlock()
-		return err
+		return fmt.Errorf("no pending interrupt to resume")
 	}
-	run.pendingInterrupt = nil
-	run.activeBundleGeneration = pending.BundleGeneration
-	run.activeRunnerKind = pending.RunnerKind
 	sessionID := run.sessionID
+	item := s.newRuntimeResumeAnswerItem(sessionID, pending, answer)
+	run.pendingInterrupt = nil
+	s.resetRuntimeTurnLoopLocked(run)
+	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
 
-	// Build resume data with user's answer
-	resumeData := &tools.FollowUpInfo{
-		UserAnswer: answer,
+	logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer), "session", sessionID)
+	if ok, _ := loop.Push(item); !ok {
+		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
-	if info, ok := pending.Info.(*tools.FollowUpInfo); ok {
-		resumeData.Questions = info.Questions
-	}
-
-	runCtx, cancel := context.WithCancel(s.ctx)
-	runCtx = contextWithSessionID(runCtx, sessionID)
-	runCtx = tools.ContextWithRuntimeObjective(runCtx, run.currentObjective())
 	s.mu.Lock()
-	run.cancelFn = cancel
-	run.running = true
-	done := make(chan struct{})
-	run.runDone = done
+	if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
+		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	}
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
-
-	go func() {
-		defer close(done)
-		defer func() {
-			s.mu.Lock()
-			run.running = false
-			run.cancelFn = nil
-			run.currentAgent = ""
-			run.activeBundleGeneration = 0
-			run.activeRunnerKind = ""
-			s.cleanupRetiredBundlesLocked()
-			s.mu.Unlock()
-			s.emitRunState(sessionID)
-		}()
-		defer cancel()
-		defer func() {
-			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-					"sessionId": sessionID,
-					"error":     fmt.Sprintf("Resume panic: %v", r),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-					"sessionId": sessionID,
-				})
-			}
-		}()
-
-		logger.Info("[CHAT] Resuming after follow-up", "answer_length", len(answer), "session", sessionID)
-		startTime := time.Now()
-
-		events, err := runner.ResumeWithParams(runCtx, pending.CheckpointID, &adk.ResumeParams{
-			Targets: map[string]any{
-				pending.InterruptID: resumeData,
-			},
-		})
-		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-				"sessionId": sessionID,
-				"error":     fmt.Sprintf("Resume failed: %v", err),
-			})
-			wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-				"sessionId": sessionID,
-			})
-			return
-		}
-
-		lastContent, transferCount, interrupted := s.processEventsForRun(events, pending.CheckpointID, run)
-
-		if interrupted {
-			return
-		}
-
-		if lastContent != "" {
-			run.addAssistantMessage(lastContent)
-		}
-
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-			"sessionId": sessionID,
-		})
-		logger.Info("[CHAT] Resume completed",
-			"duration_ms", time.Since(startTime).Milliseconds(),
-			"transfer_count", transferCount,
-			"session", sessionID,
-		)
-
-		s.mu.Lock()
-		doneFn := s.onAgentDone
-		s.mu.Unlock()
-		if doneFn != nil {
-			doneFn(sessionID)
-		}
-	}()
-
 	return nil
 }
 
@@ -2429,117 +2235,32 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no active session")
 	}
-	if run.running {
+	if run.running || run.starting {
 		s.mu.Unlock()
 		return fmt.Errorf("agent is already running in this session")
 	}
-	_, runner, pending, err := s.resolvePendingRunnerLocked(run)
-	if err != nil {
-		if run != nil {
-			run.pendingInterrupt = nil
-			s.cleanupRetiredBundlesLocked()
-		}
+	pending := run.pendingInterrupt
+	if pending == nil {
 		s.mu.Unlock()
-		return err
+		return fmt.Errorf("no pending interrupt to resume")
 	}
-	run.pendingInterrupt = nil
-	run.activeBundleGeneration = pending.BundleGeneration
-	run.activeRunnerKind = pending.RunnerKind
 	sessionID := run.sessionID
+	item := s.newRuntimeResumeChoiceItem(sessionID, pending, selectedIndex)
+	run.pendingInterrupt = nil
+	s.resetRuntimeTurnLoopLocked(run)
+	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
 
-	// Build resume data with user's selection
-	resumeData := &tools.ChoiceInfo{
-		Selected: selectedIndex,
+	logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex, "session", sessionID)
+	if ok, _ := loop.Push(item); !ok {
+		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
-	if info, ok := pending.Info.(*tools.ChoiceInfo); ok {
-		resumeData.Question = info.Question
-		resumeData.Options = info.Options
-	}
-
-	runCtx, cancel := context.WithCancel(s.ctx)
-	runCtx = contextWithSessionID(runCtx, sessionID)
-	runCtx = tools.ContextWithRuntimeObjective(runCtx, run.currentObjective())
 	s.mu.Lock()
-	run.cancelFn = cancel
-	run.running = true
-	done := make(chan struct{})
-	run.runDone = done
+	if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
+		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	}
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
-
-	go func() {
-		defer close(done)
-		defer func() {
-			s.mu.Lock()
-			run.running = false
-			run.cancelFn = nil
-			run.currentAgent = ""
-			run.activeBundleGeneration = 0
-			run.activeRunnerKind = ""
-			s.cleanupRetiredBundlesLocked()
-			s.mu.Unlock()
-			s.emitRunState(sessionID)
-		}()
-		defer cancel()
-		defer func() {
-			if r := recover(); r != nil {
-				wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-					"sessionId": sessionID,
-					"error":     fmt.Sprintf("Resume panic: %v", r),
-				})
-				wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-					"sessionId": sessionID,
-				})
-			}
-		}()
-
-		logger.Info("[CHAT] Resuming after choice", "selected", selectedIndex, "session", sessionID)
-		startTime := time.Now()
-
-		events, err := runner.ResumeWithParams(runCtx, pending.CheckpointID, &adk.ResumeParams{
-			Targets: map[string]any{
-				pending.InterruptID: resumeData,
-			},
-		})
-		if err != nil {
-			wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
-				"sessionId": sessionID,
-				"error":     fmt.Sprintf("Resume failed: %v", err),
-			})
-			wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-				"sessionId": sessionID,
-			})
-			return
-		}
-
-		lastContent, transferCount, interrupted := s.processEventsForRun(events, pending.CheckpointID, run)
-
-		if interrupted {
-			return
-		}
-
-		if lastContent != "" {
-			run.addAssistantMessage(lastContent)
-		}
-
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
-			"sessionId": sessionID,
-		})
-		logger.Info("[CHAT] Resume completed",
-			"duration_ms", time.Since(startTime).Milliseconds(),
-			"transfer_count", transferCount,
-			"session", sessionID,
-		)
-
-		s.mu.Lock()
-		doneFn := s.onAgentDone
-		s.mu.Unlock()
-		if doneFn != nil {
-			doneFn(sessionID)
-		}
-	}()
-
 	return nil
 }
 
@@ -2558,6 +2279,8 @@ func (s *ChatService) StopGeneration() error {
 	if run.starting {
 		if run.cancelFn != nil {
 			run.cancelFn()
+		} else if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
 		}
 		done := run.startDone
 		s.mu.Unlock()
@@ -2574,14 +2297,20 @@ func (s *ChatService) StopGeneration() error {
 		sessionID := run.sessionID
 		hadInterrupt := run.pendingInterrupt != nil
 		run.pendingInterrupt = nil
+		if hadInterrupt {
+			s.resetRuntimeTurnLoopLocked(run)
+		}
 		s.cleanupRetiredBundlesLocked()
 		s.mu.Unlock()
 		if hadInterrupt {
+			s.deleteRuntimeTurnCheckpoint(sessionID)
 			s.emitRunState(sessionID)
 		}
 		return nil
 	}
-	if run.cancelFn != nil {
+	if run.turnLoop != nil {
+		run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
+	} else if run.cancelFn != nil {
 		run.cancelFn()
 	}
 	run.pendingInterrupt = nil
@@ -2610,6 +2339,8 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 	if run.starting {
 		if run.cancelFn != nil {
 			run.cancelFn()
+		} else if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
 		}
 		done := run.startDone
 		s.mu.Unlock()
@@ -2623,10 +2354,21 @@ func (s *ChatService) StopSessionGeneration(sessionID string) {
 		return
 	}
 	if !run.running {
+		hadInterrupt := run.pendingInterrupt != nil
+		run.pendingInterrupt = nil
+		if hadInterrupt {
+			s.resetRuntimeTurnLoopLocked(run)
+		}
 		s.mu.Unlock()
+		if hadInterrupt {
+			s.deleteRuntimeTurnCheckpoint(sessionID)
+			s.emitRunState(sessionID)
+		}
 		return
 	}
-	if run.cancelFn != nil {
+	if run.turnLoop != nil {
+		run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
+	} else if run.cancelFn != nil {
 		run.cancelFn()
 	}
 	run.pendingInterrupt = nil
@@ -2659,12 +2401,14 @@ func (s *ChatService) ClearHistory() error {
 
 	run.clearSessionState()
 	run.pendingInterrupt = nil
+	s.resetRuntimeTurnLoopLocked(run)
 	s.invalidateRunners()
 	s.cleanupRetiredBundlesLocked()
 	sessionID := s.activeSessionID
 	sessionSvc := s.sessionService
 	s.mu.Unlock()
 
+	s.deleteRuntimeTurnCheckpoint(sessionID)
 	tools.ClearTodosForSession(sessionID)
 	if sessionSvc != nil && sessionID != "" {
 		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {

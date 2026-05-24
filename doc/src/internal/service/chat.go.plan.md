@@ -8,8 +8,8 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 实现 `ChatService`，负责多会话聊天、runner 生命周期、事件流转、中断恢复、mode 切换。
-- 维护共享 runner 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
+- 实现 `ChatService`，负责多会话聊天、TurnLoop 生命周期、事件流转、中断恢复、mode 切换。
+- 维护共享 runtime bundle 与 per-session `SessionRun`，其中 discovery 采用 `SessionData.DiscoveredTools` 持久化、`SessionRun.discoveredTools` 内存态、每次模型调用前按 session 现算。
 - 维护 deferred MCP/runtime surface 的 session state、discovery state 和 permission state；具体 catalog/runner 组装委托给 `runtimeBundleBuilder`。
 - Runtime V2 core/deferred tool catalog、Eino v0.9 `tool_search` bridge、permission gate 和 top-level runner 安装由 `runtime_bundle_builder.go` 承接。
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
@@ -86,15 +86,21 @@
   - `activeBundleGeneration`
   - `activeRunnerKind`
   用于运行中引用 bundle；interrupt 挂起后引用转移到 `PendingInterrupt`
-- `SessionRun` 在 run 真正启动前还会记录 `pendingStartBundleGeneration`：
+- `SessionRun` 维护一个可重建 Eino TurnLoop：
+  - normal user turn 在 `GenInput` 里创建 objective、准备 bundle、组装 messages
+  - running 状态下的新消息通过 TurnLoop preempt 进入下一 turn
+  - interrupt 由 TurnLoop checkpoint 保存，resume 使用 interrupted objective 而不是 mutable 当前 session objective
+  - user stop 使用 skip-checkpoint，避免显式取消后误恢复旧 turn
+- `SessionRun` 在 turn 真正启动前还会记录 `pendingStartBundleGeneration`：
   - 只对最终返回给这次 run 的 bundle 建立临时引用
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`
   - 启动放弃、session 删除、runner/context 创建失败时立即清掉并触发 retired cleanup
 - `contextWithSessionID(...)` 是所有 per-model-call deferred 计算的唯一 sessionID 注入入口；下游只能从 `context.Context` 读取，不从 shared runner 或全局 active session 推断。
-- shared runner 已收敛为 `RunnerBundle`：
+- shared runtime bundle 已收敛为 `RunnerBundle`：
   - `Generation`
   - `ConfigDigest`
-  - `DefaultRunner` / `PlanRunner`
+  - `DefaultAgent` / `PlanAgent`
+  - legacy `DefaultRunner` / `PlanRunner` 仅保留兼容旧测试和 helper 路径，顶层 session 执行不再使用
   - `MCPCatalog`
   - `MCPHandles`
   - `LastFreshnessCheckAt`

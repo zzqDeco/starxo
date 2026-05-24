@@ -8,6 +8,8 @@
 
 ## Behavior
 - `BuildRuntimeAgent` assembles direct runtime tools, ToolSearch middleware, context middleware, and `RuntimeBehaviorMiddleware`.
+- Top-level session execution is now driven by Eino `TurnLoop`; `ChatModelAgent` remains the inner ReAct agent for each turn.
+- TurnLoop owns user turn queueing, safe-point preemption, explicit stop, interrupt checkpointing, and resume dispatch.
 - `<current-objective>` is pinned before model calls so older messages are treated as historical context unless the current turn is a continuation.
 - `ask_user` and `ask_choice` reject prompts that clearly pursue stale debug/release/review work unrelated to the active objective.
 - `Agent` supports two delegation styles:
@@ -22,6 +24,7 @@
 - Generation-bound tool provider code lives in `runtime_tool_provider.go`; Eino v0.9 ToolSearch bridge code lives in `runtime_toolsearch_eino.go`.
 - Forked subagents use a dedicated `RuntimeForkAgentPrompt` plus direct ask/notify/todo tools; the prompt no longer advertises recursive Agent delegation.
 - Subagent mode is monotonic: explicit plan can tighten default sessions, but explicit default cannot lower a parent plan session. The effective mode is propagated through provider and permission contexts.
+- `runtime_turn_loop.go` isolates TurnLoop lifecycle from `chat.go`; subagent sync execution intentionally remains on a local runner.
 
 ## Validation
 - Added targeted tests for standalone objective isolation, continuation inheritance, compact sidecar filtering, ask guard behavior, Agent fork normalization, and active objective cloning.

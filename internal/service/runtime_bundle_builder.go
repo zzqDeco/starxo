@@ -92,12 +92,8 @@ func (b *runtimeBundleBuilder) Build(ctx context.Context) (*RunnerBundle, error)
 		return b.closeWithError(err)
 	}
 
-	bundle.DefaultRunner = agent.BuildDefaultRunner(ctx, defaultAgent, b.chat.checkpointStore)
-	bundle.PlanRunner, err = agent.BuildPlanRunner(ctx, mdl, planAgent, ac, b.chat.checkpointStore)
-	if err != nil {
-		logger.Error("[RUNNER] Failed to build runtime plan runner", err)
-		return b.closeWithError(fmt.Errorf("failed to build runtime plan runner: %w", err))
-	}
+	bundle.DefaultAgent = defaultAgent
+	bundle.PlanAgent = planAgent
 	bundle.LastFreshnessCheckAt = b.chat.now()
 
 	b.emitMCPHandleErrors(bundle)

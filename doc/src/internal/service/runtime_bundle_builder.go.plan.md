@@ -6,12 +6,12 @@
 - 所属模块: service
 
 ## 2. 核心职责
-- 封装 `RunnerBundle` 构建流程，让 `ChatService` 不直接承载 runtime catalog、ToolSearch middleware 和 runner 装配细节。
+- 封装 `RunnerBundle` 构建流程，让 `ChatService` 不直接承载 runtime catalog、ToolSearch middleware 和 agent 装配细节。
 - 按固定顺序组装 runtime core tools、`Agent` tool、deferred runtime tools、web tools、MCP action/resource tools 和 dev-only sample。
 - 构建 default/plan 两套 runtime handlers，并把顶层 agent 交给 `buildTopLevelRuntimeAgents(...)`。
 
 ## 3. 关键实现细节
-- `Build(...)` 负责创建 chat model、探测 agentic beta protocol、构造 generation-bound `deferredMCPProvider`、设置 LSP config、构造 subagent registry、安装 runner。
+- `Build(...)` 负责创建 chat model、探测 agentic beta protocol、构造 generation-bound `deferredMCPProvider`、设置 LSP config、构造 subagent registry、安装 default/plan `ChatModelAgent`。
 - `buildRuntimeCatalog(...)` 只负责 catalog 组装和 permission wrapper，不直接启动 runner。
 - `buildRuntimeHandlers(...)` 只负责 dynamic MCP surface 与 Eino v0.9 ToolSearch bridge。
 - `registerWrappedCatalogEntries(...)` 统一 catalog 注册错误文案，避免各类 runtime/MCP tool 分散重复注册逻辑。
