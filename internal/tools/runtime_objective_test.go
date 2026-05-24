@@ -81,3 +81,28 @@ func TestRuntimeObjectiveGuardUsesWordBoundaries(t *testing.T) {
 		t.Fatalf("expected stage to avoid matching tag, msg=%q", msg)
 	}
 }
+
+func TestRuntimeObjectiveToolGuardAllowsPlanReviewText(t *testing.T) {
+	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
+		ID:        "obj-1",
+		Objective: "implement a small file change",
+		Scope:     "standalone",
+	})
+
+	args := `{"plan":"1. Review current files\n2. Edit hello.txt\n3. Run verification"}`
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "ExitPlanMode", args); !ok {
+		t.Fatalf("expected normal plan review wording to be allowed, msg=%q", msg)
+	}
+}
+
+func TestRuntimeObjectiveToolGuardKeepsHighConfidenceReviewStale(t *testing.T) {
+	ctx := ContextWithRuntimeObjective(context.Background(), &model.RunObjective{
+		ID:        "obj-1",
+		Objective: "implement a small file change",
+		Scope:     "standalone",
+	})
+
+	if msg, ok := RuntimeObjectiveToolGuard(ctx, "Bash", `{"command":"codex review"}`); ok {
+		t.Fatalf("expected codex review stale call to be rejected, msg=%q", msg)
+	}
+}

@@ -78,9 +78,9 @@ func objectiveQuestionLooksStale(objective, text string) bool {
 		return false
 	}
 	staleFamilies := [][]string{
-		{"debug", "failing test", "failing tests", "test failure", "tests failing", "测试失败", "失败的测试"},
-		{"release", "tag", "publish", "发布"},
-		{"review", "codex review", "pr review", "审查"},
+		{"failing test", "failing tests", "test failure", "tests failing", "debug failing tests", "测试失败", "失败的测试"},
+		{"release tag", "github release", "publish release", "create release", "发布版本", "发布 release"},
+		{"codex review", "pr review", "review comment", "review comments", "review finding", "review findings"},
 	}
 	for _, family := range staleFamilies {
 		textHit := false
