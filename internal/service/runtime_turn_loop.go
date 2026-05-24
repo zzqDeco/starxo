@@ -19,7 +19,8 @@ const (
 	runtimeTurnKindResumeAnswer = "resume_answer"
 	runtimeTurnKindResumeChoice = "resume_choice"
 
-	runtimeTurnPreemptTimeout = 15 * time.Second
+	runtimeTurnPreemptTimeout        = 15 * time.Second
+	runtimeTurnStartupPreemptTimeout = 5 * time.Second
 )
 
 type runtimeTurnItem struct {
@@ -203,6 +204,13 @@ func (s *ChatService) runtimeTurnLoopGenInput(sessionID string) func(context.Con
 		bundle, err := s.ensureBundleReadyForNewRun(startCtx, sessionID)
 		if err != nil {
 			startCancel()
+			s.mu.Lock()
+			s.finalizeStartupLocked(sessionID)
+			s.mu.Unlock()
+			s.emitRunState(sessionID)
+			return nil, err
+		}
+		if err := startCtx.Err(); err != nil {
 			s.mu.Lock()
 			s.finalizeStartupLocked(sessionID)
 			s.mu.Unlock()

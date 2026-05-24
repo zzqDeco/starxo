@@ -13,8 +13,9 @@
 - A fresh non-preempt user turn discards any stale session TurnLoop checkpoint before starting, so old interrupted state cannot hijack a new standalone request into an invalid resume path.
 - A replaced/stale TurnLoop can exit from context cancellation without surfacing a false agent error to the UI.
 - Preempted turns suppress false completion events and remove unresolved tool-call groups instead of injecting synthetic tool failures into the next turn.
+- Replacement messages received during startup cancel the startup wait before queueing the new objective, so stale startup work cannot run ahead of the latest turn.
 - Resume keeps `pendingInterrupt` until the resume item is queued and the TurnLoop is ready to run, so failed enqueue attempts remain retryable.
-- Removing a session stops its persistent TurnLoop and deletes its runtime checkpoint.
+- Removing a session stops its persistent TurnLoop, finalizes active run waiters, and deletes its runtime checkpoint.
 - User turns and current objectives are recorded before runner bundle startup so model/config/sandbox initialization failures do not drop the just-submitted request.
 - `<current-objective>` is pinned before model calls so older messages are treated as historical context unless the current turn is a continuation.
 - `ask_user` and `ask_choice` reject prompts that clearly pursue stale debug/release/review work unrelated to the active objective.

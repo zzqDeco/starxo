@@ -1172,6 +1172,9 @@ func (s *ChatService) RemoveSession(sessionID string) {
 		} else if run.cancelFn != nil {
 			run.cancelFn()
 		}
+		if run.running || run.starting {
+			s.finishRuntimeTurnLocked(run)
+		}
 		if run.startDone != nil {
 			close(run.startDone)
 			run.startDone = nil
@@ -1322,72 +1325,93 @@ func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration
 
 // SendMessage processes a user message through the agent and streams results to the frontend.
 func (s *ChatService) SendMessage(userMessage string) error {
-	s.mu.Lock()
-	if s.activeSessionID == "" {
-		s.mu.Unlock()
-		return fmt.Errorf("no active session")
-	}
-	run := s.activeRun()
-	if run == nil {
-		s.mu.Unlock()
-		return fmt.Errorf("no active session")
-	}
-	sessionID := run.sessionID
-	preempt := run.running || run.starting
-	clearPendingInterrupt := run.pendingInterrupt != nil && !preempt
-	if clearPendingInterrupt {
-		run.pendingInterrupt = nil
-		s.resetRuntimeTurnLoopLocked(run)
-	}
-	item := s.newRuntimeUserTurnItem(sessionID, userMessage)
-	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
-	logger.Info("[CHAT] User message received",
-		"length", len(userMessage),
-		"preview", truncateResult(userMessage, 100),
-		"session", sessionID,
-	)
-	s.mu.Unlock()
-
-	if !preempt {
-		s.deleteRuntimeTurnCheckpoint(sessionID)
-	}
-	ok := false
-	if preempt {
-		var ack <-chan struct{}
-		ok, ack = loop.Push(item, adk.WithPreemptTimeout[runtimeTurnItem, *schema.Message](adk.AfterToolCalls, runtimeTurnPreemptTimeout))
-		if ack != nil {
-			go func() {
-				<-ack
-				logger.Info("[CHAT] Runtime turn preempt acknowledged", "session", sessionID)
-			}()
-		}
-	} else {
-		ok, _ = loop.Push(item)
-	}
-	if !ok {
+	for {
 		s.mu.Lock()
-		run = s.sessions[sessionID]
+		if s.activeSessionID == "" {
+			s.mu.Unlock()
+			return fmt.Errorf("no active session")
+		}
+		run := s.activeRun()
 		if run == nil {
 			s.mu.Unlock()
-			return fmt.Errorf("session %s not found", sessionID)
+			return fmt.Errorf("no active session")
 		}
-		if run.turnLoop == loop {
+		sessionID := run.sessionID
+		if run.starting && !run.running {
+			if run.cancelFn != nil {
+				run.cancelFn()
+			} else if run.turnLoop != nil {
+				run.turnLoop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
+			}
+			done := run.startDone
+			logger.Info("[CHAT] Canceling startup before replacing objective", "session", sessionID)
+			s.mu.Unlock()
+			if done != nil {
+				select {
+				case <-done:
+				case <-time.After(runtimeTurnStartupPreemptTimeout):
+					return fmt.Errorf("previous agent startup is still canceling for session %s", sessionID)
+				}
+			}
+			s.emitRunState(sessionID)
+			continue
+		}
+		preempt := run.running
+		clearPendingInterrupt := run.pendingInterrupt != nil && !preempt
+		if clearPendingInterrupt {
+			run.pendingInterrupt = nil
 			s.resetRuntimeTurnLoopLocked(run)
 		}
-		loop = s.ensureRuntimeTurnLoopLocked(sessionID, run)
+		item := s.newRuntimeUserTurnItem(sessionID, userMessage)
+		loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
+		logger.Info("[CHAT] User message received",
+			"length", len(userMessage),
+			"preview", truncateResult(userMessage, 100),
+			"session", sessionID,
+		)
 		s.mu.Unlock()
-		ok, _ = loop.Push(item)
+
+		if !preempt {
+			s.deleteRuntimeTurnCheckpoint(sessionID)
+		}
+		ok := false
+		if preempt {
+			var ack <-chan struct{}
+			ok, ack = loop.Push(item, adk.WithPreemptTimeout[runtimeTurnItem, *schema.Message](adk.AfterToolCalls, runtimeTurnPreemptTimeout))
+			if ack != nil {
+				go func() {
+					<-ack
+					logger.Info("[CHAT] Runtime turn preempt acknowledged", "session", sessionID)
+				}()
+			}
+		} else {
+			ok, _ = loop.Push(item)
+		}
+		if !ok {
+			s.mu.Lock()
+			run = s.sessions[sessionID]
+			if run == nil {
+				s.mu.Unlock()
+				return fmt.Errorf("session %s not found", sessionID)
+			}
+			if run.turnLoop == loop {
+				s.resetRuntimeTurnLoopLocked(run)
+			}
+			loop = s.ensureRuntimeTurnLoopLocked(sessionID, run)
+			s.mu.Unlock()
+			ok, _ = loop.Push(item)
+		}
+		if !ok {
+			return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
+		}
+		s.mu.Lock()
+		if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
+			s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+		}
+		s.mu.Unlock()
+		s.emitRunState(sessionID)
+		return nil
 	}
-	if !ok {
-		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
-	}
-	s.mu.Lock()
-	if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
-		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
-	}
-	s.mu.Unlock()
-	s.emitRunState(sessionID)
-	return nil
 }
 
 // ---------------------------------------------------------------------------

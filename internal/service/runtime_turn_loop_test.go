@@ -26,6 +26,24 @@ func (runtimeTurnTestAgent) Run(context.Context, *adk.AgentInput, ...adk.AgentRu
 	return iter
 }
 
+type runtimeTurnRecordingAgent struct {
+	calls chan []*schema.Message
+}
+
+func (a *runtimeTurnRecordingAgent) Name(context.Context) string { return "runtime_turn_recording" }
+func (a *runtimeTurnRecordingAgent) Description(context.Context) string {
+	return "runtime turn recording agent"
+}
+func (a *runtimeTurnRecordingAgent) Run(_ context.Context, input *adk.AgentInput, _ ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
+	if a.calls != nil {
+		messages := append([]*schema.Message(nil), input.Messages...)
+		a.calls <- messages
+	}
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	go gen.Close()
+	return iter
+}
+
 func TestRuntimeTurnLoopGenResumeUsesInterruptedObjective(t *testing.T) {
 	chat := NewChatService(nil)
 	sessionID := "sess-turn-resume"
@@ -118,6 +136,74 @@ func TestRuntimeTurnLoopGenInputPersistsUserTurnBeforeBundleFailure(t *testing.T
 	if objective == nil || objective.UserMessageID != item.UserTurnID || objective.Objective != item.UserMessage {
 		t.Fatalf("expected objective to persist before bundle failure, got %#v", objective)
 	}
+}
+
+func TestSendMessageCancelsStartupBeforeReplacementTurn(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	chat.SetContext(context.Background())
+	sessionID := "sess-startup-replace"
+	chat.SetActiveSessionID(sessionID)
+	targetDigest := mustConfigDigest(t, chat)
+	enteredBuild := make(chan struct{}, 1)
+	releaseBuild := make(chan struct{})
+	recorder := &runtimeTurnRecordingAgent{calls: make(chan []*schema.Message, 2)}
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		select {
+		case enteredBuild <- struct{}{}:
+		default:
+		}
+		<-releaseBuild
+		return &RunnerBundle{
+			ConfigDigest: targetDigest,
+			DefaultAgent: recorder,
+			PlanAgent:    recorder,
+		}, nil
+	}
+
+	if err := chat.SendMessage("first stale startup objective"); err != nil {
+		t.Fatalf("send first message: %v", err)
+	}
+	select {
+	case <-enteredBuild:
+	case <-time.After(time.Second):
+		t.Fatalf("expected first startup to begin bundle preparation")
+	}
+	if err := chat.SendMessage("second replacement objective"); err != nil {
+		t.Fatalf("send replacement message: %v", err)
+	}
+	close(releaseBuild)
+
+	var messages []*schema.Message
+	select {
+	case messages = <-recorder.calls:
+	case <-time.After(time.Second):
+		t.Fatalf("expected replacement turn to run after startup cancellation")
+	}
+	if !runtimeTurnMessagesContain(messages, "second replacement objective") {
+		t.Fatalf("expected replacement objective in agent input, got %#v", messages)
+	}
+	select {
+	case extra := <-recorder.calls:
+		t.Fatalf("expected stale startup turn not to run, got extra call %#v", extra)
+	case <-time.After(100 * time.Millisecond):
+	}
+	chat.mu.Lock()
+	run := chat.sessions[sessionID]
+	chat.mu.Unlock()
+	objective := run.currentObjective()
+	if objective == nil || objective.Objective != "second replacement objective" {
+		t.Fatalf("expected active objective to be replacement, got %#v", objective)
+	}
+}
+
+func runtimeTurnMessagesContain(messages []*schema.Message, content string) bool {
+	for _, msg := range messages {
+		if msg != nil && msg.Content == content {
+			return true
+		}
+	}
+	return false
 }
 
 type runtimeTurnTrackingCheckpointStore struct {
@@ -266,5 +352,34 @@ func TestRemoveSessionStopsIdleRuntimeTurnLoop(t *testing.T) {
 	chat.mu.Unlock()
 	if exists {
 		t.Fatalf("expected session to be removed")
+	}
+}
+
+func TestRemoveSessionFinalizesActiveRuntimeTurnLoopRun(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-remove-active-loop"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	loop := chat.ensureRuntimeTurnLoopLocked(sessionID, run)
+	chat.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	run.running = true
+	run.runDone = make(chan struct{})
+	runDone := run.runDone
+	loopDone := run.turnLoopDone
+	chat.mu.Unlock()
+	if runDone == nil || loopDone == nil {
+		t.Fatalf("expected active run and turn loop done channels")
+	}
+
+	chat.RemoveSession(sessionID)
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatalf("expected active run completion channel to close when session is removed")
+	}
+	select {
+	case <-loopDone:
+	case <-time.After(time.Second):
+		t.Fatalf("expected active runtime turn loop to stop when session is removed")
 	}
 }
