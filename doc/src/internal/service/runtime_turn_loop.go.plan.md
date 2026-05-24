@@ -17,6 +17,8 @@
 - 普通新 user turn 在启动前由 `ChatService.SendMessage` 丢弃旧 checkpoint；这样内存 pending interrupt 丢失或 checkpoint 残留时，新请求会走正常 `GenInput` 而不是无 payload 的 `GenResume`。
 - `StopGeneration` 使用 `WithImmediate + WithSkipCheckpoint`，用户显式停止不会留下可恢复 checkpoint。
 - 被 reset 替换掉的旧 TurnLoop 退出时视为 stale loop，只做后台收敛，不再向 UI 发 `agent:error` / `agent:done`。
+- preempted turn 通过 `TurnContext.Preempted` 识别；该路径只收敛 run state，不写 assistant completion、不触发 done callback。
+- preempted turn 若已有未完成 tool call，会从历史中移除对应 tool-call group，而不是注入“tool execution failed”合成结果。
 
 ## 4. 维护边界
 - subagent 内部同步执行仍使用局部 runner，本文件只迁移顶层 ChatService session loop。

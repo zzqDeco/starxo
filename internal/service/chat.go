@@ -221,6 +221,67 @@ func (r *SessionRun) addMessage(msg *schema.Message) {
 	r.ctxEngine.AddMessage(msg)
 }
 
+func (r *SessionRun) removeToolCallGroupsForIDs(toolCallIDs map[string]pendingRuntimeToolCall) int {
+	if len(toolCallIDs) == 0 {
+		return 0
+	}
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	history := r.ctxEngine.History()
+	msgs := history.GetAll()
+	removeIDs := make(map[string]struct{}, len(toolCallIDs))
+	for id := range toolCallIDs {
+		removeIDs[id] = struct{}{}
+	}
+	for _, msg := range msgs {
+		if msg == nil {
+			continue
+		}
+		removeGroup := false
+		for _, tc := range msg.ToolCalls {
+			if _, ok := toolCallIDs[tc.ID]; ok {
+				removeGroup = true
+				break
+			}
+		}
+		if !removeGroup {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID != "" {
+				removeIDs[tc.ID] = struct{}{}
+			}
+		}
+	}
+	filtered := make([]*schema.Message, 0, len(msgs))
+	removed := 0
+	for _, msg := range msgs {
+		if msg == nil {
+			filtered = append(filtered, msg)
+			continue
+		}
+		drop := false
+		for _, tc := range msg.ToolCalls {
+			if _, ok := removeIDs[tc.ID]; ok {
+				drop = true
+				break
+			}
+		}
+		if !drop && msg.ToolCallID != "" {
+			_, drop = removeIDs[msg.ToolCallID]
+		}
+		if drop {
+			removed++
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	if removed > 0 {
+		history.SetAll(filtered)
+	}
+	return removed
+}
+
 func (r *SessionRun) addUserTurn(id, content string, timestamp int64) {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
@@ -1103,8 +1164,12 @@ func (s *ChatService) GetOrCreateRun(sessionID string) *SessionRun {
 // RemoveSession removes a session's run state from memory.
 func (s *ChatService) RemoveSession(sessionID string) {
 	s.mu.Lock()
+	hadSession := false
 	if run, ok := s.sessions[sessionID]; ok {
-		if run.cancelFn != nil {
+		hadSession = true
+		if run.turnLoop != nil {
+			s.resetRuntimeTurnLoopLocked(run)
+		} else if run.cancelFn != nil {
 			run.cancelFn()
 		}
 		if run.startDone != nil {
@@ -1114,9 +1179,12 @@ func (s *ChatService) RemoveSession(sessionID string) {
 		run.starting = false
 		run.pendingStartBundleGeneration = 0
 	}
-	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
 	s.cleanupRetiredBundlesLocked()
+	s.mu.Unlock()
+	if hadSession {
+		s.deleteRuntimeTurnCheckpoint(sessionID)
+	}
 	tools.ClearTodosForSession(sessionID)
 }
 
@@ -1330,7 +1398,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 // session's timeline collector for backend persistence.
 func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 	evt.SessionID = run.sessionID
-	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	wailsEmit(s.ctx, "agent:timeline", evt)
 	if evt.Agent != "" {
 		agentChanged := false
 		s.mu.Lock()
@@ -1361,7 +1429,7 @@ func (s *ChatService) emitTimelineForRun(evt TimelineEvent, run *SessionRun) {
 // (for OnToolEvent callbacks where we only have context, not a run reference).
 func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string) {
 	evt.SessionID = sessionID
-	wailsruntime.EventsEmit(s.ctx, "agent:timeline", evt)
+	wailsEmit(s.ctx, "agent:timeline", evt)
 	s.mu.Lock()
 	run, ok := s.sessions[sessionID]
 	s.mu.Unlock()
@@ -1400,7 +1468,7 @@ func (s *ChatService) emitTimelineForSession(evt TimelineEvent, sessionID string
 // processEventsForRun consumes the event stream for a specific session run,
 // emits frontend events, and detects interrupts.
 // Returns the last message content, transfer count, and whether an interrupt occurred.
-func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string, run *SessionRun) (string, int, bool) {
+func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEvent], checkpointID string, run *SessionRun, preempted <-chan struct{}) (string, int, bool, bool) {
 	var allContents []string
 	var transferCount int
 	lastContentByAgent := make(map[string]string) // dedup
@@ -1450,7 +1518,7 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 			if event.Action.Interrupted != nil && len(event.Action.Interrupted.InterruptContexts) > 0 {
 				interruptCtx := event.Action.Interrupted.InterruptContexts[0]
 				s.handleInterruptForRun(interruptCtx, checkpointID, run)
-				return strings.Join(allContents, "\n\n"), transferCount, true
+				return strings.Join(allContents, "\n\n"), transferCount, true, runtimeTurnSignalClosed(preempted)
 			}
 
 			if event.Action.TransferToAgent != nil {
@@ -1630,15 +1698,22 @@ func (s *ChatService) processEventsForRun(events *adk.AsyncIterator[*adk.AgentEv
 
 	// Fix orphaned tool calls: inject synthetic error responses for any tool_call_ids
 	// that were stored but never received a matching tool result.
+	wasPreempted := runtimeTurnSignalClosed(preempted)
 	if len(pendingToolCalls) > 0 {
-		for toolCallID := range pendingToolCalls {
-			logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
-				"tool_call_id", toolCallID, "session", sessionID)
-			run.addToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+		if wasPreempted {
+			removed := run.removeToolCallGroupsForIDs(pendingToolCalls)
+			logger.Info("[CHAT] Dropped unresolved tool-call history for preempted turn",
+				"pending_tool_calls", len(pendingToolCalls), "removed_messages", removed, "session", sessionID)
+		} else {
+			for toolCallID := range pendingToolCalls {
+				logger.Warn("[CHAT] Injecting synthetic tool result for orphaned tool_call",
+					"tool_call_id", toolCallID, "session", sessionID)
+				run.addToolResult(toolCallID, "Error: tool execution failed or was interrupted")
+			}
 		}
 	}
 
-	return strings.Join(allContents, "\n\n"), transferCount, false
+	return strings.Join(allContents, "\n\n"), transferCount, false, wasPreempted
 }
 
 func (s *ChatService) recordToolSearchOutputForRun(run *SessionRun, msg *schema.Message) {
@@ -2209,7 +2284,6 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 	}
 	sessionID := run.sessionID
 	item := s.newRuntimeResumeAnswerItem(sessionID, pending, answer)
-	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
 	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
@@ -2219,9 +2293,16 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
 	s.mu.Lock()
-	if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
-		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	if run = s.sessions[sessionID]; run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
 	}
+	if run.turnLoop != loop {
+		s.mu.Unlock()
+		return fmt.Errorf("runtime turn loop changed for session %s", sessionID)
+	}
+	run.pendingInterrupt = nil
+	s.startRuntimeTurnLoopLocked(sessionID, run, loop)
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
 	return nil
@@ -2246,7 +2327,6 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 	}
 	sessionID := run.sessionID
 	item := s.newRuntimeResumeChoiceItem(sessionID, pending, selectedIndex)
-	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
 	loop := s.ensureRuntimeTurnLoopLocked(sessionID, run)
 	s.mu.Unlock()
@@ -2256,9 +2336,16 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		return fmt.Errorf("runtime turn loop is stopped for session %s", sessionID)
 	}
 	s.mu.Lock()
-	if run = s.sessions[sessionID]; run != nil && run.turnLoop == loop {
-		s.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	if run = s.sessions[sessionID]; run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
 	}
+	if run.turnLoop != loop {
+		s.mu.Unlock()
+		return fmt.Errorf("runtime turn loop changed for session %s", sessionID)
+	}
+	run.pendingInterrupt = nil
+	s.startRuntimeTurnLoopLocked(sessionID, run, loop)
 	s.mu.Unlock()
 	s.emitRunState(sessionID)
 	return nil

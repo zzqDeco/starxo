@@ -93,6 +93,9 @@
   - user stop 使用 skip-checkpoint，避免显式取消后误恢复旧 turn
   - 非 preempt 的普通新 user turn 会先删除 session 级 TurnLoop checkpoint，避免残留 interrupted checkpoint 把新请求误导入 resume 路径
   - reset/替换 TurnLoop 后，旧 loop 的 context cancellation 被视为 stale lifecycle，不会再污染前端为错误状态
+  - preempt 取消的 turn 不会写入 orphan tool_call 的合成失败结果，也不会发 `agent:done`
+  - resume 只有在 resume item 成功进入 TurnLoop 且即将启动时才清空 `pendingInterrupt`，失败时允许用户重试
+  - `RemoveSession(...)` 会停止 idle/running TurnLoop 并删除 session runtime checkpoint，避免 session 删除后残留 goroutine
 - `SessionRun` 在 turn 真正启动前还会记录 `pendingStartBundleGeneration`：
   - 只对最终返回给这次 run 的 bundle 建立临时引用
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`

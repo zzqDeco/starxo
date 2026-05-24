@@ -408,8 +408,17 @@ func (s *ChatService) runtimeTurnLoopOnAgentEvents(_ context.Context, tc *adk.Tu
 		"bundle_generation", item.BundleGeneration,
 	)
 	startTime := s.now()
-	lastContent, transferCount, interrupted := s.processEventsForRun(events, runtimeTurnCheckpointID(item.SessionID), run)
+	lastContent, transferCount, interrupted, preempted := s.processEventsForRun(events, runtimeTurnCheckpointID(item.SessionID), run, tc.Preempted)
 	if interrupted {
+		s.finishRuntimeTurn(item.SessionID, run)
+		return nil
+	}
+	if preempted || runtimeTurnSignalClosed(tc.Preempted) {
+		logger.Info("[CHAT] Agent turn preempted",
+			"duration_ms", time.Since(startTime).Milliseconds(),
+			"transfer_count", transferCount,
+			"session", item.SessionID,
+		)
 		s.finishRuntimeTurn(item.SessionID, run)
 		return nil
 	}
@@ -465,6 +474,18 @@ func (s *ChatService) finishRuntimeTurnLocked(run *SessionRun) {
 	if run.runDone != nil {
 		close(run.runDone)
 		run.runDone = nil
+	}
+}
+
+func runtimeTurnSignalClosed(ch <-chan struct{}) bool {
+	if ch == nil {
+		return false
+	}
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
 	}
 }
 

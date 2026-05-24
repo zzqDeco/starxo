@@ -33,12 +33,10 @@ func (p *deferredMCPProvider) RequestToolPermission(ctx context.Context, entry t
 	if sessionID != "" {
 		p.chat.mu.Lock()
 		run := p.chat.sessions[sessionID]
-		p.chat.mu.Unlock()
 		if run != nil {
-			run.stateMu.RLock()
 			mode = run.mode
-			run.stateMu.RUnlock()
 		}
+		p.chat.mu.Unlock()
 	}
 	if override, ok := runtimeModeOverrideFromContext(ctx); ok {
 		mode = override

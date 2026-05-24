@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
 
 	"starxo/internal/config"
 	"starxo/internal/model"
@@ -163,5 +164,74 @@ func TestSendMessageDeletesStaleRuntimeCheckpointBeforeNormalTurn(t *testing.T) 
 	}
 	if !checkpoints.deletedKey(runtimeTurnCheckpointID("sess-stale")) {
 		t.Fatalf("expected normal user turn to delete stale runtime checkpoint")
+	}
+}
+
+func TestProcessEventsForRunPreemptDropsUnresolvedToolCallHistory(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-preempt"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	chat.mu.Unlock()
+
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	go func() {
+		gen.Send(&adk.AgentEvent{
+			AgentName: "coding_agent",
+			Output: &adk.AgentOutput{MessageOutput: &adk.MessageVariant{Message: &schema.Message{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{{
+					ID:       "call-preempt",
+					Function: schema.FunctionCall{Name: "Bash", Arguments: `{"command":"sleep 10"}`},
+				}},
+			}}},
+		})
+		gen.Close()
+	}()
+	preempted := make(chan struct{})
+	close(preempted)
+
+	_, _, interrupted, wasPreempted := chat.processEventsForRun(iter, runtimeTurnCheckpointID(sessionID), run, preempted)
+	if interrupted {
+		t.Fatalf("did not expect interrupt")
+	}
+	if !wasPreempted {
+		t.Fatalf("expected preempted turn")
+	}
+	messages := run.ctxEngine.ExportMessages()
+	for _, msg := range messages {
+		if msg.ToolCallID == "call-preempt" || len(msg.ToolCalls) > 0 {
+			t.Fatalf("expected preempted unresolved tool call history to be removed, got %#v", messages)
+		}
+		if msg.Content == "Error: tool execution failed or was interrupted" {
+			t.Fatalf("expected no synthetic tool failure for preempted turn, got %#v", messages)
+		}
+	}
+}
+
+func TestRemoveSessionStopsIdleRuntimeTurnLoop(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-remove-loop"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	loop := chat.ensureRuntimeTurnLoopLocked(sessionID, run)
+	chat.startRuntimeTurnLoopLocked(sessionID, run, loop)
+	done := run.turnLoopDone
+	chat.mu.Unlock()
+	if done == nil {
+		t.Fatalf("expected runtime turn loop done channel")
+	}
+
+	chat.RemoveSession(sessionID)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("expected idle runtime turn loop to stop when session is removed")
+	}
+	chat.mu.Lock()
+	_, exists := chat.sessions[sessionID]
+	chat.mu.Unlock()
+	if exists {
+		t.Fatalf("expected session to be removed")
 	}
 }
