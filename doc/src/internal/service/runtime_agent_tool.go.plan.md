@@ -24,7 +24,9 @@
 - subagent definition 可限制 `allowedTools`，也可通过 `backgroundAllowed=false` 禁止后台执行。
 - `Agent` 是 always-load runtime tool，但执行仍会经过 permission wrapper。
 - 子 agent 使用同一个 Eino chat model，并按 subagent definition 注入允许的 Runtime V2/MCP always-load 工具；子工具同样走 permission gate、workspace guard 和 timeline event wrapper。
+- non-fork 子 agent 的 Eino ToolSearch 也按同一 `allowedTools` 策略过滤 deferred tools，避免子 agent 通过搜索发现 definition 之外的能力；fork 子 agent 才继承父 agent 的完整可搜索工具面。
 - omitted `subagent_type` 使用 `RuntimeAgentPrompt` fork 当前 objective；explicit `subagent_type` 使用 `RuntimeSubagentPrompt` 创建 fresh worker。
+- fork 子 agent 默认继承父会话 runtime mode；父会话在 plan mode 时，fork prompt 会继续使用 plan-mode 工具约束，除非调用方显式传入 `mode` override。
 - worktree isolation 会派生子 agent 专用 `AgentContext.WorkspacePath`，context middleware、tool wrapper 和 prompt 都使用隔离 worktree path，不污染父会话 workspace。
 - `background=true` 时调用 `runtimeTaskManager.StartAgentTask`，任务输出落盘到 runtime task output 文件。
 - `isolation=worktree` 时通过 `runtimeWorkspaceManager.CreateIsolatedWorktree` 创建 git worktree，并用 context-scoped workspace override 只影响当前子 agent；父 session 的 active workspace 不会被临时切走。

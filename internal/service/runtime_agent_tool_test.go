@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"starxo/internal/agent"
 	"starxo/internal/config"
+	"starxo/internal/model"
 	"starxo/internal/tools"
 )
 
@@ -161,6 +163,67 @@ func TestRuntimeSubagentToolsForkIgnoresDefaultAllowlist(t *testing.T) {
 	forkTools := NewChatService(nil).runtimeSubagentTools(provider, def, true)
 	if len(forkTools) != 2 {
 		t.Fatalf("expected fork to inherit all always-loaded context tools, got %d", len(forkTools))
+	}
+}
+
+func TestRuntimeSubagentToolSearchCandidatesHonorAllowlist(t *testing.T) {
+	catalog := tools.NewToolCatalog()
+	for _, entry := range []tools.CatalogEntry{
+		{
+			CanonicalName:  tools.RuntimeToolLSP,
+			ShouldDefer:    true,
+			PermissionSpec: tools.PermissionSpec{AllowSearch: true, AllowExecute: true},
+			Tool:           &stubTool{name: tools.RuntimeToolLSP},
+		},
+		{
+			CanonicalName:  tools.RuntimeToolWebSearch,
+			ShouldDefer:    true,
+			PermissionSpec: tools.PermissionSpec{AllowSearch: true, AllowExecute: true},
+			Tool:           &stubTool{name: tools.RuntimeToolWebSearch},
+		},
+	} {
+		if err := catalog.Register(entry); err != nil {
+			t.Fatalf("register catalog entry: %v", err)
+		}
+	}
+	def := agent.SubagentDefinition{Name: "reviewer", AllowedTools: []string{tools.RuntimeToolLSP}}
+
+	restricted := einoV09ToolSearchCandidatesFiltered(catalog, "default", runtimeSubagentCatalogEntryAllowed(def, false))
+	if len(restricted) != 1 {
+		t.Fatalf("expected restricted ToolSearch candidates to honor allowlist, got %d", len(restricted))
+	}
+	info, err := restricted[0].Info(context.Background())
+	if err != nil {
+		t.Fatalf("tool info: %v", err)
+	}
+	if info.Name != tools.RuntimeToolLSP {
+		t.Fatalf("expected only LSP candidate, got %q", info.Name)
+	}
+
+	forked := einoV09ToolSearchCandidatesFiltered(catalog, "default", runtimeSubagentCatalogEntryAllowed(def, true))
+	if len(forked) != 2 {
+		t.Fatalf("expected forked ToolSearch to inherit all candidates, got %d", len(forked))
+	}
+}
+
+func TestRuntimeSubagentModeInheritsParentPlanMode(t *testing.T) {
+	chat := NewChatService(nil)
+	sessionID := "sess-plan-subagent"
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.mode = model.ModePlan
+	chat.mu.Unlock()
+
+	provider := &deferredMCPProvider{chat: chat}
+	ctx := contextWithSessionID(context.Background(), sessionID)
+	if got := chat.runtimeSubagentMode(ctx, provider, ""); got != model.ModePlan {
+		t.Fatalf("expected subagent to inherit parent plan mode, got %q", got)
+	}
+	if got := runtimeSubagentDeepAgentMode(model.ModePlan); got != agent.DeepAgentModePlan {
+		t.Fatalf("expected plan prompt mode, got %q", got)
+	}
+	if got := chat.runtimeSubagentMode(ctx, provider, model.ModeDefault); got != model.ModeDefault {
+		t.Fatalf("expected explicit default mode override, got %q", got)
 	}
 }
 

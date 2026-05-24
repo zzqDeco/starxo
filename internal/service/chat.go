@@ -727,7 +727,11 @@ func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvi
 	if provider == nil || provider.bundle == nil || provider.bundle.MCPCatalog == nil {
 		return nil, nil
 	}
-	dynamicTools := einoV09ToolSearchCandidates(provider.bundle.MCPCatalog, mode)
+	return newEinoV09ToolSearchHandlerForCatalog(ctx, provider.bundle.MCPCatalog, mode, toolSearchMode, agenticProtocol, nil)
+}
+
+func newEinoV09ToolSearchHandlerForCatalog(ctx context.Context, catalog *tools.ToolCatalog, mode, toolSearchMode, agenticProtocol string, allowEntry func(tools.CatalogEntry) bool) (adk.ChatModelAgentMiddleware, error) {
+	dynamicTools := einoV09ToolSearchCandidatesFiltered(catalog, mode, allowEntry)
 	if len(dynamicTools) == 0 {
 		return nil, nil
 	}
@@ -741,6 +745,10 @@ func newEinoV09ToolSearchHandler(ctx context.Context, provider *deferredMCPProvi
 }
 
 func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, mode string) []einotool.BaseTool {
+	return einoV09ToolSearchCandidatesFiltered(catalog, mode, nil)
+}
+
+func einoV09ToolSearchCandidatesFiltered(catalog *tools.ToolCatalog, mode string, allowEntry func(tools.CatalogEntry) bool) []einotool.BaseTool {
 	if catalog == nil {
 		return nil
 	}
@@ -751,6 +759,9 @@ func einoV09ToolSearchCandidates(catalog *tools.ToolCatalog, mode string) []eino
 			continue
 		}
 		if !einoV09PotentiallySearchable(entry, mode) {
+			continue
+		}
+		if allowEntry != nil && !allowEntry(entry) {
 			continue
 		}
 		dynamicTools = append(dynamicTools, entry.Tool)

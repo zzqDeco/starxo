@@ -197,12 +197,16 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	}
 	subTools = agent.WrapToolsWithEvents(agentID, subTools, subAC)
 
-	mode := "default"
-	if strings.TrimSpace(input.Mode) == starmodel.ModePlan {
-		mode = starmodel.ModePlan
-	}
+	mode := s.runtimeSubagentMode(ctx, provider, input.Mode)
 	handlers := []adk.ChatModelAgentMiddleware{tools.NewDynamicMCPSurfaceMiddleware(provider)}
-	toolSearchHandler, err := newEinoV09ToolSearchHandler(ctx, provider, mode, "client", "")
+	toolSearchHandler, err := newEinoV09ToolSearchHandlerForCatalog(
+		ctx,
+		runtimeSubagentCatalog(provider),
+		mode,
+		"client",
+		"",
+		runtimeSubagentCatalogEntryAllowed(def, input.Fork),
+	)
 	if err != nil {
 		return runtimeAgentRunResult{}, err
 	}
@@ -218,7 +222,7 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 	instruction := agent.RuntimeSubagentPrompt(def, currentRuntimeAgentWorkspace(ac.WorkspacePath, worktreeResult), input.Isolation)
 	prompt := input.Prompt
 	if input.Fork {
-		instruction = agent.RuntimeAgentPrompt(subAC, agent.DeepAgentModeDefault, registry)
+		instruction = agent.RuntimeAgentPrompt(subAC, runtimeSubagentDeepAgentMode(mode), registry)
 		if objective, ok := tools.RuntimeObjectiveFromContext(ctx); ok {
 			prompt = fmt.Sprintf("Forked task for the current objective:\n\nCurrent objective: %s\n\nDelegated task: %s", objective.Objective, input.Prompt)
 		}
@@ -248,6 +252,47 @@ func (s *ChatService) runRuntimeSubagent(ctx context.Context, mdl einomodel.Tool
 		return runtimeAgentRunResult{text: result, worktree: worktreeResult}, err
 	}
 	return runtimeAgentRunResult{text: result, worktree: worktreeResult}, nil
+}
+
+func (s *ChatService) runtimeSubagentMode(ctx context.Context, provider *deferredMCPProvider, requested string) string {
+	switch strings.TrimSpace(requested) {
+	case starmodel.ModePlan:
+		return starmodel.ModePlan
+	case starmodel.ModeDefault:
+		return starmodel.ModeDefault
+	}
+	if provider != nil {
+		if _, mode, _, err := provider.sessionState(ctx); err == nil && strings.TrimSpace(mode) != "" {
+			return mode
+		}
+	}
+	return starmodel.ModeDefault
+}
+
+func runtimeSubagentDeepAgentMode(mode string) agent.DeepAgentMode {
+	if mode == starmodel.ModePlan {
+		return agent.DeepAgentModePlan
+	}
+	return agent.DeepAgentModeDefault
+}
+
+func runtimeSubagentCatalog(provider *deferredMCPProvider) *tools.ToolCatalog {
+	if provider == nil || provider.bundle == nil {
+		return nil
+	}
+	return provider.bundle.MCPCatalog
+}
+
+func runtimeSubagentCatalogEntryAllowed(def agent.SubagentDefinition, fork bool) func(tools.CatalogEntry) bool {
+	if fork {
+		return nil
+	}
+	return func(entry tools.CatalogEntry) bool {
+		if entry.CanonicalName == tools.RuntimeToolAgent {
+			return false
+		}
+		return runtimeSubagentAllowsTool(def, entry.CanonicalName)
+	}
 }
 
 func (s *ChatService) runtimeSubagentTools(provider *deferredMCPProvider, def agent.SubagentDefinition, fork bool) []einotool.BaseTool {

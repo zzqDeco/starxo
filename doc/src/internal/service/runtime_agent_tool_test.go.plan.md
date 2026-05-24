@@ -12,6 +12,8 @@
 - `normalizeRuntimeAgentInput` 会填充 registry default / 默认 isolation；省略 `subagent_type` 标记为 fork，并拒绝未知 `subagent_type` 或 `isolation`。
 - `Agent` tool schema 会使用配置 registry 的 subagent enum，不泄漏被替换掉的内置名称。
 - fork 子 agent 不继承 registry default 的 `allowedTools` 收窄；explicit subagent 继续按 definition 过滤。
+- non-fork 子 agent 的 ToolSearch deferred candidates 会按 `allowedTools` 过滤；fork 子 agent 可继承父 agent 的完整搜索候选。
+- 未显式传 `mode` 时，fork/subagent 会继承父会话 plan/default mode；显式传 default 可覆盖 plan mode。
 - worktree isolation 会派生子 agent 专用 `AgentContext`，不修改父 workspace。
 - `formatRuntimeAgentRunResult` 会把 isolated worktree path/branch 写入结果文本，后台 task output 也可复用同一格式。
 - `runtimeSubagentInstruction` 会明确实际 workspace 和 worktree isolation 语义。
