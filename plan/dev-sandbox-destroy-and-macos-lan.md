@@ -4,6 +4,7 @@
 - Fix two dev integration regressions:
   - Destroying the active sandbox must not disconnect SSH.
   - macOS app bundles must use a Starxo-owned bundle identity and be signed before release packaging.
+  - macOS LAN connection failures that surface as `no route to host` must guide users to Local Network permission recovery when Terminal SSH still works.
 - Implement as two commits:
   - `fix(sandbox): keep ssh connected when destroying active sandbox`
   - `build(mac): sign app bundle with starxo identity`
@@ -17,6 +18,7 @@
 - macOS bundle identifier is `com.starxo.app`.
 - Release builds sign the `.app` bundle after Wails build and before packaging.
 - Signing may be ad-hoc for v1, but the signed bundle must bind `Info.plist` and seal resources so macOS Local Network permission is associated with the Starxo bundle identity.
+- The frontend normalizes SSH errors and, on macOS LAN hosts, appends a Local Network permission hint for `no route to host`.
 
 ## Verification
 - Run Go tests, frontend build, Wails build, bundle signing checks, and manual SSH/sandbox regression against `192.168.31.59`.

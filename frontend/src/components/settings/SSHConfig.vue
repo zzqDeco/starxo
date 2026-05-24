@@ -1,24 +1,28 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { NForm, NFormItem, NInput, NInputNumber, NButton, NIcon } from 'naive-ui'
+import { NAlert, NForm, NFormItem, NInput, NInputNumber, NButton, NIcon } from 'naive-ui'
 import { Checkmark, Key } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { TestSSHConnection } from '../../../wailsjs/go/service/SettingsService'
+import { formatSSHError } from '@/utils/sshErrorHints'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const testing = ref(false)
 const testResult = ref<'success' | 'error' | null>(null)
+const testError = ref('')
 
 async function testConnection() {
   testing.value = true
   testResult.value = null
+  testError.value = ''
   try {
     await TestSSHConnection(settingsStore.settings.ssh as any)
     testResult.value = 'success'
   } catch (e) {
     testResult.value = 'error'
+    testError.value = formatSSHError(e, settingsStore.settings.ssh)
     console.error('SSH test failed:', e)
   } finally {
     testing.value = false
@@ -92,6 +96,10 @@ async function testConnection() {
         {{ testResult === 'success' ? t('settings.ssh.connected') : testResult === 'error' ? t('settings.ssh.failed') : t('settings.ssh.testConnection') }}
       </NButton>
     </div>
+
+    <NAlert v-if="testError" type="warning" class="ssh-test-error">
+      {{ testError }}
+    </NAlert>
   </div>
 </template>
 
@@ -111,5 +119,10 @@ async function testConnection() {
 .mono-input :deep(textarea) {
   font-family: var(--font-mono) !important;
   font-size: 11px !important;
+}
+
+.ssh-test-error {
+  margin-top: 12px;
+  white-space: pre-line;
 }
 </style>

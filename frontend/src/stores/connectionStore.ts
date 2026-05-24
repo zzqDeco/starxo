@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { ConnectSSH, DisconnectSSH, GetStatus } from '../../wailsjs/go/service/SandboxService'
 import { useSettingsStore } from './settingsStore'
+import { formatSSHError } from '@/utils/sshErrorHints'
 
 export const useConnectionStore = defineStore('connection', () => {
   const sshConnected = ref(false)
@@ -38,7 +39,8 @@ export const useConnectionStore = defineStore('connection', () => {
     try {
       await ConnectSSH()
     } catch (e: any) {
-      error.value = e?.message || String(e)
+      const settingsStore = useSettingsStore()
+      error.value = formatSSHError(e, settingsStore.settings.ssh)
       console.error('SSH connection failed:', e)
     } finally {
       connecting.value = false
@@ -53,7 +55,7 @@ export const useConnectionStore = defineStore('connection', () => {
       initProgress.value = 0
       initStep.value = ''
     } catch (e: any) {
-      error.value = e?.message || String(e)
+      error.value = formatSSHError(e)
       console.error('Disconnect failed:', e)
     }
   }
