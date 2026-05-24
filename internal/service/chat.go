@@ -646,11 +646,12 @@ func (s *ChatService) SetDependencies(sbx *sandbox.SandboxManager, _ *agentctx.E
 // UpdateSandbox updates the sandbox manager reference.
 func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 	var stoppedSessions []string
+	var clearedInterruptSessions []string
 	var repairedSessions map[string]agentctx.RepairResult
 	s.mu.Lock()
 	s.sandbox = sbx
 	if sbx == nil {
-		stoppedSessions, repairedSessions = s.cancelRunsForSandboxLossLocked()
+		stoppedSessions, clearedInterruptSessions, repairedSessions = s.cancelRunsForSandboxLossLocked()
 	}
 	s.invalidateRunners()
 	lsp := s.runtimeLSP
@@ -666,19 +667,31 @@ func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 		})
 		s.emitRunState(sessionID)
 	}
+	emitted := stringSet(stoppedSessions)
 	for sessionID, repair := range repairedSessions {
 		s.saveSessionAfterHistoryRepair(sessionID, repair)
-		s.emitRunState(sessionID)
+		if _, ok := emitted[sessionID]; !ok {
+			s.emitRunState(sessionID)
+			emitted[sessionID] = struct{}{}
+		}
+	}
+	for _, sessionID := range clearedInterruptSessions {
+		if _, ok := emitted[sessionID]; !ok {
+			s.emitRunState(sessionID)
+			emitted[sessionID] = struct{}{}
+		}
 	}
 }
 
-func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, map[string]agentctx.RepairResult) {
+func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, []string, map[string]agentctx.RepairResult) {
 	stopped := make([]string, 0)
+	clearedInterrupts := make([]string, 0)
 	repaired := make(map[string]agentctx.RepairResult)
 	for sessionID, run := range s.sessions {
 		if run == nil || (!run.running && !run.starting) {
 			if run != nil && run.pendingInterrupt != nil {
 				_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxReason)
+				clearedInterrupts = append(clearedInterrupts, sessionID)
 				s.logHistoryRepair(sessionID, "sandbox_lost", repair)
 				if repair.Count > 0 {
 					repaired[sessionID] = repair
@@ -695,7 +708,11 @@ func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, map[string]age
 			run.cancelFn()
 		}
 		run.cancelFn = nil
+		hadInterrupt := run.pendingInterrupt != nil
 		_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxReason)
+		if hadInterrupt {
+			clearedInterrupts = append(clearedInterrupts, sessionID)
+		}
 		s.logHistoryRepair(sessionID, "sandbox_lost", repair)
 		if repair.Count > 0 {
 			repaired[sessionID] = repair
@@ -706,7 +723,34 @@ func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, map[string]age
 		s.cleanupRetiredBundlesLocked()
 	}
 	sort.Strings(stopped)
-	return stopped, repaired
+	sort.Strings(clearedInterrupts)
+	return stopped, compactStringSlice(clearedInterrupts), repaired
+}
+
+func stringSet(values []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value != "" {
+			out[value] = struct{}{}
+		}
+	}
+	return out
+}
+
+func compactStringSlice(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	out := values[:0]
+	last := ""
+	for i, value := range values {
+		if i > 0 && value == last {
+			continue
+		}
+		out = append(out, value)
+		last = value
+	}
+	return out
 }
 
 func (s *ChatService) clearPendingInterruptLocked(run *SessionRun, reason string) (string, agentctx.RepairResult) {

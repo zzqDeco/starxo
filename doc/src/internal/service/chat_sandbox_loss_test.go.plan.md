@@ -7,6 +7,7 @@
 ## 覆盖范围
 - active sandbox 丢失时取消 running agent run。
 - active sandbox 丢失时取消 starting agent run，但 startup wait channel 和 starting 标记保留到 startup path 自己 unwind。
+- active sandbox 丢失时会清理 idle pending interrupt；即使没有 orphan tool-call history 需要修复，也要报告 session state 变更供 UI 清掉 resume 状态。
 - cancel 后仍保留 active bundle generation / runner kind，直到原 run goroutine 退出，避免提前关闭 still-referenced runner bundle。
 - 设置新的非 nil sandbox manager 时不取消正在运行的 agent run。
 
