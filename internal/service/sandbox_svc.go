@@ -41,6 +41,7 @@ type SandboxService struct {
 	healthSSHFailures    int
 	healthSSHProbe       func(context.Context, *sandbox.SandboxManager) error
 	healthSandboxProbe   func(context.Context, *sandbox.SandboxManager) (bool, error)
+	destroySandboxRemote func(context.Context, *sandbox.SandboxManager, string, string) error
 }
 
 // NewSandboxService creates a new SandboxService.
@@ -319,6 +320,61 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 // SSH remains connected.
 func (s *SandboxService) DeactivateContainer() error {
 	s.markActiveSandboxUnavailable("sandbox deactivated")
+	return nil
+}
+
+func (s *SandboxService) destroyActiveSandbox(containerRegID, runtimeID, workspacePath string) error {
+	s.mu.RLock()
+	mgr := s.manager
+	activeRegID := s.activeContainerRegID
+	destroyRemote := s.destroySandboxRemote
+	appCtx := s.ctx
+	s.mu.RUnlock()
+
+	if mgr == nil {
+		return fmt.Errorf("SSH not connected")
+	}
+	if activeRegID != containerRegID {
+		return fmt.Errorf("sandbox %s is not active", containerRegID)
+	}
+	if runtimeID == "" {
+		return fmt.Errorf("sandbox runtime id is empty")
+	}
+	if destroyRemote == nil {
+		if !mgr.SSHConnected() {
+			return fmt.Errorf("SSH not connected")
+		}
+		destroyRemote = func(ctx context.Context, mgr *sandbox.SandboxManager, id, path string) error {
+			return mgr.DestroySandbox(ctx, id, path)
+		}
+	}
+
+	ctx := appCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := destroyRemote(ctx, mgr, runtimeID, workspacePath); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if s.manager != mgr || s.activeContainerRegID != containerRegID {
+		s.mu.Unlock()
+		return nil
+	}
+	deactivatedCb := s.onContainerDeactivated
+	s.activeContainerRegID = ""
+	s.healthSSHFailures = 0
+	mgr.DetachContainer()
+	s.mu.Unlock()
+
+	if deactivatedCb != nil {
+		deactivatedCb()
+	}
+	wailsEmit(appCtx, "container:deactivated", map[string]string{
+		"containerID": containerRegID,
+		"reason":      "sandbox destroyed",
+	})
 	return nil
 }
 
