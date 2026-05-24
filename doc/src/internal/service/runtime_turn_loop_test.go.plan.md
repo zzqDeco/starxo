@@ -12,6 +12,7 @@
 ## 3. 关键测试覆盖
 - `GenResume` 从 TurnLoop interrupted item 恢复原 objective，并生成对应 interrupt id 的 resume params。
 - TurnLoop checkpoint id 保持 session scoped：`runtime-turn:<sessionID>`。
+- 普通 `SendMessage` 在非 preempt 路径会先删除旧 runtime checkpoint，避免 stale checkpoint 导致新消息卡在无 resume payload 的恢复路径。
 
 ## 4. 维护建议
 - 后续新增 preempt/abort 场景时优先在本测试文件补 focused unit test，再做端到端手工验证。

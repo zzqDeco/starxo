@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/compose"
 
+	"starxo/internal/config"
 	"starxo/internal/model"
 	"starxo/internal/tools"
 )
@@ -79,5 +83,85 @@ func TestRuntimeTurnLoopGenResumeUsesInterruptedObjective(t *testing.T) {
 func TestRuntimeTurnCheckpointIDIsSessionScoped(t *testing.T) {
 	if got := runtimeTurnCheckpointID("sess-1"); got != "runtime-turn:sess-1" {
 		t.Fatalf("unexpected checkpoint id %q", got)
+	}
+}
+
+type runtimeTurnTrackingCheckpointStore struct {
+	mu      sync.Mutex
+	deleted []string
+	values  map[string][]byte
+}
+
+func newRuntimeTurnTrackingCheckpointStore() *runtimeTurnTrackingCheckpointStore {
+	return &runtimeTurnTrackingCheckpointStore{values: make(map[string][]byte)}
+}
+
+func (s *runtimeTurnTrackingCheckpointStore) Get(_ context.Context, key string) ([]byte, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.values[key]
+	return append([]byte{}, v...), ok, nil
+}
+
+func (s *runtimeTurnTrackingCheckpointStore) Set(_ context.Context, key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[key] = append([]byte{}, value...)
+	return nil
+}
+
+func (s *runtimeTurnTrackingCheckpointStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, key)
+	delete(s.values, key)
+	return nil
+}
+
+func (s *runtimeTurnTrackingCheckpointStore) deletedKey(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, deleted := range s.deleted {
+		if deleted == key {
+			return true
+		}
+	}
+	return false
+}
+
+var _ compose.CheckPointStore = (*runtimeTurnTrackingCheckpointStore)(nil)
+var _ runtimeCheckpointDeleter = (*runtimeTurnTrackingCheckpointStore)(nil)
+
+func TestSendMessageDeletesStaleRuntimeCheckpointBeforeNormalTurn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store, err := config.NewStore()
+	if err != nil {
+		t.Fatalf("new config store: %v", err)
+	}
+	chat := NewChatService(store)
+	checkpoints := newRuntimeTurnTrackingCheckpointStore()
+	chat.checkpointStore = checkpoints
+	chat.SetActiveSessionID("sess-stale")
+
+	_, digest, err := chat.currentConfigSnapshot()
+	if err != nil {
+		t.Fatalf("config snapshot: %v", err)
+	}
+	chat.mu.Lock()
+	chat.installedBundle = &RunnerBundle{
+		Generation:           1,
+		ConfigDigest:         digest,
+		DefaultAgent:         runtimeTurnTestAgent{},
+		PlanAgent:            runtimeTurnTestAgent{},
+		LastFreshnessCheckAt: time.Now(),
+	}
+	chat.nextGeneration = 1
+	chat.mu.Unlock()
+
+	if err := chat.SendMessage("start a fresh task"); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if !checkpoints.deletedKey(runtimeTurnCheckpointID("sess-stale")) {
+		t.Fatalf("expected normal user turn to delete stale runtime checkpoint")
 	}
 }

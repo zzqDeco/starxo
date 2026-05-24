@@ -1280,7 +1280,7 @@ func (s *ChatService) SendMessage(userMessage string) error {
 	)
 	s.mu.Unlock()
 
-	if clearPendingInterrupt {
+	if !preempt {
 		s.deleteRuntimeTurnCheckpoint(sessionID)
 	}
 	ok := false

@@ -8,7 +8,6 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"starxo/internal/logger"
 	"starxo/internal/model"
@@ -188,7 +187,7 @@ func (s *ChatService) runtimeTurnLoopGenInput(sessionID string) func(context.Con
 				"session", sessionID,
 				"reason", "complexity_trigger",
 			)
-			wailsruntime.EventsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
+			wailsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
 				Mode:      model.ModePlan,
 				SessionID: sessionID,
 			})
@@ -421,7 +420,7 @@ func (s *ChatService) runtimeTurnLoopOnAgentEvents(_ context.Context, tc *adk.Tu
 	if item.Resumed {
 		s.deleteRuntimeTurnCheckpoint(item.SessionID)
 	}
-	wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{
+	wailsEmit(s.ctx, "agent:done", map[string]string{
 		"sessionId": item.SessionID,
 	})
 	logger.Info("[CHAT] Agent turn completed",
@@ -497,14 +496,14 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 	s.mu.Unlock()
 
 	if emitErr != nil {
-		wailsruntime.EventsEmit(s.ctx, "agent:error", map[string]interface{}{
+		wailsEmit(s.ctx, "agent:error", map[string]interface{}{
 			"sessionId": sessionID,
 			"error":     emitErr.Error(),
 		})
 		emitDone = true
 	}
 	if emitDone {
-		wailsruntime.EventsEmit(s.ctx, "agent:done", map[string]string{"sessionId": sessionID})
+		wailsEmit(s.ctx, "agent:done", map[string]string{"sessionId": sessionID})
 		s.emitRunState(sessionID)
 	}
 }
