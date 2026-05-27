@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"starxo/internal/model"
 	"starxo/internal/tools"
 )
 
@@ -155,5 +156,52 @@ func TestRuntimeTaskManagerTaskGraphIDsResistClockCollisions(t *testing.T) {
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected both task items to survive same-tick creates, got %#v", items)
+	}
+}
+
+func TestRuntimeTaskManagerRestoreTaskItemsReplacesSessionState(t *testing.T) {
+	manager := newRuntimeTaskManager(func() time.Time { return time.UnixMilli(1000) }, nil)
+	stale, err := manager.CreateTaskItem(context.Background(), "sess-runtime", tools.TaskCreateInput{Title: "stale item"})
+	if err != nil {
+		t.Fatalf("create stale task item: %v", err)
+	}
+	if _, err := manager.CreateTaskItem(context.Background(), "sess-other", tools.TaskCreateInput{Title: "other item"}); err != nil {
+		t.Fatalf("create other task item: %v", err)
+	}
+
+	manager.RestoreCompactTaskItems("sess-runtime", []model.RuntimeTaskItemCompact{{
+		ID:        "taskitem-restored",
+		SessionID: "sess-runtime",
+		Title:     "restored item",
+		Status:    runtimeTaskItemStatusInProgress,
+		CreatedAt: 100,
+		UpdatedAt: 200,
+	}})
+
+	items, err := manager.ListTaskItems(context.Background(), "sess-runtime", tools.TaskListInput{IncludeClosed: true})
+	if err != nil {
+		t.Fatalf("list restored task items: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "taskitem-restored" || items[0].Status != runtimeTaskItemStatusInProgress {
+		t.Fatalf("expected restored task item to replace stale state, got %#v", items)
+	}
+	if _, err := manager.GetTaskItem(context.Background(), "sess-runtime", stale.ID); err == nil {
+		t.Fatalf("expected stale task item %q to be removed", stale.ID)
+	}
+
+	manager.RestoreCompactTaskItems("sess-runtime", nil)
+	items, err = manager.ListTaskItems(context.Background(), "sess-runtime", tools.TaskListInput{IncludeClosed: true})
+	if err != nil {
+		t.Fatalf("list cleared task items: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty restore to clear session task items, got %#v", items)
+	}
+	otherItems, err := manager.ListTaskItems(context.Background(), "sess-other", tools.TaskListInput{IncludeClosed: true})
+	if err != nil {
+		t.Fatalf("list other task items: %v", err)
+	}
+	if len(otherItems) != 1 || otherItems[0].SessionID != "sess-other" {
+		t.Fatalf("expected restore to preserve other session task items, got %#v", otherItems)
 	}
 }

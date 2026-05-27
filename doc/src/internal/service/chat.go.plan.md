@@ -66,6 +66,7 @@
   - direct-call 输入由 `ChatService` 自己 normalize + log
   - startup / session switch 这种 store-load 路径直接走 `restoreNormalizedSessionData(...)`
   - 同一条调用链只记一次 normalize warning
+  - nil 或缺少 runtime compact 的 restore 会清空当前 session 的 todos 和 task graph items，避免旧 in-memory 状态被下一次 snapshot 重新写回
 - `SetMode()` / `GetMode()` 仍然是 active-session scoped API：
   - `SetMode(...)` 只改当前 active session
   - `GetMode()` 只读当前 active session

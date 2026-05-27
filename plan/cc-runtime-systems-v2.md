@@ -15,7 +15,8 @@
   - Kept task graph tools safe for plan mode because they only mutate Starxo runtime metadata, not sandbox files or processes.
 - Runtime compact:
   - Persist task graph records into `RuntimeContextCompact.TaskItems`.
-  - Restore task graph records after session reload.
+  - Restore task graph records after session reload, replacing stale in-memory records for the restored session.
+  - Strip task graph records from standalone objective compact state so unrelated new turns do not resume old workflows.
   - Include task graph counts in the compact prompt summary.
 - Permission audit:
   - Record non-read-only runtime permission decisions for bypass mode, session grants, user decisions, missing UI context, and canceled requests.

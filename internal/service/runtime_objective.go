@@ -140,6 +140,7 @@ func scopeCompactForObjective(compact *model.RuntimeContextCompact, objective *m
 		out.OriginalMessageCount = 0
 		out.TokenEstimate = 0
 		out.Tasks = nil
+		out.TaskItems = nil
 		out.FileReadState = nil
 		out.DiffSummaries = nil
 		out.Todos = nil

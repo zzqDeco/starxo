@@ -109,6 +109,7 @@ func TestScopeCompactForStandaloneObjectiveDropsOldActiveState(t *testing.T) {
 		},
 		PermissionGrants: []model.RuntimePermissionGrant{{ToolName: tools.RuntimeToolBash}},
 		Tasks:            []model.RuntimeTaskCompact{{ID: "task-old", Status: "running"}},
+		TaskItems:        []model.RuntimeTaskItemCompact{{ID: "taskitem-old", Title: "debug old workflow", Status: "in_progress"}},
 		Todos:            []model.RuntimeTodoItem{{ID: "todo-old", Title: "debug old tests", Status: "in_progress"}},
 		PlanDocument:     &model.PlanDocument{Markdown: "old plan"},
 	}
@@ -123,7 +124,7 @@ func TestScopeCompactForStandaloneObjectiveDropsOldActiveState(t *testing.T) {
 	if scoped == nil || scoped.ActiveObjective == nil || scoped.ActiveObjective.ID != "obj-new" {
 		t.Fatalf("expected active objective in scoped compact, got %#v", scoped)
 	}
-	if scoped.Summary != "" || len(scoped.Tasks) != 0 || len(scoped.Todos) != 0 || scoped.PlanDocument != nil {
+	if scoped.Summary != "" || len(scoped.Tasks) != 0 || len(scoped.TaskItems) != 0 || len(scoped.Todos) != 0 || scoped.PlanDocument != nil {
 		t.Fatalf("expected old active work to be stripped, got %#v", scoped)
 	}
 	if len(scoped.ToolSearch.DiscoveredTools) != 1 || len(scoped.PermissionGrants) != 1 {

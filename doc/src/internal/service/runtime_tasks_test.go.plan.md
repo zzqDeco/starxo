@@ -16,3 +16,4 @@
 - `TaskUpdate` 可关闭 task graph item，并记录 completed timestamp。
 - `TaskList` 默认隐藏 closed items，`include_closed` 可列出 completed/canceled items。
 - task graph compact/restore 后仍可通过 id 读取。
+- task graph restore 会替换当前 session 旧 records，空 restore 会清空当前 session，同时保留其他 session records。

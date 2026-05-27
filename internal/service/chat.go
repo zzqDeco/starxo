@@ -2865,6 +2865,9 @@ func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model
 		}
 		tools.RestoreTodosForSession(sessionID, data.RuntimeContextCompact.Todos)
 	} else {
+		if tasks != nil {
+			tasks.RestoreCompactTaskItems(sessionID, nil)
+		}
 		tools.ClearTodosForSession(sessionID)
 	}
 	if repair.Count > 0 {

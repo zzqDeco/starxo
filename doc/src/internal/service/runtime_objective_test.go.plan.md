@@ -13,4 +13,4 @@
 - continuation 请求会继承最近任务上下文。
 - generic `above` / `previous` 文本不会被误判为 continuation。
 - punctuated continuation intent 会被规范化；bare `resume` 和 `resume previous task` 是 continuation，但 `resume parser design` / `resume the container service` 保持 standalone。
-- standalone compact 会丢弃旧 active work，同时保留 ToolSearch 和 permission grants。
+- standalone compact 会丢弃旧 active work，包括 runtime tasks、task graph items、todos 和 plan，同时保留 ToolSearch 和 permission grants。

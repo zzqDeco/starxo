@@ -546,16 +546,21 @@ func (m *runtimeTaskManager) RestoreCompactTasks(sessionID string, tasks []model
 }
 
 func (m *runtimeTaskManager) RestoreCompactTaskItems(sessionID string, items []model.RuntimeTaskItemCompact) {
-	if len(items) == 0 {
-		return
-	}
+	sessionID = strings.TrimSpace(sessionID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if sessionID != "" {
+		for id, item := range m.taskItems {
+			if item.SessionID == sessionID {
+				delete(m.taskItems, id)
+			}
+		}
+	}
 	for _, item := range items {
 		if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Title) == "" {
 			continue
 		}
-		itemSessionID := item.SessionID
+		itemSessionID := strings.TrimSpace(item.SessionID)
 		if itemSessionID == "" {
 			itemSessionID = sessionID
 		}

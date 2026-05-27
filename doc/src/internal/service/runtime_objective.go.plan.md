@@ -12,7 +12,7 @@
 - `objectiveScope(...)` 根据用户文本识别 continuation 请求，例如 `继续`、`下一步`、`do the above`、`continue previous task`。
 - continuation intent 会先规范化末尾常见标点；bare `resume` 是 continuation，但 `resume ...` 前缀只在明确引用 previous/current task 时才继承旧上下文，避免 `resume parser design` 这类新任务误带历史。
 - standalone objective 会记录 `HistoryStartIndex`，后续 prompt 只带本 turn 后的历史。
-- `scopeCompactForObjective(...)` 在 standalone 下移除旧 summary、tasks、file read state、diff summary、todos 和 plan，同时保留 ToolSearch、permission grants 和 workspace routing。
+- `scopeCompactForObjective(...)` 在 standalone 下移除旧 summary、runtime tasks、task graph items、file read state、diff summary、todos 和 plan，同时保留 ToolSearch、permission grants 和 workspace routing。
 - `runtimeObjectivePinnedMessages(...)` 生成模型可见 `<current-objective>`。
 
 ## 4. 维护边界
