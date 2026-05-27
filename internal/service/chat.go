@@ -137,6 +137,7 @@ type SessionRun struct {
 	timeline                  *agentctx.TimelineCollector
 	discoveredTools           map[string]model.DiscoveredToolRecord
 	permissionGrants          map[string]model.RuntimePermissionGrant
+	permissionAudit           []model.RuntimePermissionAudit
 	deferredAnnouncementState *model.DeferredAnnouncementState
 	mcpInstructionsDeltaState *model.MCPInstructionsDeltaState
 	runtimeContextCompact     *model.RuntimeContextCompact
@@ -327,6 +328,7 @@ func (r *SessionRun) clearSessionState() {
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
 	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
+	r.permissionAudit = nil
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
 	r.runtimeContextCompact = nil
@@ -371,6 +373,7 @@ func (r *SessionRun) importSessionData(data *model.SessionData) agentctx.RepairR
 	r.streamingState = nil
 	r.discoveredTools = make(map[string]model.DiscoveredToolRecord)
 	r.permissionGrants = make(map[string]model.RuntimePermissionGrant)
+	r.permissionAudit = nil
 	r.deferredAnnouncementState = nil
 	r.mcpInstructionsDeltaState = nil
 	r.runtimeContextCompact = nil
@@ -415,6 +418,10 @@ func (r *SessionRun) importSessionData(data *model.SessionData) agentctx.RepairR
 		}
 		r.permissionGrants[grant.ToolName] = grant
 	}
+	r.permissionAudit = append([]model.RuntimePermissionAudit(nil), data.PermissionAudit...)
+	if len(r.permissionAudit) == 0 && data.RuntimeContextCompact != nil {
+		r.permissionAudit = append([]model.RuntimePermissionAudit(nil), data.RuntimeContextCompact.PermissionAudit...)
+	}
 	return repair
 }
 
@@ -436,6 +443,7 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 	sort.Slice(grants, func(i, j int) bool {
 		return grants[i].ToolName < grants[j].ToolName
 	})
+	audit := append([]model.RuntimePermissionAudit(nil), r.permissionAudit...)
 
 	return &SessionSnapshot{
 		HasSessionRun: true,
@@ -447,6 +455,7 @@ func (r *SessionRun) snapshot() *SessionSnapshot {
 			Streaming:                 cloneStreamingState(r.streamingState),
 			DiscoveredTools:           discovered,
 			PermissionGrants:          grants,
+			PermissionAudit:           audit,
 			DeferredAnnouncementState: cloneDeferredAnnouncementState(r.deferredAnnouncementState),
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(r.mcpInstructionsDeltaState),
 			RuntimeContextCompact:     model.CloneRuntimeContextCompact(r.runtimeContextCompact),
@@ -847,6 +856,7 @@ func (s *ChatService) getOrCreateRun(sessionID string) *SessionRun {
 		timeline:         agentctx.NewTimelineCollector(),
 		discoveredTools:  make(map[string]model.DiscoveredToolRecord),
 		permissionGrants: make(map[string]model.RuntimePermissionGrant),
+		permissionAudit:  nil,
 		fileReadState:    make(map[string]model.RuntimeFileReadState),
 		mode:             model.ModeDefault,
 	}
@@ -2841,6 +2851,7 @@ func (s *ChatService) restoreNormalizedSessionData(sessionID string, data *model
 	if data != nil && data.RuntimeContextCompact != nil {
 		if tasks != nil {
 			tasks.RestoreCompactTasks(sessionID, data.RuntimeContextCompact.Tasks)
+			tasks.RestoreCompactTaskItems(sessionID, data.RuntimeContextCompact.TaskItems)
 		}
 		if workspaces != nil {
 			workspaces.RestoreCompactSnapshot(sessionID, data.RuntimeContextCompact.Workspace)

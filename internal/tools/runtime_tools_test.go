@@ -112,6 +112,22 @@ func (m *fakeRuntimeTaskManager) StartShellTask(ctx context.Context, sessionID, 
 	return RuntimeTaskRef{}, fmt.Errorf("not implemented")
 }
 
+func (m *fakeRuntimeTaskManager) CreateTaskItem(ctx context.Context, sessionID string, input TaskCreateInput) (RuntimeTaskItem, error) {
+	return RuntimeTaskItem{}, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRuntimeTaskManager) GetTaskItem(ctx context.Context, sessionID, taskID string) (RuntimeTaskItem, error) {
+	return RuntimeTaskItem{}, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRuntimeTaskManager) UpdateTaskItem(ctx context.Context, sessionID string, input TaskUpdateInput) (RuntimeTaskItem, error) {
+	return RuntimeTaskItem{}, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRuntimeTaskManager) ListTaskItems(ctx context.Context, sessionID string, input TaskListInput) ([]RuntimeTaskItem, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 func (m *fakeRuntimeTaskManager) ReadTaskOutput(ctx context.Context, taskID string, offset, limit int) (RuntimeTaskOutput, error) {
 	return RuntimeTaskOutput{}, fmt.Errorf("not implemented")
 }
@@ -157,7 +173,11 @@ func TestRuntimeCoreCatalogEntriesExposeAliasesAndPlanGate(t *testing.T) {
 		RuntimeToolGlob,
 		RuntimeToolGrep,
 		RuntimeToolRead,
+		RuntimeToolTaskCreate,
+		RuntimeToolTaskGet,
+		RuntimeToolTaskList,
 		RuntimeToolTaskOutput,
+		RuntimeToolTaskUpdate,
 	})
 	assertCatalogNames(t, state.SearchablePoolForMode, []string{
 		RuntimeToolWorktreeDiff,

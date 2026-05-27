@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,10 +31,11 @@ type runtimeTask struct {
 }
 
 type runtimeTaskManager struct {
-	mu    sync.RWMutex
-	tasks map[string]*runtimeTask
-	now   func() time.Time
-	emit  func(event string, data any)
+	mu        sync.RWMutex
+	tasks     map[string]*runtimeTask
+	taskItems map[string]tools.RuntimeTaskItem
+	now       func() time.Time
+	emit      func(event string, data any)
 }
 
 func newRuntimeTaskManager(now func() time.Time, emit func(event string, data any)) *runtimeTaskManager {
@@ -41,9 +43,10 @@ func newRuntimeTaskManager(now func() time.Time, emit func(event string, data an
 		now = time.Now
 	}
 	return &runtimeTaskManager{
-		tasks: make(map[string]*runtimeTask),
-		now:   now,
-		emit:  emit,
+		tasks:     make(map[string]*runtimeTask),
+		taskItems: make(map[string]tools.RuntimeTaskItem),
+		now:       now,
+		emit:      emit,
 	}
 }
 
@@ -181,6 +184,150 @@ func (m *runtimeTaskManager) StartAgentTask(ctx context.Context, sessionID, desc
 	}, nil
 }
 
+func (m *runtimeTaskManager) CreateTaskItem(ctx context.Context, sessionID string, input tools.TaskCreateInput) (tools.RuntimeTaskItem, error) {
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		return tools.RuntimeTaskItem{}, fmt.Errorf("title is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = "global"
+	}
+	status, err := normalizeRuntimeTaskItemStatus(input.Status, runtimeTaskItemStatusTodo)
+	if err != nil {
+		return tools.RuntimeTaskItem{}, err
+	}
+	now := m.now().UnixMilli()
+	item := tools.RuntimeTaskItem{
+		ID:          fmt.Sprintf("taskitem-%d", m.now().UnixNano()),
+		SessionID:   sessionID,
+		Title:       title,
+		Description: strings.TrimSpace(input.Description),
+		Status:      status,
+		Owner:       strings.TrimSpace(input.Owner),
+		Priority:    strings.TrimSpace(input.Priority),
+		DependsOn:   compactRuntimeTaskDependsOn(input.DependsOn),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if runtimeTaskItemStatusClosed(status) {
+		item.CompletedAt = now
+	}
+	m.mu.Lock()
+	m.taskItems[item.ID] = item
+	m.mu.Unlock()
+	m.emitEvent("runtime:task_graph_changed", map[string]any{
+		"action":    "created",
+		"sessionId": sessionID,
+		"task":      item,
+	})
+	return item, nil
+}
+
+func (m *runtimeTaskManager) GetTaskItem(ctx context.Context, sessionID, taskID string) (tools.RuntimeTaskItem, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return tools.RuntimeTaskItem{}, fmt.Errorf("task_id is required")
+	}
+	m.mu.RLock()
+	item, ok := m.taskItems[taskID]
+	m.mu.RUnlock()
+	if !ok || (sessionID != "" && item.SessionID != sessionID) {
+		return tools.RuntimeTaskItem{}, fmt.Errorf("task item %s not found", taskID)
+	}
+	return cloneRuntimeTaskItem(item), nil
+}
+
+func (m *runtimeTaskManager) UpdateTaskItem(ctx context.Context, sessionID string, input tools.TaskUpdateInput) (tools.RuntimeTaskItem, error) {
+	taskID := strings.TrimSpace(input.TaskID)
+	if taskID == "" {
+		return tools.RuntimeTaskItem{}, fmt.Errorf("task_id is required")
+	}
+	m.mu.Lock()
+	item, ok := m.taskItems[taskID]
+	if !ok || (sessionID != "" && item.SessionID != sessionID) {
+		m.mu.Unlock()
+		return tools.RuntimeTaskItem{}, fmt.Errorf("task item %s not found", taskID)
+	}
+	if title := strings.TrimSpace(input.Title); title != "" {
+		item.Title = title
+	}
+	if strings.TrimSpace(input.Description) != "" {
+		item.Description = strings.TrimSpace(input.Description)
+	}
+	if status := strings.TrimSpace(input.Status); status != "" {
+		nextStatus, err := normalizeRuntimeTaskItemStatus(status, item.Status)
+		if err != nil {
+			m.mu.Unlock()
+			return tools.RuntimeTaskItem{}, err
+		}
+		item.Status = nextStatus
+		if runtimeTaskItemStatusClosed(nextStatus) {
+			item.CompletedAt = m.now().UnixMilli()
+		} else {
+			item.CompletedAt = 0
+		}
+	}
+	if input.ClearOwner {
+		item.Owner = ""
+	} else if owner := strings.TrimSpace(input.Owner); owner != "" {
+		item.Owner = owner
+	}
+	if input.ClearPriority {
+		item.Priority = ""
+	} else if priority := strings.TrimSpace(input.Priority); priority != "" {
+		item.Priority = priority
+	}
+	if input.DependsOn != nil {
+		item.DependsOn = compactRuntimeTaskDependsOn(input.DependsOn)
+	}
+	item.UpdatedAt = m.now().UnixMilli()
+	m.taskItems[taskID] = item
+	m.mu.Unlock()
+	m.emitEvent("runtime:task_graph_changed", map[string]any{
+		"action":    "updated",
+		"sessionId": item.SessionID,
+		"task":      item,
+	})
+	return cloneRuntimeTaskItem(item), nil
+}
+
+func (m *runtimeTaskManager) ListTaskItems(ctx context.Context, sessionID string, input tools.TaskListInput) ([]tools.RuntimeTaskItem, error) {
+	status := strings.TrimSpace(input.Status)
+	if status != "" {
+		normalized, err := normalizeRuntimeTaskItemStatus(status, status)
+		if err != nil {
+			return nil, err
+		}
+		status = normalized
+	}
+	owner := strings.TrimSpace(input.Owner)
+	m.mu.RLock()
+	out := make([]tools.RuntimeTaskItem, 0, len(m.taskItems))
+	for _, item := range m.taskItems {
+		if sessionID != "" && item.SessionID != sessionID {
+			continue
+		}
+		if status != "" && item.Status != status {
+			continue
+		}
+		if status == "" && !input.IncludeClosed && runtimeTaskItemStatusClosed(item.Status) {
+			continue
+		}
+		if owner != "" && item.Owner != owner {
+			continue
+		}
+		out = append(out, cloneRuntimeTaskItem(item))
+	}
+	m.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt == out[j].CreatedAt {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt < out[j].CreatedAt
+	})
+	return out, nil
+}
+
 func (m *runtimeTaskManager) ReadTaskOutput(ctx context.Context, taskID string, offset, limit int) (tools.RuntimeTaskOutput, error) {
 	if strings.TrimSpace(taskID) == "" {
 		return tools.RuntimeTaskOutput{}, fmt.Errorf("task_id is required")
@@ -314,6 +461,37 @@ func (m *runtimeTaskManager) CompactSnapshots(sessionID string) []model.RuntimeT
 	return out
 }
 
+func (m *runtimeTaskManager) CompactTaskItems(sessionID string) []model.RuntimeTaskItemCompact {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]model.RuntimeTaskItemCompact, 0, len(m.taskItems))
+	for _, item := range m.taskItems {
+		if sessionID != "" && item.SessionID != sessionID {
+			continue
+		}
+		out = append(out, model.RuntimeTaskItemCompact{
+			ID:          item.ID,
+			SessionID:   item.SessionID,
+			Title:       item.Title,
+			Description: item.Description,
+			Status:      item.Status,
+			Owner:       item.Owner,
+			Priority:    item.Priority,
+			DependsOn:   append([]string(nil), item.DependsOn...),
+			CreatedAt:   item.CreatedAt,
+			UpdatedAt:   item.UpdatedAt,
+			CompletedAt: item.CompletedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt == out[j].CreatedAt {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt < out[j].CreatedAt
+	})
+	return out
+}
+
 func (m *runtimeTaskManager) RestoreCompactTasks(sessionID string, tasks []model.RuntimeTaskCompact) {
 	if len(tasks) == 0 {
 		return
@@ -361,6 +539,99 @@ func (m *runtimeTaskManager) RestoreCompactTasks(sessionID string, tasks []model
 			Error:       errText,
 		}}
 	}
+}
+
+func (m *runtimeTaskManager) RestoreCompactTaskItems(sessionID string, items []model.RuntimeTaskItemCompact) {
+	if len(items) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Title) == "" {
+			continue
+		}
+		itemSessionID := item.SessionID
+		if itemSessionID == "" {
+			itemSessionID = sessionID
+		}
+		if sessionID != "" && itemSessionID != sessionID {
+			continue
+		}
+		status, err := normalizeRuntimeTaskItemStatus(item.Status, runtimeTaskItemStatusTodo)
+		if err != nil {
+			status = runtimeTaskItemStatusTodo
+		}
+		m.taskItems[item.ID] = tools.RuntimeTaskItem{
+			ID:          item.ID,
+			SessionID:   itemSessionID,
+			Title:       item.Title,
+			Description: item.Description,
+			Status:      status,
+			Owner:       item.Owner,
+			Priority:    item.Priority,
+			DependsOn:   compactRuntimeTaskDependsOn(item.DependsOn),
+			CreatedAt:   item.CreatedAt,
+			UpdatedAt:   item.UpdatedAt,
+			CompletedAt: item.CompletedAt,
+		}
+	}
+}
+
+const (
+	runtimeTaskItemStatusTodo       = "todo"
+	runtimeTaskItemStatusInProgress = "in_progress"
+	runtimeTaskItemStatusBlocked    = "blocked"
+	runtimeTaskItemStatusCompleted  = "completed"
+	runtimeTaskItemStatusCanceled   = "canceled"
+)
+
+func normalizeRuntimeTaskItemStatus(status, fallback string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "":
+		if strings.TrimSpace(fallback) != "" {
+			return fallback, nil
+		}
+		return runtimeTaskItemStatusTodo, nil
+	case "todo", "pending", "open":
+		return runtimeTaskItemStatusTodo, nil
+	case "in_progress", "in-progress", "running", "active":
+		return runtimeTaskItemStatusInProgress, nil
+	case "blocked":
+		return runtimeTaskItemStatusBlocked, nil
+	case "completed", "complete", "done", "closed":
+		return runtimeTaskItemStatusCompleted, nil
+	case "canceled", "cancelled":
+		return runtimeTaskItemStatusCanceled, nil
+	default:
+		return "", fmt.Errorf("unsupported task status %q", status)
+	}
+}
+
+func runtimeTaskItemStatusClosed(status string) bool {
+	return status == runtimeTaskItemStatusCompleted || status == runtimeTaskItemStatusCanceled
+}
+
+func compactRuntimeTaskDependsOn(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, value := range in {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func cloneRuntimeTaskItem(in tools.RuntimeTaskItem) tools.RuntimeTaskItem {
+	in.DependsOn = append([]string(nil), in.DependsOn...)
+	return in
 }
 
 func maxRuntimeTaskDuration(a, b int64) int64 {

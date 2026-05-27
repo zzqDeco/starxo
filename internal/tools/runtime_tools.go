@@ -22,6 +22,10 @@ const (
 	RuntimeToolEdit          = "Edit"
 	RuntimeToolGlob          = "Glob"
 	RuntimeToolGrep          = "Grep"
+	RuntimeToolTaskCreate    = "TaskCreate"
+	RuntimeToolTaskGet       = "TaskGet"
+	RuntimeToolTaskUpdate    = "TaskUpdate"
+	RuntimeToolTaskList      = "TaskList"
 	RuntimeToolTaskOutput    = "TaskOutput"
 	RuntimeToolTaskStop      = "TaskStop"
 	RuntimeToolExitPlanMode  = "ExitPlanMode"
@@ -61,6 +65,20 @@ type RuntimeTaskSnapshot struct {
 	Error       string `json:"error,omitempty"`
 }
 
+type RuntimeTaskItem struct {
+	ID          string   `json:"id"`
+	SessionID   string   `json:"sessionId,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Status      string   `json:"status"`
+	Owner       string   `json:"owner,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	CreatedAt   int64    `json:"createdAt"`
+	UpdatedAt   int64    `json:"updatedAt"`
+	CompletedAt int64    `json:"completedAt,omitempty"`
+}
+
 type RuntimeTaskOutput struct {
 	TaskID     string `json:"taskId"`
 	Status     string `json:"status"`
@@ -72,10 +90,49 @@ type RuntimeTaskOutput struct {
 	Truncated  bool   `json:"truncated"`
 }
 
+type TaskCreateInput struct {
+	Title       string   `json:"title" jsonschema:"description=short task title"`
+	Description string   `json:"description,omitempty" jsonschema:"description=details, acceptance notes, or implementation context"`
+	Status      string   `json:"status,omitempty" jsonschema:"description=todo, in_progress, blocked, completed, or canceled; defaults to todo"`
+	Owner       string   `json:"owner,omitempty" jsonschema:"description=agent or human owner label"`
+	Priority    string   `json:"priority,omitempty" jsonschema:"description=optional priority label such as high, medium, or low"`
+	DependsOn   []string `json:"depends_on,omitempty" jsonschema:"description=task ids that must complete first"`
+}
+
+type TaskGetInput struct {
+	TaskID string `json:"task_id" jsonschema:"description=runtime task graph item id"`
+}
+
+type TaskUpdateInput struct {
+	TaskID        string   `json:"task_id" jsonschema:"description=runtime task graph item id"`
+	Title         string   `json:"title,omitempty" jsonschema:"description=replace the task title when non-empty"`
+	Description   string   `json:"description,omitempty" jsonschema:"description=replace the task description when non-empty"`
+	Status        string   `json:"status,omitempty" jsonschema:"description=todo, in_progress, blocked, completed, or canceled"`
+	Owner         string   `json:"owner,omitempty" jsonschema:"description=replace the owner label when non-empty"`
+	Priority      string   `json:"priority,omitempty" jsonschema:"description=replace the priority label when non-empty"`
+	DependsOn     []string `json:"depends_on,omitempty" jsonschema:"description=replace dependencies when provided"`
+	ClearOwner    bool     `json:"clear_owner,omitempty" jsonschema:"description=clear the owner label"`
+	ClearPriority bool     `json:"clear_priority,omitempty" jsonschema:"description=clear the priority label"`
+}
+
+type TaskListInput struct {
+	Status        string `json:"status,omitempty" jsonschema:"description=optional status filter"`
+	Owner         string `json:"owner,omitempty" jsonschema:"description=optional owner filter"`
+	IncludeClosed bool   `json:"include_closed,omitempty" jsonschema:"description=include completed and canceled tasks when no explicit status is provided"`
+}
+
+type TaskListOutput struct {
+	Tasks []RuntimeTaskItem `json:"tasks"`
+}
+
 type RuntimeTaskRunner func(ctx context.Context) (BashOutput, error)
 
 type RuntimeTaskManager interface {
 	StartShellTask(ctx context.Context, sessionID, command, description string, runner RuntimeTaskRunner) (RuntimeTaskRef, error)
+	CreateTaskItem(ctx context.Context, sessionID string, input TaskCreateInput) (RuntimeTaskItem, error)
+	GetTaskItem(ctx context.Context, sessionID, taskID string) (RuntimeTaskItem, error)
+	UpdateTaskItem(ctx context.Context, sessionID string, input TaskUpdateInput) (RuntimeTaskItem, error)
+	ListTaskItems(ctx context.Context, sessionID string, input TaskListInput) ([]RuntimeTaskItem, error)
 	ReadTaskOutput(ctx context.Context, taskID string, offset, limit int) (RuntimeTaskOutput, error)
 	StopTask(ctx context.Context, taskID string) (RuntimeTaskSnapshot, error)
 	PersistToolResult(ctx context.Context, sessionID, prefix, content string) (path string, size int64, err error)
@@ -269,6 +326,10 @@ func NewRuntimeCoreCatalogEntries(op commandline.Operator, workspacePath string,
 		func() (CatalogEntry, error) { return newEditCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newGlobCatalogEntry(op, workspacePath, workspaces) },
 		func() (CatalogEntry, error) { return newGrepCatalogEntry(op, workspacePath, workspaces) },
+		func() (CatalogEntry, error) { return newTaskCreateCatalogEntry(tasks) },
+		func() (CatalogEntry, error) { return newTaskGetCatalogEntry(tasks) },
+		func() (CatalogEntry, error) { return newTaskUpdateCatalogEntry(tasks) },
+		func() (CatalogEntry, error) { return newTaskListCatalogEntry(tasks) },
 		func() (CatalogEntry, error) { return newTaskOutputCatalogEntry(tasks) },
 		func() (CatalogEntry, error) { return newTaskStopCatalogEntry(tasks) },
 		newExitPlanModeCatalogEntry,
@@ -657,6 +718,70 @@ func newTaskOutputCatalogEntry(tasks RuntimeTaskManager) (CatalogEntry, error) {
 		return CatalogEntry{}, err
 	}
 	return runtimeCatalogEntry(RuntimeToolTaskOutput, "Task Output", "Read background task output.", ToolClassRuntimeTask, true, t), nil
+}
+
+func newTaskCreateCatalogEntry(tasks RuntimeTaskManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolTaskCreate,
+		"Create a persistent runtime task graph item for planning, delegation, workflow checkpoints, or long-running CC-style engineering work.",
+		func(ctx context.Context, input TaskCreateInput) (RuntimeTaskItem, error) {
+			if tasks == nil {
+				return RuntimeTaskItem{}, fmt.Errorf("runtime tasks are not available")
+			}
+			return tasks.CreateTaskItem(ctx, sessionIDFromContext(ctx), input)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	return runtimeCatalogEntry(RuntimeToolTaskCreate, "Task Create", "Create persistent task graph items.", ToolClassRuntimeTask, true, t), nil
+}
+
+func newTaskGetCatalogEntry(tasks RuntimeTaskManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolTaskGet,
+		"Read a persistent runtime task graph item by id.",
+		func(ctx context.Context, input TaskGetInput) (RuntimeTaskItem, error) {
+			if tasks == nil {
+				return RuntimeTaskItem{}, fmt.Errorf("runtime tasks are not available")
+			}
+			return tasks.GetTaskItem(ctx, sessionIDFromContext(ctx), input.TaskID)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	return runtimeCatalogEntry(RuntimeToolTaskGet, "Task Get", "Read persistent task graph items.", ToolClassRuntimeTask, true, t), nil
+}
+
+func newTaskUpdateCatalogEntry(tasks RuntimeTaskManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolTaskUpdate,
+		"Update a persistent runtime task graph item status, owner, priority, dependencies, or description.",
+		func(ctx context.Context, input TaskUpdateInput) (RuntimeTaskItem, error) {
+			if tasks == nil {
+				return RuntimeTaskItem{}, fmt.Errorf("runtime tasks are not available")
+			}
+			return tasks.UpdateTaskItem(ctx, sessionIDFromContext(ctx), input)
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	return runtimeCatalogEntry(RuntimeToolTaskUpdate, "Task Update", "Update persistent task graph items.", ToolClassRuntimeTask, true, t), nil
+}
+
+func newTaskListCatalogEntry(tasks RuntimeTaskManager) (CatalogEntry, error) {
+	t, err := toolutils.InferTool(RuntimeToolTaskList,
+		"List persistent runtime task graph items for the current session.",
+		func(ctx context.Context, input TaskListInput) (TaskListOutput, error) {
+			if tasks == nil {
+				return TaskListOutput{}, fmt.Errorf("runtime tasks are not available")
+			}
+			items, err := tasks.ListTaskItems(ctx, sessionIDFromContext(ctx), input)
+			if err != nil {
+				return TaskListOutput{}, err
+			}
+			return TaskListOutput{Tasks: items}, nil
+		})
+	if err != nil {
+		return CatalogEntry{}, err
+	}
+	return runtimeCatalogEntry(RuntimeToolTaskList, "Task List", "List persistent task graph items.", ToolClassRuntimeTask, true, t), nil
 }
 
 func newTaskStopCatalogEntry(tasks RuntimeTaskManager) (CatalogEntry, error) {

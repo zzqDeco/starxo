@@ -14,11 +14,13 @@
 - Runtime V2 core/deferred tool catalog、Eino v0.9 `tool_search` bridge、permission gate 和 top-level runner 安装由 `runtime_bundle_builder.go` 承接。
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
+- 管理 CC-style runtime task graph，并通过 compact/snapshot 支持 reload 后继续追踪 task records。
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。
+- 管理 runtime permission audit，把 bypass、session grant、user decision、missing UI 和 canceled request 记录为 per-session audit state。
 - 管理 Eino v0.9 runtime beta path：默认 Message runtime，显式 `agenticProtocol` 时仅探测 agentic provider 可用性并允许失败回退。
-- 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、后台任务、文件 read state、diff summary、todos、plan 和 worktree state。
+- 管理 Runtime context compact：在长会话 prompt 中保留 ToolSearch、权限、权限审计、后台任务、task graph、文件 read state、diff summary、todos、plan 和 worktree state。
 - 管理 current-objective 行为层：每个 user turn 生成 `RunObjective`，standalone 请求隔离旧历史，continuation 请求继承最近上下文。
 - 维护 `RunnerBundle` 的安装、retire、freshness probe 和事务式 swap，保证多 session 共享 runner 下的 freshness 更新不会打断正在运行或待 resume 的会话。
 - 提供一致性快照导出与 save-time discovery 剪枝接口，供 `SessionService` 原子落盘。
@@ -43,6 +45,7 @@
   - `timeline`
   - `streamingState`
   - `discoveredTools map[string]model.DiscoveredToolRecord`
+  - `permissionAudit []model.RuntimePermissionAudit`
   - `deferredAnnouncementState`
   - `mcpInstructionsDeltaState`
   - `runtimeContextCompact`

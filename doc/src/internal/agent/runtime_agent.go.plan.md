@@ -13,6 +13,7 @@
 - `BuildRuntimeAgent(...)` 接收模型、sandbox operator、always-load tools、AgentContext、mode、middleware 和 unknown-tool handler。
 - 默认 direct tools 包括 ask/choice/notify/todos；Runtime V2 core tools 由 service 层通过 `extraTools` 注入。
 - `RuntimeAgentPrompt(...)` 明确：当前 objective 是唯一 active task；旧消息只作为历史；`Agent` 是可选委派而不是默认分工。
+- prompt 现在要求跨 compact/reload、delegation、workflow checkpoint 或用户审阅的任务状态使用 `TaskCreate` / `TaskGet` / `TaskUpdate` / `TaskList`，普通短期步骤仍可使用 todos。
 - `RuntimeForkAgentPrompt(...)` 专用于 omitted `subagent_type` 的 fork subagent，保留 current-objective/plan-mode 规则，但明确禁止递归 `Agent` 委派，避免提示词暴露实际工具池不存在的能力。
 - plan mode 只改变 prompt 和 permission surface，执行仍在同一个 ChatModelAgent loop 内完成。
 

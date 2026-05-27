@@ -21,6 +21,7 @@ type SessionData struct {
 	Streaming                 *StreamingState            `json:"streaming,omitempty"`                 // non-nil when interrupted mid-stream
 	DiscoveredTools           []DiscoveredToolRecord     `json:"discoveredTools,omitempty"`           // MCP deferred discovery state
 	PermissionGrants          []RuntimePermissionGrant   `json:"permissionGrants,omitempty"`          // per-session runtime tool grants
+	PermissionAudit           []RuntimePermissionAudit   `json:"permissionAudit,omitempty"`           // per-session runtime tool permission decisions
 	DeferredAnnouncementState *DeferredAnnouncementState `json:"deferredAnnouncementState,omitempty"` // persisted deferred tools delta state
 	MCPInstructionsDeltaState *MCPInstructionsDeltaState `json:"mcpInstructionsDeltaState,omitempty"` // persisted MCP instructions summary state
 	RuntimeContextCompact     *RuntimeContextCompact     `json:"runtimeContextCompact,omitempty"`     // runtime-aware compact state for long sessions
@@ -141,6 +142,7 @@ func NormalizeSessionData(data *SessionData) (*SessionData, []string) {
 		Streaming:                 CloneStreamingState(data.Streaming),
 		DiscoveredTools:           cloneDiscoveredToolRecords(data.DiscoveredTools),
 		PermissionGrants:          cloneRuntimePermissionGrants(data.PermissionGrants),
+		PermissionAudit:           cloneRuntimePermissionAudit(data.PermissionAudit),
 		DeferredAnnouncementState: cloneDeferredAnnouncementState(data.DeferredAnnouncementState),
 		MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(data.MCPInstructionsDeltaState),
 		RuntimeContextCompact:     CloneRuntimeContextCompact(data.RuntimeContextCompact),

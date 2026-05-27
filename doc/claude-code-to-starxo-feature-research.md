@@ -24,6 +24,7 @@
 ## 2. 执行摘要
 
 - `starxo` 已经有一个不错的远程执行底座：SSH + Docker sandbox、多会话、Plan Mode、中断恢复、MCP、基础文件与命令工具、可视化 todo DAG。这些不应重造，应该继续增强。
+- 2026-05-27 增量：Runtime V2 已新增 `TaskCreate` / `TaskGet` / `TaskUpdate` / `TaskList` 持久任务图，以及 permission decision audit。Task V2 和权限审计不再是完全缺失项，后续重点应转向 rules、Workflow/Cron/Monitor、Session Memory/Auto Compact。
 - `claude-code` 的优势不在“单一模型更强”，而在一整层围绕 agent 的工程化能力：动态工具面、权限治理、上下文压缩与记忆、技能/插件、任务系统、IDE/bridge、自动化触发、工作流命令层。
 - 对 `starxo` 来说，最值得迁移的不是 CLI/TUI 表层，而是 5 组基础设施能力：
   - 动态工具面与资源访问层
@@ -68,7 +69,7 @@
 | Skills / Plugins / MCP | `SkillTool`、`loadSkillsDir.ts`、`builtinPlugins.ts` 支持 file-based skills、插件化扩展、MCP skill builder | MCP 工具已接入，但无技能/插件/扩展工作流层 | 部分具备 | MCP 不该单独演化，应该与技能/插件统一成扩展体系 |
 | IDE / Bridge | `src/bridge/*` 是完整 bridge 子系统，能管理远程 session 与外部入口 | Wails 桌面自身是主入口，没有 editor bridge | 缺失 | 有价值，但不是第一优先级 |
 | 自动化 / 远程触发 | `ScheduleCronTool`、`RemoteTriggerTool`、`SleepTool`、相关 skills 形成自动化触发能力 | 暂无 cron / remote trigger；计划中也未覆盖 | 缺失 | 与远程桌面定位非常契合，建议在基础能力补齐后做 |
-| 权限 / 治理 / 可观测性 | `doc/permissions.md`、Bash/File 权限、自定义 permission mode、MCP 审批、tool telemetry、audit 类能力成熟 | 只有 Docker 隔离与少量 tool wrapper/error policy；`plan/008-audit-log.md` 仍待实施 | 缺失 | 对远程执行产品尤其关键，应列入 `P0` |
+| 权限 / 治理 / 可观测性 | `doc/permissions.md`、Bash/File 权限、自定义 permission mode、MCP 审批、tool telemetry、audit 类能力成熟 | 已有 runtime permission queue、session grant 和 permission decision audit；缺 project/session rules、mode matrix 和 hook/classifier | 部分具备 | 对远程执行产品尤其关键，应继续作为 `P0` |
 
 ## 5. 重点迁移候选 Top 列表
 
@@ -147,7 +148,7 @@
 
 - `feature_name`: 并发安全的持久化任务模型
 - `source_evidence`: `/Users/zhaoziqian/claude-code/doc/tasks.md`；`/Users/zhaoziqian/claude-code/doc/src/tools/TaskCreateTool/README.md`；`/Users/zhaoziqian/claude-code/doc/src/tools/TodoWriteTool/README.md`；`/Users/zhaoziqian/starxo/internal/tools/todos.go`；`/Users/zhaoziqian/starxo/frontend/src/components/layout/TaskRailFloating.vue`
-- `current_starxo_state`: 已有 `write_todos` / `update_todo` 和 DAG UI，但 todo 数据是会话内内存结构，不支持 owner、并发 agent 协同、持久化 hooks 与更细状态流转。
+- `current_starxo_state`: 已有 `write_todos` / `update_todo` 和 DAG UI；Runtime V2 现在新增了 session-scoped persistent task graph 和 `TaskCreate/Get/Update/List`，但还缺 UI、workflow hooks、owner/team 协同和 automation 绑定。
 - `transfer_type`: 直接能力迁移
 - `user_value`: 高。比当前 todo 更适合多 agent、长任务、后台任务和恢复场景。
 - `core_capability_gap`: 现在的 todo 只能用来做视觉进度提示，还不足以承担“任务系统”的职责。

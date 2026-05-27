@@ -21,6 +21,10 @@
   - `Edit`
   - `Glob`
   - `Grep`
+  - `TaskCreate`
+  - `TaskGet`
+  - `TaskUpdate`
+  - `TaskList`
   - `TaskOutput`
   - `TaskStop`
   - `ExitPlanMode`
@@ -36,12 +40,13 @@
   - `write_file`
   - `list_files`
   - `str_replace_editor`
-- `Read`/`Glob`/`Grep`/`TaskOutput`/`ExitPlanMode` 标记为 read-only trusted，plan mode 可见。
+- `Read`/`Glob`/`Grep`/`TaskCreate`/`TaskGet`/`TaskUpdate`/`TaskList`/`TaskOutput`/`ExitPlanMode` 标记为 read-only trusted，plan mode 可见；Task graph 工具只修改 Starxo runtime metadata，不修改 sandbox。
 - `WorktreeDiff` 标记为 read-only trusted，可用于审阅 active worktree 修改。
 - `Bash`/`Write`/`Edit`/`TaskStop`/`Agent`/`EnterWorktree`/`ExitWorktree`/`WorktreeMerge` 是 writable/destructive surface，plan mode 下不加载或需先退出计划模式。
 - 所有 workspace path 都走 guard：拒绝空 workspace、`..` traversal 和 active workspace 外 absolute path；worktree mode 下以当前 active worktree 作为唯一边界。
 - `Read`/`Write`/`Edit`/`Glob`/`Grep`/`Bash` 会通过 `RuntimeWorkspaceManager.CurrentWorkspace` 解析 session 当前 workspace，因此可透明运行在 active worktree 中。
 - `Bash` 支持 foreground/background。background 通过 task manager 持久化输出。
+- `TaskCreate`/`TaskGet`/`TaskUpdate`/`TaskList` 提供 CC-style persistent task graph surface，用于跨 compact/reload、delegation、workflow checkpoint 和用户审阅的任务状态。
 - `Read` 支持 line offset/limit。
 - `Write` 返回 created/bytes/linesAdded/linesRemoved 和 bounded patch，方便前端结构化审阅写入结果；覆盖旧文件时优先使用 operator 的 bounded preview，且为新增内容保留 patch 预算，避免为生成 diff 读取完整大文件或只显示删除内容。
 - `Edit` 使用精确字符串替换并返回 bounded patch 摘要、行数变化和是否替换成功；大段替换时和 `Write` 一样为 replacement 内容保留 patch 预算。

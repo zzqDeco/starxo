@@ -13,6 +13,9 @@
 - resolved request 会从 pending queue 中移除。
 - pending requests 可按 session 过滤，并按创建时间稳定排序。
 - 已存在 session grant 时危险工具直接放行。
+- session grant 放行会记录 permission audit。
 - 无 UI context 时危险工具 fail-closed。
+- missing UI context 会记录 deny audit。
 - `allow_session` grant 会进入 session snapshot 并可持久化。
 - session grants 可通过 API 列出并撤销。
+- bypass permission mode 会自动放行并记录 bypass audit。
