@@ -578,6 +578,31 @@ func (m *runtimeTaskManager) RestoreCompactTaskItems(sessionID string, items []m
 	}
 }
 
+func (m *runtimeTaskManager) ClearTaskItemsForSession(sessionID string) int {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := 0
+	for id, item := range m.taskItems {
+		if item.SessionID != sessionID {
+			continue
+		}
+		delete(m.taskItems, id)
+		removed++
+	}
+	if removed > 0 {
+		m.emitEvent("runtime:task_graph_changed", map[string]any{
+			"action":    "cleared",
+			"sessionId": sessionID,
+			"count":     removed,
+		})
+	}
+	return removed
+}
+
 const (
 	runtimeTaskItemStatusTodo       = "todo"
 	runtimeTaskItemStatusInProgress = "in_progress"

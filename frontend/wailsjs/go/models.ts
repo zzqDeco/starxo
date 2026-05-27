@@ -167,8 +167,69 @@ export namespace config {
 		    return a;
 		}
 	}
+	export class SubagentDefinitionConfig {
+	    name: string;
+	    description: string;
+	    instruction?: string;
+	    allowedTools?: string[];
+	    defaultIsolation?: string;
+	    backgroundAllowed?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new SubagentDefinitionConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.instruction = source["instruction"];
+	        this.allowedTools = source["allowedTools"];
+	        this.defaultIsolation = source["defaultIsolation"];
+	        this.backgroundAllowed = source["backgroundAllowed"];
+	    }
+	}
+	export class AgentRuntimeConfig {
+	    engine: string;
+	    toolSearchMode: string;
+	    agenticProtocol: string;
+	    enableBuiltinDeepTransferFallback: boolean;
+	    subagents?: SubagentDefinitionConfig[];
+
+	    static createFrom(source: any = {}) {
+	        return new AgentRuntimeConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.engine = source["engine"];
+	        this.toolSearchMode = source["toolSearchMode"];
+	        this.agenticProtocol = source["agenticProtocol"];
+	        this.enableBuiltinDeepTransferFallback = source["enableBuiltinDeepTransferFallback"];
+	        this.subagents = this.convertValues(source["subagents"], SubagentDefinitionConfig);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AgentConfig {
 	    maxIterations: number;
+	    runtime: AgentRuntimeConfig;
 	    webSearch: WebSearchConfig;
 	    lsp: RuntimeLSPConfig;
 
@@ -179,6 +240,7 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.maxIterations = source["maxIterations"];
+	        this.runtime = this.convertValues(source["runtime"], AgentRuntimeConfig);
 	        this.webSearch = this.convertValues(source["webSearch"], WebSearchConfig);
 	        this.lsp = this.convertValues(source["lsp"], RuntimeLSPConfig);
 	    }
@@ -201,6 +263,7 @@ export namespace config {
 		    return a;
 		}
 	}
+
 	export class MCPServerConfig {
 	    name: string;
 	    transport: string;
@@ -381,6 +444,7 @@ export namespace config {
 		    return a;
 		}
 	}
+
 
 
 
@@ -681,6 +745,32 @@ export namespace model {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
+	export class RunObjective {
+	    id: string;
+	    runId: string;
+	    userMessageId: string;
+	    scope: string;
+	    objective: string;
+	    acceptance?: string;
+	    createdAt: number;
+	    historyStartIndex?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RunObjective(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.runId = source["runId"];
+	        this.userMessageId = source["userMessageId"];
+	        this.scope = source["scope"];
+	        this.objective = source["objective"];
+	        this.acceptance = source["acceptance"];
+	        this.createdAt = source["createdAt"];
+	        this.historyStartIndex = source["historyStartIndex"];
+	    }
+	}
 	export class RuntimeWorkspaceCompact {
 	    active: boolean;
 	    workspacePath?: string;
@@ -767,6 +857,38 @@ export namespace model {
 	        this.lastReadAt = source["lastReadAt"];
 	    }
 	}
+	export class RuntimeTaskItemCompact {
+	    id: string;
+	    sessionId?: string;
+	    title: string;
+	    description?: string;
+	    status: string;
+	    owner?: string;
+	    priority?: string;
+	    depends_on?: string[];
+	    createdAt?: number;
+	    updatedAt?: number;
+	    completedAt?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimeTaskItemCompact(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.status = source["status"];
+	        this.owner = source["owner"];
+	        this.priority = source["priority"];
+	        this.depends_on = source["depends_on"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.completedAt = source["completedAt"];
+	    }
+	}
 	export class RuntimeTaskCompact {
 	    id: string;
 	    sessionId?: string;
@@ -801,6 +923,40 @@ export namespace model {
 	        this.durationMs = source["durationMs"];
 	        this.exitCode = source["exitCode"];
 	        this.error = source["error"];
+	    }
+	}
+	export class RuntimePermissionAudit {
+	    requestId?: string;
+	    sessionId?: string;
+	    toolName: string;
+	    toolClass?: string;
+	    source?: string;
+	    risk?: string;
+	    mode?: string;
+	    decision: string;
+	    reason?: string;
+	    input?: string;
+	    createdAt?: number;
+	    resolvedAt?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RuntimePermissionAudit(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requestId = source["requestId"];
+	        this.sessionId = source["sessionId"];
+	        this.toolName = source["toolName"];
+	        this.toolClass = source["toolClass"];
+	        this.source = source["source"];
+	        this.risk = source["risk"];
+	        this.mode = source["mode"];
+	        this.decision = source["decision"];
+	        this.reason = source["reason"];
+	        this.input = source["input"];
+	        this.createdAt = source["createdAt"];
+	        this.resolvedAt = source["resolvedAt"];
 	    }
 	}
 	export class RuntimePermissionGrant {
@@ -867,12 +1023,15 @@ export namespace model {
 	    summary: string;
 	    toolSearch?: RuntimeToolSearchCompact;
 	    permissionGrants?: RuntimePermissionGrant[];
+	    permissionAudit?: RuntimePermissionAudit[];
 	    tasks?: RuntimeTaskCompact[];
+	    taskItems?: RuntimeTaskItemCompact[];
 	    fileReadState?: RuntimeFileReadState[];
 	    diffSummaries?: RuntimeDiffSummary[];
 	    todos?: RuntimeTodoItem[];
 	    planDocument?: PlanDocument;
 	    workspace?: RuntimeWorkspaceCompact;
+	    activeObjective?: RunObjective;
 
 	    static createFrom(source: any = {}) {
 	        return new RuntimeContextCompact(source);
@@ -889,12 +1048,15 @@ export namespace model {
 	        this.summary = source["summary"];
 	        this.toolSearch = this.convertValues(source["toolSearch"], RuntimeToolSearchCompact);
 	        this.permissionGrants = this.convertValues(source["permissionGrants"], RuntimePermissionGrant);
+	        this.permissionAudit = this.convertValues(source["permissionAudit"], RuntimePermissionAudit);
 	        this.tasks = this.convertValues(source["tasks"], RuntimeTaskCompact);
+	        this.taskItems = this.convertValues(source["taskItems"], RuntimeTaskItemCompact);
 	        this.fileReadState = this.convertValues(source["fileReadState"], RuntimeFileReadState);
 	        this.diffSummaries = this.convertValues(source["diffSummaries"], RuntimeDiffSummary);
 	        this.todos = this.convertValues(source["todos"], RuntimeTodoItem);
 	        this.planDocument = this.convertValues(source["planDocument"], PlanDocument);
 	        this.workspace = this.convertValues(source["workspace"], RuntimeWorkspaceCompact);
+	        this.activeObjective = this.convertValues(source["activeObjective"], RunObjective);
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -915,6 +1077,8 @@ export namespace model {
 		    return a;
 		}
 	}
+
+
 
 
 
@@ -969,6 +1133,7 @@ export namespace model {
 	    streaming?: StreamingState;
 	    discoveredTools?: DiscoveredToolRecord[];
 	    permissionGrants?: RuntimePermissionGrant[];
+	    permissionAudit?: RuntimePermissionAudit[];
 	    deferredAnnouncementState?: DeferredAnnouncementState;
 	    mcpInstructionsDeltaState?: MCPInstructionsDeltaState;
 	    runtimeContextCompact?: RuntimeContextCompact;
@@ -989,6 +1154,7 @@ export namespace model {
 	        this.streaming = this.convertValues(source["streaming"], StreamingState);
 	        this.discoveredTools = this.convertValues(source["discoveredTools"], DiscoveredToolRecord);
 	        this.permissionGrants = this.convertValues(source["permissionGrants"], RuntimePermissionGrant);
+	        this.permissionAudit = this.convertValues(source["permissionAudit"], RuntimePermissionAudit);
 	        this.deferredAnnouncementState = this.convertValues(source["deferredAnnouncementState"], DeferredAnnouncementState);
 	        this.mcpInstructionsDeltaState = this.convertValues(source["mcpInstructionsDeltaState"], MCPInstructionsDeltaState);
 	        this.runtimeContextCompact = this.convertValues(source["runtimeContextCompact"], RuntimeContextCompact);
@@ -1434,7 +1600,6 @@ export namespace service {
 	        this.supportsMica = source["supportsMica"];
 	    }
 	}
-
 	export class RuntimeLSPConfigured {
 	    language: string;
 	    executable: string;
@@ -1954,6 +2119,10 @@ export namespace tools {
 	    worktreeBranch: string;
 	    commitMessage?: string;
 	    removed: boolean;
+	    conflicted?: boolean;
+	    conflictFiles?: string[];
+	    mergeOutput?: string;
+	    recoveryHint?: string;
 	    message: string;
 
 	    static createFrom(source: any = {}) {
@@ -1968,6 +2137,10 @@ export namespace tools {
 	        this.worktreeBranch = source["worktreeBranch"];
 	        this.commitMessage = source["commitMessage"];
 	        this.removed = source["removed"];
+	        this.conflicted = source["conflicted"];
+	        this.conflictFiles = source["conflictFiles"];
+	        this.mergeOutput = source["mergeOutput"];
+	        this.recoveryHint = source["recoveryHint"];
 	        this.message = source["message"];
 	    }
 	}

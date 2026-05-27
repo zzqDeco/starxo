@@ -87,6 +87,7 @@
 - `ClearHistory()`：
   - 清空消息/显示/streaming/deferred state 与 plan state
   - 清空当前 active session 对应的 todo bucket，不影响其他后台 session 的 todo 状态
+  - 清空当前 active session 对应的 task graph items，避免旧 `TaskCreate` 状态在 compact/save 后重新出现
   - 不重置当前 mode
   - 解锁后 best-effort 调度 async save
   - 不删除、不重写 workspace 里的 `plan.md`

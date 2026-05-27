@@ -2718,10 +2718,14 @@ func (s *ChatService) ClearHistory() error {
 	s.cleanupRetiredBundlesLocked()
 	sessionID := s.activeSessionID
 	sessionSvc := s.sessionService
+	runtimeTasks := s.runtimeTasks
 	s.mu.Unlock()
 
 	s.deleteRuntimeTurnCheckpoint(sessionID)
 	tools.ClearTodosForSession(sessionID)
+	if runtimeTasks != nil {
+		runtimeTasks.ClearTaskItemsForSession(sessionID)
+	}
 	if sessionSvc != nil && sessionID != "" {
 		if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
 			logger.Warn("[CHAT] Failed to schedule clear-history save", "session", sessionID, "error", err)
