@@ -78,6 +78,10 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 			ToolName: "Bash",
 			Decision: "allow_session",
 		}},
+		PermissionAudit: []RuntimePermissionAudit{{
+			ToolName: "Bash",
+			Decision: "allow_once",
+		}},
 		PlanDocument: &PlanDocument{
 			Markdown:  "draft",
 			UpdatedAt: 10,
@@ -107,11 +111,15 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 	if len(normalized.PermissionGrants) != 1 || normalized.PermissionGrants[0].ToolName != "Bash" {
 		t.Fatalf("expected permission grant clone, got %#v", normalized.PermissionGrants)
 	}
+	if len(normalized.PermissionAudit) != 1 || normalized.PermissionAudit[0].ToolName != "Bash" {
+		t.Fatalf("expected permission audit clone, got %#v", normalized.PermissionAudit)
+	}
 
 	normalized.PlanDocument.Markdown = "changed"
 	normalized.PendingPlanApproval.RequestedAt = 99
 	normalized.PendingPlanAttachment.Markdown = "changed too"
 	normalized.PermissionGrants[0].ToolName = "Write"
+	normalized.PermissionAudit[0].ToolName = "Write"
 
 	if data.PlanDocument.Markdown != "draft" {
 		t.Fatalf("expected original plan document to stay unchanged, got %#v", data.PlanDocument)
@@ -124,6 +132,9 @@ func TestNormalizeSessionDataReturnsCopy(t *testing.T) {
 	}
 	if data.PermissionGrants[0].ToolName != "Bash" {
 		t.Fatalf("expected original permission grant to stay unchanged, got %#v", data.PermissionGrants)
+	}
+	if data.PermissionAudit[0].ToolName != "Bash" {
+		t.Fatalf("expected original permission audit to stay unchanged, got %#v", data.PermissionAudit)
 	}
 }
 
@@ -151,9 +162,19 @@ func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
 				ToolName: "Bash",
 				Decision: "allow_session",
 			}},
+			PermissionAudit: []RuntimePermissionAudit{{
+				ToolName: "Bash",
+				Decision: "allow_once",
+			}},
 			Tasks: []RuntimeTaskCompact{{
 				ID:     "task-1",
 				Status: "running",
+			}},
+			TaskItems: []RuntimeTaskItemCompact{{
+				ID:        "taskitem-1",
+				Title:     "Ship task graph",
+				Status:    "todo",
+				DependsOn: []string{"taskitem-0"},
 			}},
 			FileReadState: []RuntimeFileReadState{{
 				FilePath: "/workspace/main.go",
@@ -191,7 +212,9 @@ func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
 	normalized.RuntimeContextCompact.ToolSearch.DeferredAnnouncementState.AnnouncedSearchableCanonicalNames[0] = "mutated"
 	normalized.RuntimeContextCompact.ToolSearch.MCPInstructionsDeltaState.LastAnnouncedSearchableServers[0] = "mutated"
 	normalized.RuntimeContextCompact.PermissionGrants[0].ToolName = "Write"
+	normalized.RuntimeContextCompact.PermissionAudit[0].ToolName = "Write"
 	normalized.RuntimeContextCompact.Tasks[0].Status = "failed"
+	normalized.RuntimeContextCompact.TaskItems[0].DependsOn[0] = "changed"
 	normalized.RuntimeContextCompact.FileReadState[0].FilePath = "changed"
 	normalized.RuntimeContextCompact.DiffSummaries[0].Summary = "changed"
 	normalized.RuntimeContextCompact.Todos[0].DependsOn[0] = "changed"
@@ -204,7 +227,9 @@ func TestNormalizeSessionDataClonesRuntimeContextCompact(t *testing.T) {
 		orig.ToolSearch.DeferredAnnouncementState.AnnouncedSearchableCanonicalNames[0] != "LSP" ||
 		orig.ToolSearch.MCPInstructionsDeltaState.LastAnnouncedSearchableServers[0] != "alpha" ||
 		orig.PermissionGrants[0].ToolName != "Bash" ||
+		orig.PermissionAudit[0].ToolName != "Bash" ||
 		orig.Tasks[0].Status != "running" ||
+		orig.TaskItems[0].DependsOn[0] != "taskitem-0" ||
 		orig.FileReadState[0].FilePath != "/workspace/main.go" ||
 		orig.DiffSummaries[0].Summary != "edited" ||
 		orig.Todos[0].DependsOn[0] != "todo-0" ||

@@ -84,6 +84,13 @@ func TestRequestToolPermissionUsesSessionGrant(t *testing.T) {
 	if resolution.Decision != tools.ToolPermissionDecisionAllowSession {
 		t.Fatalf("expected allow_session from grant, got %#v", resolution)
 	}
+	audit, err := chat.ListToolPermissionAudit("sess-perm")
+	if err != nil {
+		t.Fatalf("list permission audit: %v", err)
+	}
+	if len(audit) != 1 || audit[0].ToolName != "Bash" || audit[0].Reason != "session_grant" {
+		t.Fatalf("expected session grant audit, got %#v", audit)
+	}
 }
 
 func TestRequestToolPermissionWithoutUIContextFailsClosed(t *testing.T) {
@@ -95,6 +102,13 @@ func TestRequestToolPermissionWithoutUIContextFailsClosed(t *testing.T) {
 	}, `{"command":"rm -rf build"}`)
 	if err == nil {
 		t.Fatalf("expected missing UI context to fail closed")
+	}
+	audit, auditErr := chat.ListToolPermissionAudit("sess-perm")
+	if auditErr != nil {
+		t.Fatalf("list permission audit: %v", auditErr)
+	}
+	if len(audit) != 1 || audit[0].Decision != tools.ToolPermissionDecisionDeny || audit[0].Reason != "missing_ui_context" {
+		t.Fatalf("expected missing UI denial audit, got %#v", audit)
 	}
 }
 
@@ -142,5 +156,27 @@ func TestListAndRevokeToolPermissionGrants(t *testing.T) {
 	}
 	if len(grants) != 0 {
 		t.Fatalf("expected revoked grants to be empty, got %#v", grants)
+	}
+}
+
+func TestRequestToolPermissionBypassModeAudited(t *testing.T) {
+	chat := NewChatService(nil)
+	resolution, err := chat.requestToolPermission(context.Background(), "sess-perm", "bypassPermissions", tools.CatalogEntry{
+		CanonicalName: "Bash",
+		ToolClass:     tools.ToolClassRuntimeExec,
+		Source:        tools.ToolSourceRuntime,
+	}, `{"command":"go test ./..."}`)
+	if err != nil {
+		t.Fatalf("request permission in bypass mode: %v", err)
+	}
+	if resolution.Decision != tools.ToolPermissionDecisionAllowOnce {
+		t.Fatalf("expected allow_once from bypass, got %#v", resolution)
+	}
+	audit, err := chat.ListToolPermissionAudit("sess-perm")
+	if err != nil {
+		t.Fatalf("list permission audit: %v", err)
+	}
+	if len(audit) != 1 || audit[0].Reason != "bypass_permissions" || audit[0].Mode != "bypassPermissions" {
+		t.Fatalf("expected bypass audit, got %#v", audit)
 	}
 }

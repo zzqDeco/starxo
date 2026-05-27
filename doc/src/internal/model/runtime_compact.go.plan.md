@@ -15,7 +15,9 @@
   - `Summary`: deterministic compact summary
   - `ToolSearch`: discovered tools / deferred announcement / MCP instructions delta state
   - `PermissionGrants`
+  - `PermissionAudit`: recent non-read-only tool permission decisions
   - `Tasks`
+  - `TaskItems`: CC-style persistent task graph records
   - `FileReadState`
   - `DiffSummaries`
   - `Todos`
@@ -26,5 +28,7 @@
 
 ## 4. 维护边界
 - model 层不依赖 tools/service，`RuntimeTodoItem` 和 task/workspace compact 类型保持纯数据结构。
+- `RuntimeTaskItemCompact` 保存 task graph 的 title/status/owner/priority/dependencies/timestamps。
+- `RuntimePermissionAudit` 保存 request id、tool metadata、mode、decision、reason、input preview 和 timestamps。
 - 新增 compact 字段时必须同步 `CloneRuntimeContextCompact` 和 `NormalizeSessionData`。
 - `ActiveObjective` 是行为层隔离边界；compact 后必须保留，避免长会话恢复时把旧任务当成当前目标。

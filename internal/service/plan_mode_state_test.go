@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"starxo/internal/model"
 	"starxo/internal/storage"
+	"starxo/internal/tools"
 )
 
 func newPlanModeStateHarness(t *testing.T) (*storage.SessionStore, *ChatService, *SessionService, *model.Session) {
@@ -260,6 +262,12 @@ func TestPlanModeStateClearHistoryClearsPlanStateWithoutChangingModeAndPersists(
 	}
 	run.stateMu.Unlock()
 	run.addUserMessage("hello")
+	if _, err := chat.runtimeTasks.CreateTaskItem(nil, sess.ID, tools.TaskCreateInput{
+		Title:  "stale workflow task",
+		Status: "in_progress",
+	}); err != nil {
+		t.Fatalf("create task graph item: %v", err)
+	}
 
 	if err := chat.ClearHistory(); err != nil {
 		t.Fatalf("clear history: %v", err)
@@ -276,11 +284,50 @@ func TestPlanModeStateClearHistoryClearsPlanStateWithoutChangingModeAndPersists(
 			data.PlanDocument == nil &&
 			data.PendingPlanApproval == nil &&
 			data.PendingPlanAttachment == nil &&
-			len(data.Messages) == 0
+			len(data.Messages) == 0 &&
+			(data.RuntimeContextCompact == nil || len(data.RuntimeContextCompact.TaskItems) == 0)
 	})
 	if saved.PlanDocument != nil || saved.PendingPlanApproval != nil || saved.PendingPlanAttachment != nil {
 		t.Fatalf("expected persisted plan state to be cleared, got %#v", saved)
 	}
+	if taskItems, err := chat.runtimeTasks.ListTaskItems(nil, sess.ID, tools.TaskListInput{IncludeClosed: true}); err != nil {
+		t.Fatalf("list task graph after clear history: %v", err)
+	} else if len(taskItems) != 0 {
+		t.Fatalf("expected clear history to remove task graph items, got %#v", taskItems)
+	}
+}
+
+func TestRuntimeTaskGraphMutationsPersistSessionData(t *testing.T) {
+	sessionStore, chat, _, sess := newPlanModeStateHarness(t)
+
+	created, err := chat.runtimeTasks.CreateTaskItem(context.Background(), sess.ID, tools.TaskCreateInput{
+		Title:  "checkpoint task",
+		Status: "in_progress",
+	})
+	if err != nil {
+		t.Fatalf("create task graph item: %v", err)
+	}
+	waitForLoadedSessionData(t, sessionStore, sess.ID, func(data *model.SessionData) bool {
+		return data != nil &&
+			data.RuntimeContextCompact != nil &&
+			len(data.RuntimeContextCompact.TaskItems) == 1 &&
+			data.RuntimeContextCompact.TaskItems[0].ID == created.ID &&
+			data.RuntimeContextCompact.TaskItems[0].Status == "in_progress"
+	})
+
+	if _, err := chat.runtimeTasks.UpdateTaskItem(context.Background(), sess.ID, tools.TaskUpdateInput{
+		TaskID: created.ID,
+		Status: "completed",
+	}); err != nil {
+		t.Fatalf("update task graph item: %v", err)
+	}
+	waitForLoadedSessionData(t, sessionStore, sess.ID, func(data *model.SessionData) bool {
+		return data != nil &&
+			data.RuntimeContextCompact != nil &&
+			len(data.RuntimeContextCompact.TaskItems) == 1 &&
+			data.RuntimeContextCompact.TaskItems[0].ID == created.ID &&
+			data.RuntimeContextCompact.TaskItems[0].Status == "completed"
+	})
 }
 
 func TestPlanModeStateEnsureDefaultSessionRestoresPersistedModeForStartupChain(t *testing.T) {

@@ -15,6 +15,7 @@
 ## 4. 关键测试覆盖
 - legacy aliases 映射到 canonical runtime tool names。
 - plan mode current loaded 只保留 read-only trusted runtime tools。
+- `TaskCreate` / `TaskGet` / `TaskUpdate` / `TaskList` 作为 safe runtime metadata tools 在 plan mode 可用。
 - `Edit` tool 能通过 invokable contract 修改文件并返回 patch。
 - `Edit` tool 替换大段旧文本时仍会在 patch 中保留 replacement 内容。
 - `Write` tool 覆盖已有文件时返回 created=false、增删行和 patch metadata。

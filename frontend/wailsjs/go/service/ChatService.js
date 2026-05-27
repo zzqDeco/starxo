@@ -82,6 +82,10 @@ export function ListRuntimeTasks(arg1) {
   return window['go']['service']['ChatService']['ListRuntimeTasks'](arg1);
 }
 
+export function ListToolPermissionAudit(arg1) {
+  return window['go']['service']['ChatService']['ListToolPermissionAudit'](arg1);
+}
+
 export function ListToolPermissionGrants(arg1) {
   return window['go']['service']['ChatService']['ListToolPermissionGrants'](arg1);
 }

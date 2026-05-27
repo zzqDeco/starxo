@@ -14,7 +14,9 @@ type RuntimeContextCompact struct {
 	Summary              string                   `json:"summary"`
 	ToolSearch           RuntimeToolSearchCompact `json:"toolSearch,omitempty"`
 	PermissionGrants     []RuntimePermissionGrant `json:"permissionGrants,omitempty"`
+	PermissionAudit      []RuntimePermissionAudit `json:"permissionAudit,omitempty"`
 	Tasks                []RuntimeTaskCompact     `json:"tasks,omitempty"`
+	TaskItems            []RuntimeTaskItemCompact `json:"taskItems,omitempty"`
 	FileReadState        []RuntimeFileReadState   `json:"fileReadState,omitempty"`
 	DiffSummaries        []RuntimeDiffSummary     `json:"diffSummaries,omitempty"`
 	Todos                []RuntimeTodoItem        `json:"todos,omitempty"`
@@ -59,6 +61,39 @@ type RuntimeTaskCompact struct {
 	DurationMs  int64  `json:"durationMs,omitempty"`
 	ExitCode    int    `json:"exitCode,omitempty"`
 	Error       string `json:"error,omitempty"`
+}
+
+// RuntimeTaskItemCompact is the persisted view of the CC-style task graph
+// managed through TaskCreate/TaskGet/TaskUpdate/TaskList.
+type RuntimeTaskItemCompact struct {
+	ID          string   `json:"id"`
+	SessionID   string   `json:"sessionId,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Status      string   `json:"status"`
+	Owner       string   `json:"owner,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	CreatedAt   int64    `json:"createdAt,omitempty"`
+	UpdatedAt   int64    `json:"updatedAt,omitempty"`
+	CompletedAt int64    `json:"completedAt,omitempty"`
+}
+
+// RuntimePermissionAudit records permission decisions so compacted prompts and
+// settings surfaces can explain why a tool ran without replaying old turns.
+type RuntimePermissionAudit struct {
+	RequestID  string `json:"requestId,omitempty"`
+	SessionID  string `json:"sessionId,omitempty"`
+	ToolName   string `json:"toolName"`
+	ToolClass  string `json:"toolClass,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Risk       string `json:"risk,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	Decision   string `json:"decision"`
+	Reason     string `json:"reason,omitempty"`
+	Input      string `json:"input,omitempty"`
+	CreatedAt  int64  `json:"createdAt,omitempty"`
+	ResolvedAt int64  `json:"resolvedAt,omitempty"`
 }
 
 // RuntimeFileReadState records the latest known read range and content hash for
@@ -113,7 +148,9 @@ func CloneRuntimeContextCompact(in *RuntimeContextCompact) *RuntimeContextCompac
 		MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(in.ToolSearch.MCPInstructionsDeltaState),
 	}
 	out.PermissionGrants = cloneRuntimePermissionGrants(in.PermissionGrants)
+	out.PermissionAudit = cloneRuntimePermissionAudit(in.PermissionAudit)
 	out.Tasks = cloneRuntimeTaskCompacts(in.Tasks)
+	out.TaskItems = cloneRuntimeTaskItemCompacts(in.TaskItems)
 	out.FileReadState = cloneRuntimeFileReadState(in.FileReadState)
 	out.DiffSummaries = cloneRuntimeDiffSummaries(in.DiffSummaries)
 	out.Todos = cloneRuntimeTodoItems(in.Todos)
@@ -134,6 +171,27 @@ func cloneRuntimeTaskCompacts(in []RuntimeTaskCompact) []RuntimeTaskCompact {
 		return nil
 	}
 	out := make([]RuntimeTaskCompact, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneRuntimeTaskItemCompacts(in []RuntimeTaskItemCompact) []RuntimeTaskItemCompact {
+	if in == nil {
+		return nil
+	}
+	out := make([]RuntimeTaskItemCompact, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].DependsOn = cloneStrings(in[i].DependsOn)
+	}
+	return out
+}
+
+func cloneRuntimePermissionAudit(in []RuntimePermissionAudit) []RuntimePermissionAudit {
+	if in == nil {
+		return nil
+	}
+	out := make([]RuntimePermissionAudit, len(in))
 	copy(out, in)
 	return out
 }

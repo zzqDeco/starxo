@@ -19,6 +19,7 @@ const (
 	runtimeCompactRecentMessages = 12
 	runtimeCompactMaxDiffs       = 20
 	runtimeCompactMaxFileReads   = 40
+	runtimeCompactMaxTaskItems   = 20
 )
 
 type pendingRuntimeToolCall struct {
@@ -37,8 +38,10 @@ func (s *ChatService) refreshRuntimeContextCompact(sessionID string, run *Sessio
 	}
 	now := s.now().UnixMilli()
 	taskSnapshots := []model.RuntimeTaskCompact(nil)
+	taskItems := []model.RuntimeTaskItemCompact(nil)
 	if s.runtimeTasks != nil {
 		taskSnapshots = s.runtimeTasks.CompactSnapshots(sessionID)
+		taskItems = s.runtimeTasks.CompactTaskItems(sessionID)
 	}
 
 	var workspace *model.RuntimeWorkspaceCompact
@@ -63,6 +66,16 @@ func (s *ChatService) refreshRuntimeContextCompact(sessionID string, run *Sessio
 	sort.Slice(grants, func(i, j int) bool {
 		return grants[i].ToolName < grants[j].ToolName
 	})
+	permissionAudit := append([]model.RuntimePermissionAudit(nil), run.permissionAudit...)
+	sort.Slice(permissionAudit, func(i, j int) bool {
+		if permissionAudit[i].ResolvedAt == permissionAudit[j].ResolvedAt {
+			return permissionAudit[i].RequestID < permissionAudit[j].RequestID
+		}
+		return permissionAudit[i].ResolvedAt > permissionAudit[j].ResolvedAt
+	})
+	if len(permissionAudit) > 40 {
+		permissionAudit = permissionAudit[:40]
+	}
 	fileReads := make([]model.RuntimeFileReadState, 0, len(run.fileReadState))
 	for _, state := range run.fileReadState {
 		fileReads = append(fileReads, state)
@@ -95,7 +108,9 @@ func (s *ChatService) refreshRuntimeContextCompact(sessionID string, run *Sessio
 			MCPInstructionsDeltaState: cloneMCPInstructionsDeltaState(run.mcpInstructionsDeltaState),
 		},
 		PermissionGrants: grants,
+		PermissionAudit:  permissionAudit,
 		Tasks:            taskSnapshots,
+		TaskItems:        taskItems,
 		FileReadState:    fileReads,
 		DiffSummaries:    diffs,
 		Todos:            tools.SnapshotTodosForSession(sessionID),
@@ -129,7 +144,9 @@ func runtimeCompactHasContent(compact *model.RuntimeContextCompact) bool {
 	return compact.OmittedMessageCount > 0 ||
 		len(compact.ToolSearch.DiscoveredTools) > 0 ||
 		len(compact.PermissionGrants) > 0 ||
+		len(compact.PermissionAudit) > 0 ||
 		len(compact.Tasks) > 0 ||
+		len(compact.TaskItems) > 0 ||
 		len(compact.FileReadState) > 0 ||
 		len(compact.DiffSummaries) > 0 ||
 		len(compact.Todos) > 0 ||
@@ -169,7 +186,75 @@ func buildRuntimeCompactSummary(messages []model.PersistedMessage, compact *mode
 	if len(compact.Tasks) > 0 {
 		b.WriteString(fmt.Sprintf("There are %d runtime task snapshot(s) with output paths preserved.\n", len(compact.Tasks)))
 	}
+	if len(compact.TaskItems) > 0 {
+		b.WriteString(fmt.Sprintf("There are %d persistent task graph item(s) from TaskCreate/TaskUpdate.\n", len(compact.TaskItems)))
+		limit := len(compact.TaskItems)
+		if limit > runtimeCompactMaxTaskItems {
+			limit = runtimeCompactMaxTaskItems
+		}
+		for _, item := range compact.TaskItems[:limit] {
+			line := runtimeTaskItemCompactPromptLine(item)
+			if line == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		if len(compact.TaskItems) > limit {
+			b.WriteString(fmt.Sprintf("- ... %d more task graph item(s) omitted from prompt\n", len(compact.TaskItems)-limit))
+		}
+	}
+	if len(compact.PermissionAudit) > 0 {
+		b.WriteString(fmt.Sprintf("There are %d recent permission decision audit record(s).\n", len(compact.PermissionAudit)))
+	}
 	return strings.TrimSpace(b.String())
+}
+
+func runtimeTaskItemCompactPromptLine(item model.RuntimeTaskItemCompact) string {
+	id := strings.TrimSpace(item.ID)
+	title := strings.Join(strings.Fields(item.Title), " ")
+	if id == "" || title == "" {
+		return ""
+	}
+	status := strings.TrimSpace(item.Status)
+	if status == "" {
+		status = runtimeTaskItemStatusTodo
+	}
+	parts := []string{
+		"id=" + id,
+		"status=" + status,
+		"title=" + fmt.Sprintf("%q", truncateRuntimeCompactText(title, 120)),
+	}
+	if len(item.DependsOn) > 0 {
+		deps := make([]string, 0, len(item.DependsOn))
+		for _, dep := range item.DependsOn {
+			dep = strings.TrimSpace(dep)
+			if dep != "" {
+				deps = append(deps, dep)
+			}
+		}
+		if len(deps) > 0 {
+			parts = append(parts, "depends_on=["+strings.Join(deps, ",")+"]")
+		}
+	}
+	if owner := strings.TrimSpace(item.Owner); owner != "" {
+		parts = append(parts, "owner="+owner)
+	}
+	if priority := strings.TrimSpace(item.Priority); priority != "" {
+		parts = append(parts, "priority="+priority)
+	}
+	return strings.Join(parts, " ")
+}
+
+func truncateRuntimeCompactText(text string, maxLen int) string {
+	if maxLen <= 0 || len(text) <= maxLen {
+		return text
+	}
+	if maxLen <= 3 {
+		return text[:maxLen]
+	}
+	return text[:maxLen-3] + "..."
 }
 
 func persistedMessageOneLine(msg model.PersistedMessage) string {

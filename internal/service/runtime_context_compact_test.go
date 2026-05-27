@@ -47,6 +47,13 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 		Decision:  tools.ToolPermissionDecisionAllowSession,
 		CreatedAt: now.UnixMilli(),
 	}
+	run.permissionAudit = append(run.permissionAudit, model.RuntimePermissionAudit{
+		ToolName:   tools.RuntimeToolBash,
+		Decision:   tools.ToolPermissionDecisionAllowSession,
+		Reason:     "user_decision",
+		CreatedAt:  now.UnixMilli(),
+		ResolvedAt: now.UnixMilli(),
+	})
 	run.planDocument = &model.PlanDocument{Markdown: "ship compact", UpdatedAt: now.UnixMilli()}
 	run.stateMu.Unlock()
 
@@ -81,6 +88,14 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 		OutputPath:  outputPath,
 		StartedAt:   now.UnixMilli(),
 	}}
+	chat.runtimeTasks.taskItems["taskitem-1"] = tools.RuntimeTaskItem{
+		ID:        "taskitem-1",
+		SessionID: sessionID,
+		Title:     "Ship runtime task graph",
+		Status:    "in_progress",
+		CreatedAt: now.UnixMilli(),
+		UpdatedAt: now.UnixMilli(),
+	}
 	chat.runtimeTasks.mu.Unlock()
 	chat.runtimeWorkspaces.mu.Lock()
 	chat.runtimeWorkspaces.states[sessionID] = runtimeWorktreeState{
@@ -113,6 +128,9 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 	if len(compact.PermissionGrants) != 1 || compact.PermissionGrants[0].ToolName != tools.RuntimeToolBash {
 		t.Fatalf("unexpected grants: %#v", compact.PermissionGrants)
 	}
+	if len(compact.PermissionAudit) != 1 || compact.PermissionAudit[0].ToolName != tools.RuntimeToolBash {
+		t.Fatalf("unexpected permission audit: %#v", compact.PermissionAudit)
+	}
 	if len(compact.FileReadState) != 1 || compact.FileReadState[0].FilePath != "/workspace/main.go" || compact.FileReadState[0].ContentHash == "" {
 		t.Fatalf("unexpected file read state: %#v", compact.FileReadState)
 	}
@@ -121,6 +139,9 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 	}
 	if len(compact.Tasks) != 1 || compact.Tasks[0].ID != "task-1" {
 		t.Fatalf("unexpected task snapshots: %#v", compact.Tasks)
+	}
+	if len(compact.TaskItems) != 1 || compact.TaskItems[0].ID != "taskitem-1" {
+		t.Fatalf("unexpected task graph items: %#v", compact.TaskItems)
 	}
 	if len(compact.Todos) != 1 || compact.Todos[0].Status != "in_progress" {
 		t.Fatalf("unexpected todos: %#v", compact.Todos)
@@ -148,6 +169,13 @@ func TestRuntimeContextCompactSnapshotAndRestorePreservesRuntimeState(t *testing
 	if len(tasks) != 1 || tasks[0].Status != runtimeTaskStatusFailed {
 		t.Fatalf("expected restored running task to be visible as failed, got %#v", tasks)
 	}
+	taskItems, err := reloaded.runtimeTasks.ListTaskItems(nil, sessionID, tools.TaskListInput{})
+	if err != nil {
+		t.Fatalf("list restored task graph items: %v", err)
+	}
+	if len(taskItems) != 1 || taskItems[0].ID != "taskitem-1" || taskItems[0].Status != "in_progress" {
+		t.Fatalf("expected restored task graph item, got %#v", taskItems)
+	}
 	out, err := reloaded.ReadRuntimeTaskOutput("task-1", 0, 100)
 	if err != nil {
 		t.Fatalf("read restored task output: %v", err)
@@ -170,17 +198,31 @@ func TestPrepareMessagesForRunInjectsRuntimeCompact(t *testing.T) {
 		CanonicalName: tools.RuntimeToolLSP,
 		Kind:          tools.ToolKindAction,
 	})
+	chat.runtimeTasks.mu.Lock()
+	chat.runtimeTasks.taskItems["taskitem-prompt"] = tools.RuntimeTaskItem{
+		ID:        "taskitem-prompt",
+		SessionID: sessionID,
+		Title:     "Resume review feedback",
+		Status:    runtimeTaskItemStatusInProgress,
+		DependsOn: []string{"taskitem-root"},
+	}
+	chat.runtimeTasks.mu.Unlock()
 
 	messages := chat.prepareMessagesForRun(sessionID, run)
 	found := false
 	for _, msg := range messages {
-		if strings.Contains(msg.Content, "[Runtime context compact]") && strings.Contains(msg.Content, tools.RuntimeToolLSP) {
+		if strings.Contains(msg.Content, "[Runtime context compact]") &&
+			strings.Contains(msg.Content, tools.RuntimeToolLSP) &&
+			strings.Contains(msg.Content, "taskitem-prompt") &&
+			strings.Contains(msg.Content, "status=in_progress") &&
+			strings.Contains(msg.Content, `title="Resume review feedback"`) &&
+			strings.Contains(msg.Content, "depends_on=[taskitem-root]") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected compact message with discovered tool, got %#v", messages)
+		t.Fatalf("expected compact message with discovered tool and task graph details, got %#v", messages)
 	}
 }
 

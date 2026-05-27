@@ -48,6 +48,8 @@ export function IsSessionRunning(arg1:string):Promise<boolean>;
 
 export function ListRuntimeTasks(arg1:string):Promise<Array<tools.RuntimeTaskSnapshot>>;
 
+export function ListToolPermissionAudit(arg1:string):Promise<Array<model.RuntimePermissionAudit>>;
+
 export function ListToolPermissionGrants(arg1:string):Promise<Array<model.RuntimePermissionGrant>>;
 
 export function ListToolPermissionRequests(arg1:string):Promise<Array<tools.ToolPermissionRequest>>;

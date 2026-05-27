@@ -77,6 +77,7 @@ CURRENT OBJECTIVE POLICY:
 TOOLS:
 - Use Read/Grep/Glob for inspection, Edit/Write for changes, and Bash for commands.
 - Use write_todos/update_todo for multi-step work, but keep todos scoped to the current objective.
+- Use TaskCreate/TaskGet/TaskUpdate/TaskList for persistent task graph items that must survive compact/reload, delegation, workflow checkpoints, or user review.
 - Use tool_search before calling deferred tools that are not loaded.
 - Runtime deferred tools may include LSP, Skill, NotebookEdit, WebFetch, WebSearch, EnterWorktree, ExitWorktree, WorktreeDiff, and WorktreeMerge.
 - Agent is optional delegation, not the default path. Use it for bounded parallel research, isolated implementation, or review.
@@ -118,6 +119,7 @@ CURRENT OBJECTIVE POLICY:
 TOOLS:
 - Use Read/Grep/Glob for inspection, Edit/Write for changes, and Bash for commands.
 - Use write_todos/update_todo for multi-step work, but keep todos scoped to the delegated task.
+- Use TaskCreate/TaskGet/TaskUpdate/TaskList for persistent task graph items that must survive compact/reload, delegation, workflow checkpoints, or user review.
 - Use tool_search before calling deferred tools that are not loaded.
 - Runtime deferred tools may include LSP, Skill, NotebookEdit, WebFetch, WebSearch, EnterWorktree, ExitWorktree, WorktreeDiff, and WorktreeMerge.
 - Agent delegation is not available inside this fork; complete the delegated task directly with the tools provided.
