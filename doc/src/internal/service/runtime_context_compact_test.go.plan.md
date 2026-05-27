@@ -13,6 +13,6 @@
 - restore 后 compact internals 恢复，task snapshot 仍可见且 output 可读。
 - restore 后 task graph item 仍可通过 runtime task manager 读取。
 - 运行中的 task reload 后变为 failed，避免误表示后台进程仍附着。
-- `prepareMessagesForRun(...)` 会注入 compact synthetic message。
+- `prepareMessagesForRun(...)` 会注入 compact synthetic message，并包含 task graph item 的 id/status/title/dependency 明细。
 - todo snapshot/restore 是深拷贝，且 session-scoped snapshot/restore 不串扰其他 session。
 - runtime tool result JSON 解析失败时可从 arguments fallback 得到 file path。

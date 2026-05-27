@@ -159,6 +159,30 @@ func TestRuntimeTaskManagerTaskGraphIDsResistClockCollisions(t *testing.T) {
 	}
 }
 
+func TestRuntimeTaskManagerClearTaskItemsEmitsAfterUnlock(t *testing.T) {
+	manager := newRuntimeTaskManager(func() time.Time { return time.UnixMilli(1000) }, nil)
+	if _, err := manager.CreateTaskItem(context.Background(), "sess-runtime", tools.TaskCreateInput{Title: "clear me"}); err != nil {
+		t.Fatalf("create task item: %v", err)
+	}
+	emitted := make(chan struct{})
+	manager.onTaskGraphChanged = func(sessionID string) {
+		items := manager.CompactTaskItems(sessionID)
+		if len(items) != 0 {
+			t.Errorf("expected callback to observe cleared task graph, got %#v", items)
+		}
+		close(emitted)
+	}
+
+	if removed := manager.ClearTaskItemsForSession("sess-runtime"); removed != 1 {
+		t.Fatalf("expected one removed task item, got %d", removed)
+	}
+	select {
+	case <-emitted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for task graph clear callback")
+	}
+}
+
 func TestRuntimeTaskManagerRestoreTaskItemsReplacesSessionState(t *testing.T) {
 	manager := newRuntimeTaskManager(func() time.Time { return time.UnixMilli(1000) }, nil)
 	stale, err := manager.CreateTaskItem(context.Background(), "sess-runtime", tools.TaskCreateInput{Title: "stale item"})

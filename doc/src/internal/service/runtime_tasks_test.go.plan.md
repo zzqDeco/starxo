@@ -15,5 +15,6 @@
 - 同一时钟 tick 连续创建 task graph items 不会发生 id 覆盖。
 - `TaskUpdate` 可关闭 task graph item，并记录 completed timestamp。
 - `TaskList` 默认隐藏 closed items，`include_closed` 可列出 completed/canceled items。
+- clear task graph 会在释放 manager lock 后发出 callback，callback 可安全读取 compact task items。
 - task graph compact/restore 后仍可通过 id 读取。
 - task graph restore 会替换当前 session 旧 records，空 restore 会清空当前 session，同时保留其他 session records。

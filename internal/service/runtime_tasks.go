@@ -593,7 +593,6 @@ func (m *runtimeTaskManager) ClearTaskItemsForSession(sessionID string) int {
 		return 0
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	removed := 0
 	for id, item := range m.taskItems {
 		if item.SessionID != sessionID {
@@ -602,6 +601,7 @@ func (m *runtimeTaskManager) ClearTaskItemsForSession(sessionID string) int {
 		delete(m.taskItems, id)
 		removed++
 	}
+	m.mu.Unlock()
 	if removed > 0 {
 		m.emitTaskGraphChanged(sessionID, map[string]any{
 			"action":    "cleared",

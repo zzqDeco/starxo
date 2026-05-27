@@ -198,17 +198,31 @@ func TestPrepareMessagesForRunInjectsRuntimeCompact(t *testing.T) {
 		CanonicalName: tools.RuntimeToolLSP,
 		Kind:          tools.ToolKindAction,
 	})
+	chat.runtimeTasks.mu.Lock()
+	chat.runtimeTasks.taskItems["taskitem-prompt"] = tools.RuntimeTaskItem{
+		ID:        "taskitem-prompt",
+		SessionID: sessionID,
+		Title:     "Resume review feedback",
+		Status:    runtimeTaskItemStatusInProgress,
+		DependsOn: []string{"taskitem-root"},
+	}
+	chat.runtimeTasks.mu.Unlock()
 
 	messages := chat.prepareMessagesForRun(sessionID, run)
 	found := false
 	for _, msg := range messages {
-		if strings.Contains(msg.Content, "[Runtime context compact]") && strings.Contains(msg.Content, tools.RuntimeToolLSP) {
+		if strings.Contains(msg.Content, "[Runtime context compact]") &&
+			strings.Contains(msg.Content, tools.RuntimeToolLSP) &&
+			strings.Contains(msg.Content, "taskitem-prompt") &&
+			strings.Contains(msg.Content, "status=in_progress") &&
+			strings.Contains(msg.Content, `title="Resume review feedback"`) &&
+			strings.Contains(msg.Content, "depends_on=[taskitem-root]") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected compact message with discovered tool, got %#v", messages)
+		t.Fatalf("expected compact message with discovered tool and task graph details, got %#v", messages)
 	}
 }
 

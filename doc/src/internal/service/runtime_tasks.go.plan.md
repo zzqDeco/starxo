@@ -31,7 +31,7 @@
 - `StartAgentTask` 负责后台动态子 agent，task type 为 `agent`，并继承 session context 以支持 permission、worktree 等 per-session 能力。
 - `CreateTaskItem` / `GetTaskItem` / `UpdateTaskItem` / `ListTaskItems` 管理 session-scoped task graph records，字段包含 title、description、owner、priority、depends_on 和 timestamps。
 - task graph item id 使用 timestamp + manager-local sequence，并在持锁状态下做 collision check，避免同一 tick 的并发 create 覆盖旧 item。
-- `CreateTaskItem` / `UpdateTaskItem` / `ClearTaskItemsForSession` 会通过 `onTaskGraphChanged` 通知 owning session 保存，保证 interrupt/checkpoint 或 app exit 前也能持久化 task graph。
+- `CreateTaskItem` / `UpdateTaskItem` / `ClearTaskItemsForSession` 会在释放 task manager lock 后通过 `onTaskGraphChanged` 通知 owning session 保存，保证 interrupt/checkpoint 或 app exit 前也能持久化 task graph，且不会让 callback 重入 task manager 时自锁。
 - closed task graph items 默认从 `TaskList` 隐藏，可用 `include_closed` 或显式 status filter 查看。
 - `ReadTaskOutput` 支持 byte offset/limit，便于前端增量读取。
 - `StopTask` 对 running task 调用 cancel，并保留明确的 `killed` 状态。

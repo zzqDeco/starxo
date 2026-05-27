@@ -26,11 +26,12 @@
 - `refreshRuntimeContextCompact(...)` 是 compact state 的统一构建入口，并只读取当前 `sessionID` 的 todo bucket。
 - compact summary 是 deterministic summary，不调用 LLM。
 - compact state 保留 `PermissionAudit` 和 `TaskItems`，让长会话在旧 tool result 被裁剪后仍能解释权限决策和持久任务图。
+- compact prompt 会渲染 task graph item 的 id、status、title、depends_on 以及可选 owner/priority，便于模型在 reload/compact 后继续用 `TaskGet` / `TaskUpdate` 操作已有 task records。
 - `Read`/`read_file` 记录 file path、line range、total lines 和返回内容 hash。
 - `Write`/`write_file`、`Edit`/`str_replace_editor` 记录最近 diff summary，包括增删行、替换数和可用 patch 摘要。
 - `prepareMessagesForRun(...)` 在每次 agent run 前刷新 compact state，并调用 context 层 token-aware windowing。
 
 ## 5. 维护建议
 - 新增 Runtime tool 时，如果它会改变文件或长期状态，应在 `recordRuntimeToolResult(...)` 中加入 compact 提取逻辑。
-- 新增 runtime-side state 时必须同步 `runtimeCompactHasContent(...)`、summary builder、restore path 和 model clone helper。
+- 新增 runtime-side state 时必须同步 `runtimeCompactHasContent(...)`、summary builder、prompt renderer、restore path 和 model clone helper。
 - 不要在本文件里调用 `SessionService.GetWorkspacePath()`；保存路径可能持有 SessionService lock，避免死锁。
