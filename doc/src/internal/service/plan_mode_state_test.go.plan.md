@@ -13,3 +13,4 @@
 - mode restore / no-op save / blocking save 行为保持稳定。
 - `ClearHistory` 清空 plan state 和消息，但保留当前 mode。
 - `ClearHistory` 同时清理当前 session 的 task graph items，避免旧 `TaskCreate` 状态被 compact/save 后重新注入。
+- task graph create/update 会触发 session persistence，保证 workflow checkpoint 或 interrupt 前的 mutation 进入 `RuntimeContextCompact.TaskItems`。

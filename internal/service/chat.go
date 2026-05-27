@@ -633,6 +633,9 @@ func NewChatService(store *config.Store, opts ...ChatRuntimeOptions) *ChatServic
 	s.runtimeTasks = newRuntimeTaskManager(s.now, func(event string, data any) {
 		wailsEmit(s.ctx, event, data)
 	})
+	s.runtimeTasks.onTaskGraphChanged = func(sessionID string) {
+		s.saveSessionRuntimeState(sessionID)
+	}
 	s.runtimeWorkspaces = newRuntimeWorkspaceManager(s.now)
 	s.runtimeLSP = newRuntimeLSPManager(s.now)
 	return s

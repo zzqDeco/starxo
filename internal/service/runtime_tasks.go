@@ -31,11 +31,13 @@ type runtimeTask struct {
 }
 
 type runtimeTaskManager struct {
-	mu        sync.RWMutex
-	tasks     map[string]*runtimeTask
-	taskItems map[string]tools.RuntimeTaskItem
-	now       func() time.Time
-	emit      func(event string, data any)
+	mu                 sync.RWMutex
+	tasks              map[string]*runtimeTask
+	taskItems          map[string]tools.RuntimeTaskItem
+	taskItemSeq        uint64
+	now                func() time.Time
+	emit               func(event string, data any)
+	onTaskGraphChanged func(sessionID string)
 }
 
 func newRuntimeTaskManager(now func() time.Time, emit func(event string, data any)) *runtimeTaskManager {
@@ -196,9 +198,9 @@ func (m *runtimeTaskManager) CreateTaskItem(ctx context.Context, sessionID strin
 	if err != nil {
 		return tools.RuntimeTaskItem{}, err
 	}
-	now := m.now().UnixMilli()
+	nowTime := m.now()
+	now := nowTime.UnixMilli()
 	item := tools.RuntimeTaskItem{
-		ID:          fmt.Sprintf("taskitem-%d", m.now().UnixNano()),
 		SessionID:   sessionID,
 		Title:       title,
 		Description: strings.TrimSpace(input.Description),
@@ -213,9 +215,10 @@ func (m *runtimeTaskManager) CreateTaskItem(ctx context.Context, sessionID strin
 		item.CompletedAt = now
 	}
 	m.mu.Lock()
+	item.ID = m.nextTaskItemIDLocked(nowTime.UnixNano())
 	m.taskItems[item.ID] = item
 	m.mu.Unlock()
-	m.emitEvent("runtime:task_graph_changed", map[string]any{
+	m.emitTaskGraphChanged(sessionID, map[string]any{
 		"action":    "created",
 		"sessionId": sessionID,
 		"task":      item,
@@ -282,8 +285,9 @@ func (m *runtimeTaskManager) UpdateTaskItem(ctx context.Context, sessionID strin
 	}
 	item.UpdatedAt = m.now().UnixMilli()
 	m.taskItems[taskID] = item
+	changedSessionID := item.SessionID
 	m.mu.Unlock()
-	m.emitEvent("runtime:task_graph_changed", map[string]any{
+	m.emitTaskGraphChanged(changedSessionID, map[string]any{
 		"action":    "updated",
 		"sessionId": item.SessionID,
 		"task":      item,
@@ -594,13 +598,23 @@ func (m *runtimeTaskManager) ClearTaskItemsForSession(sessionID string) int {
 		removed++
 	}
 	if removed > 0 {
-		m.emitEvent("runtime:task_graph_changed", map[string]any{
+		m.emitTaskGraphChanged(sessionID, map[string]any{
 			"action":    "cleared",
 			"sessionId": sessionID,
 			"count":     removed,
 		})
 	}
 	return removed
+}
+
+func (m *runtimeTaskManager) nextTaskItemIDLocked(nowNanos int64) string {
+	for {
+		m.taskItemSeq++
+		id := fmt.Sprintf("taskitem-%d-%d", nowNanos, m.taskItemSeq)
+		if _, exists := m.taskItems[id]; !exists {
+			return id
+		}
+	}
 }
 
 const (
@@ -679,6 +693,13 @@ func (m *runtimeTaskManager) getTaskSnapshot(taskID string) (tools.RuntimeTaskSn
 func (m *runtimeTaskManager) emitEvent(event string, data any) {
 	if m.emit != nil {
 		m.emit(event, data)
+	}
+}
+
+func (m *runtimeTaskManager) emitTaskGraphChanged(sessionID string, data any) {
+	m.emitEvent("runtime:task_graph_changed", data)
+	if m.onTaskGraphChanged != nil {
+		m.onTaskGraphChanged(sessionID)
 	}
 }
 

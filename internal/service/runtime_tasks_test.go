@@ -133,3 +133,27 @@ func TestRuntimeTaskManagerTaskGraphCreateUpdateListAndRestore(t *testing.T) {
 		t.Fatalf("unexpected restored task item: %#v", got)
 	}
 }
+
+func TestRuntimeTaskManagerTaskGraphIDsResistClockCollisions(t *testing.T) {
+	fixed := time.Unix(0, 1234)
+	manager := newRuntimeTaskManager(func() time.Time { return fixed }, nil)
+
+	first, err := manager.CreateTaskItem(context.Background(), "sess-runtime", tools.TaskCreateInput{Title: "first"})
+	if err != nil {
+		t.Fatalf("create first task item: %v", err)
+	}
+	second, err := manager.CreateTaskItem(context.Background(), "sess-runtime", tools.TaskCreateInput{Title: "second"})
+	if err != nil {
+		t.Fatalf("create second task item: %v", err)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("expected collision-resistant ids, got %q", first.ID)
+	}
+	items, err := manager.ListTaskItems(context.Background(), "sess-runtime", tools.TaskListInput{})
+	if err != nil {
+		t.Fatalf("list task items: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected both task items to survive same-tick creates, got %#v", items)
+	}
+}

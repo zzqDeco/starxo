@@ -15,6 +15,7 @@
 - 注册 Runtime V2 deferred tools：`EnterWorktree`、`ExitWorktree`、`LSP`、`Skill`、`NotebookEdit`、`WebFetch`、`WebSearch`。
 - 管理 runtime background tasks，并向前端暴露 list/read/stop/permission-resolution API。
 - 管理 CC-style runtime task graph，并通过 compact/snapshot 支持 reload 后继续追踪 task records。
+- `ChatService` 为 runtime task manager 注入 `onTaskGraphChanged` callback，task graph create/update/clear 后会调度 session save。
 - 管理 session-scoped runtime worktree state，让 core/deferred tools 可按当前 session 切换执行 workspace。
 - 管理 runtime LSP server lifecycle，为 `LSP` tool 提供 session/workspace/language 级常驻 language server。
 - 管理 runtime permission queue，把危险工具调用桥接到前端审批弹窗，并持久化 session grant。

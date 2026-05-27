@@ -177,7 +177,16 @@ func (s *ChatService) addPermissionGrant(sessionID string, entry tools.CatalogEn
 }
 
 func (s *ChatService) saveSessionPermissionState(sessionID string) {
+	s.saveSessionRuntimeState(sessionID)
+}
+
+func (s *ChatService) saveSessionRuntimeState(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
 	s.mu.Lock()
+	_ = s.getOrCreateRun(sessionID)
 	ss := s.sessionService
 	s.mu.Unlock()
 	if ss != nil {

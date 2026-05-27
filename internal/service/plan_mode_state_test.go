@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -294,6 +295,39 @@ func TestPlanModeStateClearHistoryClearsPlanStateWithoutChangingModeAndPersists(
 	} else if len(taskItems) != 0 {
 		t.Fatalf("expected clear history to remove task graph items, got %#v", taskItems)
 	}
+}
+
+func TestRuntimeTaskGraphMutationsPersistSessionData(t *testing.T) {
+	sessionStore, chat, _, sess := newPlanModeStateHarness(t)
+
+	created, err := chat.runtimeTasks.CreateTaskItem(context.Background(), sess.ID, tools.TaskCreateInput{
+		Title:  "checkpoint task",
+		Status: "in_progress",
+	})
+	if err != nil {
+		t.Fatalf("create task graph item: %v", err)
+	}
+	waitForLoadedSessionData(t, sessionStore, sess.ID, func(data *model.SessionData) bool {
+		return data != nil &&
+			data.RuntimeContextCompact != nil &&
+			len(data.RuntimeContextCompact.TaskItems) == 1 &&
+			data.RuntimeContextCompact.TaskItems[0].ID == created.ID &&
+			data.RuntimeContextCompact.TaskItems[0].Status == "in_progress"
+	})
+
+	if _, err := chat.runtimeTasks.UpdateTaskItem(context.Background(), sess.ID, tools.TaskUpdateInput{
+		TaskID: created.ID,
+		Status: "completed",
+	}); err != nil {
+		t.Fatalf("update task graph item: %v", err)
+	}
+	waitForLoadedSessionData(t, sessionStore, sess.ID, func(data *model.SessionData) bool {
+		return data != nil &&
+			data.RuntimeContextCompact != nil &&
+			len(data.RuntimeContextCompact.TaskItems) == 1 &&
+			data.RuntimeContextCompact.TaskItems[0].ID == created.ID &&
+			data.RuntimeContextCompact.TaskItems[0].Status == "completed"
+	})
 }
 
 func TestPlanModeStateEnsureDefaultSessionRestoresPersistedModeForStartupChain(t *testing.T) {
