@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { NButton, NIcon, NInput, NTooltip } from 'naive-ui'
 import { TrashOutline, Cube, PaperPlaneOutline } from '@vicons/ionicons5'
+import SxTerminalRow from '@/components/ui/SxTerminalRow.vue'
 import { useWailsEvent } from '@/composables/useWailsEvent'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useContainerStore } from '@/stores/containerStore'
@@ -276,11 +277,12 @@ onUnmounted(() => {
     <div ref="terminalEl" class="terminal-container">
       <!-- Fallback if xterm doesn't load -->
       <template v-if="!xtermLoaded">
-        <div
+        <SxTerminalRow
           v-for="(line, i) in lines"
           :key="i"
-          :class="['term-line', `term-${line.type}`]"
-        >{{ line.text }}</div>
+          :text="line.text"
+          :type="line.type"
+        />
         <div v-if="lines.length === 0" class="term-placeholder">
           {{ t('terminal.waitingForOutput') }}
         </div>

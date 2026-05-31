@@ -1,15 +1,13 @@
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { NIcon } from 'naive-ui'
-import { Cube, Terminal, RadioButtonOn } from '@vicons/ionicons5'
+import { RadioButtonOn } from '@vicons/ionicons5'
 import ContainerPanel from './ContainerPanel.vue'
-import TerminalPanel from '@/components/terminal/TerminalPanel.vue'
 import { useContainerStore } from '@/stores/containerStore'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const containerStore = useContainerStore()
-const activeTab = ref<'containers' | 'terminal'>('containers')
 
 const activeContainer = computed(() =>
   containerStore.containers.find((c) => c.id === containerStore.activeContainerID) || null
@@ -32,42 +30,11 @@ const activeContainerName = computed(() => {
           {{ activeContainerName }}
         </span>
       </div>
-      <div class="runtime-tabs" role="tablist" :aria-label="t('runtime.title')">
-        <button
-          type="button"
-          :class="['runtime-tab', { active: activeTab === 'containers' }]"
-          role="tab"
-          :aria-selected="activeTab === 'containers'"
-          :aria-controls="'runtime-containers'"
-          @click="activeTab = 'containers'"
-        >
-          <NIcon size="14"><Cube /></NIcon>
-          {{ t('runtime.containers') }}
-        </button>
-        <button
-          type="button"
-          :class="['runtime-tab', { active: activeTab === 'terminal' }]"
-          role="tab"
-          :aria-selected="activeTab === 'terminal'"
-          :aria-controls="'runtime-terminal'"
-          @click="activeTab = 'terminal'"
-        >
-          <NIcon size="14"><Terminal /></NIcon>
-          {{ t('runtime.terminal') }}
-        </button>
-      </div>
     </header>
 
     <div class="runtime-body">
       <ContainerPanel
-        v-show="activeTab === 'containers'"
         id="runtime-containers"
-        role="tabpanel"
-        class="runtime-pane"
-      />
-      <TerminalPanel
-        v-show="activeTab === 'terminal'"
-        id="runtime-terminal"
         role="tabpanel"
         class="runtime-pane"
       />
@@ -127,57 +94,6 @@ const activeContainerName = computed(() => {
 .runtime-active .n-icon {
   color: var(--text-faint);
   flex-shrink: 0;
-}
-
-.runtime-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-xs);
-}
-
-.runtime-tab {
-  height: 30px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-  font-size: var(--fs-xs);
-  font-family: var(--font-sans);
-  transition: background var(--transition-ui), color var(--transition-ui), border-color var(--transition-ui);
-}
-
-.runtime-tab:hover {
-  background: var(--platform-bg-hover);
-  color: var(--text-primary);
-}
-
-.runtime-tab.active {
-  color: var(--text-primary);
-  background: var(--platform-bg-content);
-  border-color: var(--border-subtle);
-  box-shadow: var(--elev-1);
-}
-
-:global(:root[data-platform="macos"] .runtime-tab){
-  height: 28px;
-  border-radius: 7px;
-  background: transparent;
-}
-
-:global(:root[data-platform="macos"] .runtime-tabs){
-  padding: 2px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--platform-bg-raised) 58%, transparent);
-  border: 1px solid var(--border-subtle);
-  gap: 0;
-}
-
-:global(:root[data-platform="macos"] .runtime-tab){
-  border-color: transparent;
 }
 
 .runtime-body {

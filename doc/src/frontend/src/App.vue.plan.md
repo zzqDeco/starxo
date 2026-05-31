@@ -9,7 +9,7 @@
 
 ## 2. 核心职责
 - 应用根组件，负责全局主题配置、Wails 事件监听注册、以及初始数据恢复。
-- 配置 Naive UI 深色主题和自定义主题覆盖；主题色与 `src/style.css` 的工作台设计令牌保持一致。
+- 配置 Naive UI 深色主题和自定义主题覆盖；Naive UI themeOverrides 读取 `src/style.css` 的 `--sx-*` semantic tokens。
 - 在 `onMounted` 中初始化所有 Wails 后端事件监听器，建立前后端通信桥梁。
 - **新增 per-session 事件过滤**: 通过 `isActiveSession()` 函数检查事件的 `sessionId` 字段，确保只处理属于当前活跃会话的事件，防止后台会话的事件污染前端显示。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
@@ -59,7 +59,7 @@
   - 后备逻辑: 若 `loadSessionData` 返回空，则尝试旧版 `loadChatDisplay` + `loadActiveMessages`
 - **前端不再保存 display 数据**: `agent:done` 处理器中移除了 `saveChatDisplay` 调用，前端变为纯读取消费者
 - **主题覆盖**:
-  - primary、背景层级、边框、文本层级与 `style.css` platform token 同步
+  - primary、背景层级、边框、文本层级与 `style.css` 的 `--sx-*` token 同步
   - Naive UI 卡片/弹窗圆角收敛到 7-12px，按钮去除水波纹和重阴影，匹配 macOS 工具型界面密度
   - 主题视觉参考 Finder/System Settings/Notes/Xcode/VS Code/Chrome：中性面板、低饱和蓝、轻分割线和单 toolbar 平面
 

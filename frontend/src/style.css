@@ -42,22 +42,65 @@
   --platform-shadow-2: 0 10px 34px rgba(0, 0, 0, 0.1);
   --platform-shadow-3: 0 26px 80px rgba(0, 0, 0, 0.2);
 
+  /* Starxo v0.5 semantic tokens. These are the Figma handoff source for new UI. */
+  --sx-font-sans: var(--platform-font-sans);
+  --sx-font-mono: var(--platform-font-mono);
+  --sx-window-bg: var(--platform-bg-window);
+  --sx-sidebar-bg: var(--platform-bg-sidebar);
+  --sx-toolbar-bg: var(--platform-bg-toolbar);
+  --sx-content-bg: var(--platform-bg-content);
+  --sx-inspector-bg: var(--platform-bg-elevated);
+  --sx-elevated-bg: var(--platform-bg-elevated);
+  --sx-raised-bg: var(--platform-bg-raised);
+  --sx-control-bg: color-mix(in srgb, var(--platform-bg-content) 84%, var(--platform-bg-raised));
+  --sx-control-hover: var(--platform-bg-hover);
+  --sx-control-selected: var(--platform-bg-active);
+  --sx-control-disabled: color-mix(in srgb, var(--platform-bg-raised) 52%, transparent);
+  --sx-separator: var(--platform-separator);
+  --sx-separator-strong: var(--platform-separator-strong);
+  --sx-text-primary: var(--platform-text-primary);
+  --sx-text-secondary: var(--platform-text-secondary);
+  --sx-text-tertiary: var(--platform-text-muted);
+  --sx-text-faint: var(--platform-text-faint);
+  --sx-accent: var(--platform-accent);
+  --sx-accent-hover: var(--platform-accent-hover);
+  --sx-accent-bg: var(--platform-accent-soft);
+  --sx-accent-border: color-mix(in srgb, var(--platform-accent) 18%, transparent);
+  --sx-focus: color-mix(in srgb, var(--platform-accent) 44%, transparent);
+  --sx-success: var(--platform-success);
+  --sx-success-bg: color-mix(in srgb, var(--platform-success) 10%, transparent);
+  --sx-warning: var(--platform-warning);
+  --sx-warning-bg: color-mix(in srgb, var(--platform-warning) 12%, transparent);
+  --sx-danger: var(--platform-danger);
+  --sx-danger-pressed: var(--platform-danger-dim);
+  --sx-danger-bg: color-mix(in srgb, var(--platform-danger) 10%, transparent);
+  --sx-danger-border: color-mix(in srgb, var(--platform-danger) 20%, transparent);
+  --sx-status-neutral-bg: color-mix(in srgb, var(--platform-bg-raised) 70%, transparent);
+  --sx-radius-6: 6px;
+  --sx-radius-8: var(--platform-radius-control);
+  --sx-radius-10: var(--platform-radius-panel);
+  --sx-radius-12: var(--platform-radius-window);
+  --sx-radius-pill: 999px;
+  --sx-shadow-1: var(--platform-shadow-1);
+  --sx-shadow-2: var(--platform-shadow-2);
+  --sx-shadow-3: var(--platform-shadow-3);
+
   /* Compatibility aliases used by existing components. */
-  --bg-deepest: var(--platform-bg-window);
-  --bg-base: var(--platform-bg-content);
-  --bg-surface: var(--platform-bg-elevated);
-  --bg-elevated: var(--platform-bg-toolbar);
-  --bg-raised: var(--platform-bg-raised);
-  --bg-hover: var(--platform-bg-hover);
-  --border-subtle: var(--platform-separator);
-  --border-strong: var(--platform-separator-strong);
-  --text-primary: var(--platform-text-primary);
-  --text-secondary: var(--platform-text-secondary);
-  --text-muted: var(--platform-text-muted);
-  --text-faint: var(--platform-text-faint);
-  --accent-cyan: var(--platform-accent);
-  --accent-cyan-hover: var(--platform-accent-hover);
-  --accent-cyan-dim: var(--platform-accent);
+  --bg-deepest: var(--sx-window-bg);
+  --bg-base: var(--sx-content-bg);
+  --bg-surface: var(--sx-elevated-bg);
+  --bg-elevated: var(--sx-toolbar-bg);
+  --bg-raised: var(--sx-raised-bg);
+  --bg-hover: var(--sx-control-hover);
+  --border-subtle: var(--sx-separator);
+  --border-strong: var(--sx-separator-strong);
+  --text-primary: var(--sx-text-primary);
+  --text-secondary: var(--sx-text-secondary);
+  --text-muted: var(--sx-text-tertiary);
+  --text-faint: var(--sx-text-faint);
+  --accent-cyan: var(--sx-accent);
+  --accent-cyan-hover: var(--sx-accent-hover);
+  --accent-cyan-dim: var(--sx-accent);
   --accent-violet: #8e8e93;
   --accent-violet-dim: #6e6e73;
   --accent-amber: var(--platform-warning);
@@ -70,9 +113,9 @@
   --accent-sky: #6e6e73;
   --accent-mint: #6e6e73;
 
-  --font-sans: var(--platform-font-sans);
-  --font-mono: var(--platform-font-mono);
-  --font-brand: var(--platform-font-sans);
+  --font-sans: var(--sx-font-sans);
+  --font-mono: var(--sx-font-mono);
+  --font-brand: var(--sx-font-sans);
 
   /* Typography scale */
   --fs-2xs: 11px;
@@ -91,20 +134,20 @@
   --fw-semibold: 600;
   --fw-bold: 700;
 
-  --radius-sm: 7px;
-  --radius-md: var(--platform-radius-control);
-  --radius-lg: var(--platform-radius-panel);
-  --radius-xl: var(--platform-radius-window);
-  --radius-pill: 999px;
+  --radius-sm: var(--sx-radius-6);
+  --radius-md: var(--sx-radius-8);
+  --radius-lg: var(--sx-radius-10);
+  --radius-xl: var(--sx-radius-12);
+  --radius-pill: var(--sx-radius-pill);
 
-  --shadow-sm: var(--platform-shadow-1);
-  --shadow-md: var(--platform-shadow-2);
-  --shadow-lg: var(--platform-shadow-3);
+  --shadow-sm: var(--sx-shadow-1);
+  --shadow-md: var(--sx-shadow-2);
+  --shadow-lg: var(--sx-shadow-3);
 
   /* Elevation (hairline-layered shadows) */
-  --elev-1: var(--platform-shadow-1);
-  --elev-2: var(--platform-shadow-2);
-  --elev-3: var(--platform-shadow-3);
+  --elev-1: var(--sx-shadow-1);
+  --elev-2: var(--sx-shadow-2);
+  --elev-3: var(--sx-shadow-3);
 
   /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

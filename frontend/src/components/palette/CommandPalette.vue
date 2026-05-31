@@ -11,7 +11,7 @@ import { useUiFeedback } from '@/composables/useUiFeedback'
 import { SetMode } from '../../../wailsjs/go/service/ChatService'
 import {
   Add, Settings, SwapHorizontal, ChatbubbleEllipses, Flash, Power, Search, Close,
-  FolderOpen, List,
+  FolderOpen, List, Terminal,
 } from '@vicons/ionicons5'
 
 const props = defineProps<{ show: boolean }>()
@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (e: 'open-settings'): void
   (e: 'open-workspace'): void
   (e: 'open-runtime-tasks'): void
+  (e: 'open-terminal'): void
 }>()
 
 const { t } = useI18n()
@@ -44,6 +45,12 @@ type Command = {
   combo?: KeyCombo
   group: 'action' | 'session' | 'mode'
   run: () => void | Promise<void>
+}
+
+function displaySessionTitle(title?: string) {
+  const normalized = (title || '').trim()
+  if (!normalized || normalized === 'Default Session') return t('sidebar.untitled')
+  return normalized
 }
 
 const baseCommands = computed<Command[]>(() => {
@@ -90,6 +97,14 @@ const baseCommands = computed<Command[]>(() => {
       run: () => emit('open-runtime-tasks'),
     },
     {
+      id: 'open-terminal',
+      title: t('terminal.terminal'),
+      hint: t('runtime.terminal'),
+      icon: Terminal,
+      group: 'action',
+      run: () => emit('open-terminal'),
+    },
+    {
       id: 'toggle-mode',
       title: chatStore.agentMode === 'plan' ? t('palette.switchToDefault') : t('palette.switchToPlan'),
       hint: t('chat.modeLabel'),
@@ -122,7 +137,7 @@ const baseCommands = computed<Command[]>(() => {
 const sessionCommands = computed<Command[]>(() => {
   return sessionStore.sessions.slice(0, 20).map((s, idx) => ({
     id: `switch-${s.id}`,
-    title: s.title || t('sidebar.untitled'),
+    title: displaySessionTitle(s.title),
     hint: idx < 9 ? comboLabel({ key: String(idx + 1), meta: true }) : undefined,
     icon: ChatbubbleEllipses,
     combo: idx < 9 ? { key: String(idx + 1), meta: true } : undefined,

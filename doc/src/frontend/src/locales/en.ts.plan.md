@@ -15,4 +15,5 @@
 - 新增 file/edit diff review labels，用于 Runtime V2 `Write` / `Edit` timeline 结构化结果。
 - 新增 `message.agent.*` labels，用于 assistant timeline 中的 agent 名称，避免 UI 暴露内部变量式名称。
 - macOS native design pass tightened high-traffic copy to shorter product language such as “New”, “Ready when you are”, “Run commands”, and “Browse files”, reducing implementation-like labels in the workbench.
+- Figma v0.5 alignment adds `chat.agentRunning`, `chat.taskProgress`, `chat.statusRunning`, and `chat.statusReady` for the inline task status above the composer; `chat.modePlanHint` no longer describes the old main-agent/subagent split.
 - `containers.unavailable` 用于旧 Docker 记录。

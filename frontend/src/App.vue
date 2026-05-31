@@ -183,7 +183,62 @@ const darkThemeOverrides: GlobalThemeOverrides = {
   }
 }
 
-const themeOverrides = computed<GlobalThemeOverrides>(() => prefersDark.value ? darkThemeOverrides : lightThemeOverrides)
+const semanticThemeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: 'var(--sx-accent)',
+    primaryColorHover: 'var(--sx-accent-hover)',
+    primaryColorPressed: 'var(--sx-accent-hover)',
+    primaryColorSuppl: 'var(--sx-accent)',
+    bodyColor: 'var(--sx-window-bg)',
+    cardColor: 'var(--sx-elevated-bg)',
+    modalColor: 'var(--sx-elevated-bg)',
+    popoverColor: 'var(--sx-elevated-bg)',
+    tableColor: 'var(--sx-elevated-bg)',
+    inputColor: 'var(--sx-control-bg)',
+    actionColor: 'var(--sx-control-hover)',
+    tagColor: 'var(--sx-control-hover)',
+    borderColor: 'var(--sx-separator)',
+    dividerColor: 'var(--sx-separator)',
+    hoverColor: 'var(--sx-control-hover)',
+    textColor1: 'var(--sx-text-primary)',
+    textColor2: 'var(--sx-text-secondary)',
+    textColor3: 'var(--sx-text-tertiary)',
+    placeholderColor: 'var(--sx-text-faint)',
+    fontFamily: 'var(--sx-font-sans)',
+    fontFamilyMono: 'var(--sx-font-mono)',
+  },
+  Button: {
+    borderRadiusMedium: 'var(--sx-radius-8)',
+    borderRadiusSmall: 'var(--sx-radius-8)',
+    fontWeight: '500',
+  },
+  Input: {
+    borderRadius: 'var(--sx-radius-8)',
+  },
+  Card: {
+    borderRadius: 'var(--sx-radius-10)',
+  },
+  Modal: {
+    borderRadius: 'var(--sx-radius-12)',
+  },
+  Tag: {
+    borderRadius: 'var(--sx-radius-8)',
+  },
+  Dropdown: {
+    borderRadius: 'var(--sx-radius-10)',
+    optionColorHover: 'var(--sx-control-hover)',
+    color: 'var(--sx-elevated-bg)',
+  },
+  Collapse: {
+    titleFontSize: '13px',
+  },
+  Tabs: {
+    tabFontWeight: '500',
+    tabFontWeightActive: '600',
+  },
+}
+
+const themeOverrides = computed<GlobalThemeOverrides>(() => semanticThemeOverrides)
 
 function applyPlatformAttributes() {
   if (typeof document === 'undefined') return

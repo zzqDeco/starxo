@@ -8,13 +8,13 @@
 - 所属模块: frontend/src/components/layout
 
 ## 2. 核心职责
-- 顶部工作台导航栏组件，展示应用标题、命令面板入口、连接状态、运行任务入口、工作区抽屉开关、语言切换与设置按钮。
+- 顶部工作台导航栏组件，展示应用标题、命令面板入口、连接状态、任务/终端/工作区 inspector 入口、语言切换与设置按钮。
 - 作为应用 toolbar，承载工作台级入口；macOS 原生窗口标题栏由 Wails/native titlebar 提供。
 - 在自定义 toolbar 的非交互区域补充双击窗口 zoom fallback，但原生标题栏仍是 macOS 的主窗口操作区域。
 
 ## 3. 输入与输出
 - 输入来源: `Props.workspaceDrawerVisible`、`Props.runtimeTasksVisible`
-- 输出结果: `toggle-runtime-tasks`、`toggle-workspace-drawer`、`toggle-settings`、`open-command-palette` 事件
+- 输出结果: `toggle-runtime-tasks`、`toggle-terminal`、`toggle-workspace-drawer`、`toggle-settings`、`open-command-palette` 事件
 
 ## 4. 关键实现细节
 - Props:
@@ -22,6 +22,7 @@
   - `runtimeTasksVisible: boolean` — 运行任务面板是否打开
 - Emits:
   - `toggle-runtime-tasks`
+  - `toggle-terminal`
   - `toggle-workspace-drawer`
   - `toggle-settings`
   - `open-command-palette`
@@ -32,16 +33,17 @@
   - 显示当前会话标题、命令搜索提示和 `Cmd/Ctrl+K` 提示
   - 点击后由父组件打开 CommandPalette
 - 右上工具按钮:
-  - 运行任务按钮（List 图标）按状态显示 `header.runtimeTasksOpen / header.runtimeTasksClose`
-  - 工作区按钮（FolderOpen 图标）按状态显示 `header.workspaceOpen / header.workspaceClose`
+  - 运行任务、终端、工作区、设置按钮使用 `SxToolbarItem` 与 `lucide-vue-next` 语义图标
+  - 运行任务按钮按状态显示 `header.runtimeTasksOpen / header.runtimeTasksClose`
+  - 工作区按钮按状态显示 `header.workspaceOpen / header.workspaceClose`
   - 语言按钮
   - 设置按钮
 
 ## 5. 依赖关系
-- 内部依赖: `@/components/status/ConnectionStatus.vue`, `sessionStore`
+- 内部依赖: `@/components/status/ConnectionStatus.vue`, `@/components/ui/SxToolbarItem.vue`, `sessionStore`
 - 外部依赖:
   - `naive-ui` (`NButton`, `NTooltip`)
-  - `@vicons/ionicons5` (`Settings`, `FolderOpen`, `List`)
+  - `lucide-vue-next` via `frontend/src/components/ui/icons.ts`
   - `vue-i18n`
 
 ## 6. 变更影响面
