@@ -1,16 +1,24 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
-import { NButton, NTooltip, NIcon } from 'naive-ui'
-import { Settings, FolderOpen, Search, List } from '@vicons/ionicons5'
+import { NButton, NTooltip } from 'naive-ui'
 import ConnectionStatus from '@/components/status/ConnectionStatus.vue'
+import SxToolbarItem from '@/components/ui/SxToolbarItem.vue'
+import { resolveSxIcon } from '@/components/ui/icons'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/sessionStore'
 import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
 const { t, locale } = useI18n()
 const sessionStore = useSessionStore()
+const SearchIcon = resolveSxIcon('search')
 
-const activeSessionTitle = computed(() => sessionStore.activeSession?.title || t('sidebar.untitled'))
+function displaySessionTitle(title?: string) {
+  const normalized = (title || '').trim()
+  if (!normalized || normalized === 'Default Session') return t('sidebar.untitled')
+  return normalized
+}
+
+const activeSessionTitle = computed(() => displaySessionTitle(sessionStore.activeSession?.title))
 
 defineProps<{
   workspaceDrawerVisible: boolean
@@ -21,6 +29,7 @@ const emit = defineEmits<{
   (e: 'toggle-settings'): void
   (e: 'toggle-workspace-drawer'): void
   (e: 'toggle-runtime-tasks'): void
+  (e: 'toggle-terminal'): void
   (e: 'open-command-palette'): void
 }>()
 
@@ -55,7 +64,7 @@ function handleTitlebarDoubleClick(event: MouseEvent) {
         :aria-label="t('header.commandPalette')"
         @click="emit('open-command-palette')"
       >
-        <NIcon size="14" class="command-icon"><Search /></NIcon>
+        <SearchIcon :size="14" class="command-icon" />
         <span class="command-copy">
           <span class="command-main">{{ activeSessionTitle }}</span>
           <span class="command-sub">{{ t('header.commandPlaceholder') }}</span>
@@ -69,36 +78,38 @@ function handleTitlebarDoubleClick(event: MouseEvent) {
 
       <NTooltip trigger="hover" placement="bottom">
         <template #trigger>
-          <NButton
-            quaternary
-            circle
-            size="small"
-            class="header-btn"
-            :aria-label="runtimeTasksVisible ? t('header.runtimeTasksClose') : t('header.runtimeTasksOpen')"
+          <SxToolbarItem
+            icon="tasks"
+            compact
+            :label="runtimeTasksVisible ? t('header.runtimeTasksClose') : t('header.runtimeTasksOpen')"
+            :active="runtimeTasksVisible"
             @click="emit('toggle-runtime-tasks')"
-          >
-            <template #icon>
-              <List />
-            </template>
-          </NButton>
+          />
         </template>
         {{ runtimeTasksVisible ? t('header.runtimeTasksClose') : t('header.runtimeTasksOpen') }}
       </NTooltip>
 
       <NTooltip trigger="hover" placement="bottom">
         <template #trigger>
-          <NButton
-            quaternary
-            circle
-            size="small"
-            class="header-btn"
-            :aria-label="workspaceDrawerVisible ? t('header.workspaceClose') : t('header.workspaceOpen')"
+          <SxToolbarItem
+            icon="terminal"
+            compact
+            :label="t('terminal.terminal')"
+            @click="emit('toggle-terminal')"
+          />
+        </template>
+        {{ t('terminal.terminal') }}
+      </NTooltip>
+
+      <NTooltip trigger="hover" placement="bottom">
+        <template #trigger>
+          <SxToolbarItem
+            icon="workspace"
+            compact
+            :label="workspaceDrawerVisible ? t('header.workspaceClose') : t('header.workspaceOpen')"
+            :active="workspaceDrawerVisible"
             @click="emit('toggle-workspace-drawer')"
-          >
-            <template #icon>
-              <FolderOpen />
-            </template>
-          </NButton>
+          />
         </template>
         {{ workspaceDrawerVisible ? t('header.workspaceClose') : t('header.workspaceOpen') }}
       </NTooltip>
@@ -120,18 +131,12 @@ function handleTitlebarDoubleClick(event: MouseEvent) {
 
       <NTooltip trigger="hover" placement="bottom">
         <template #trigger>
-          <NButton
-            quaternary
-            circle
-            size="small"
-            class="header-btn"
-            :aria-label="t('header.settings')"
+          <SxToolbarItem
+            icon="settings"
+            compact
+            :label="t('header.settings')"
             @click="emit('toggle-settings')"
-          >
-            <template #icon>
-              <Settings />
-            </template>
-          </NButton>
+          />
         </template>
         {{ t('header.settings') }}
       </NTooltip>

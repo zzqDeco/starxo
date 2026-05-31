@@ -26,7 +26,7 @@
 - **xterm.js 初始化**: 动态导入、深色主题配置、FitAddon 自适应
 - 初始 banner 使用短句 “Starxo terminal / Run commands in the active sandbox workspace.”，避免把终端面板表现成营销式或版本号式启动页。
 - **ResizeObserver**: 自动适配容器尺寸
-- **回退模式**: xterm 不可用时使用 div 列表渲染；stderr 样式增加红色左边框 + 浅红背景
+- **回退模式**: xterm 不可用时使用 `SxTerminalRow` 列表渲染；stderr 使用 `--sx-danger-*` 语义 token。
 - **状态栏** (.terminal-status-bar):
   - 左侧: SSH 连接状态点 (绿色 connected / 灰色 disconnected) + 活跃容器名称 (Cube 图标)
   - 右侧: 输出行数统计
@@ -38,10 +38,11 @@
 ## 5. 依赖关系
 - 内部依赖: `@/composables/useWailsEvent`、`@/stores/connectionStore`、`@/stores/containerStore`
 - 外部依赖: vue、naive-ui、@vicons/ionicons5 (TrashOutline, Cube, PaperPlaneOutline)、@xterm/xterm (动态导入)、@xterm/addon-fit (动态导入)、vue-i18n
+- UI 依赖: `@/components/ui/SxTerminalRow.vue`
 
 ## 6. 变更影响面
 - 新增 connectionStore 和 containerStore 依赖用于状态栏显示
-- 被 MainLayout 右侧面板包含
+- 作为 MainLayout `terminal` inspector mode 的一等面板，不再隐藏在 runtime tab 内。
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。

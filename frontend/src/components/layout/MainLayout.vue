@@ -1,39 +1,38 @@
 <script lang="ts" setup>
 import { ref, computed, watch, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import { useWindowSize } from '@vueuse/core'
-import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { Albums, ChatboxEllipses } from '@vicons/ionicons5'
 import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import SplitHandle from './SplitHandle.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import WorkspacePanel from '@/components/files/WorkspacePanel.vue'
+import TerminalPanel from '@/components/terminal/TerminalPanel.vue'
+import SxIconButton from '@/components/ui/SxIconButton.vue'
+import SxInspectorSegmented from '@/components/ui/SxInspectorSegmented.vue'
 import { useKeybinds } from '@/composables/useKeybinds'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { onWorkspaceOpenPath } from '@/composables/useWorkspaceBridge'
 import { toggleWindowZoom } from '@/composables/useNativeWindow'
 
-const WorkspaceDrawer = defineAsyncComponent(() => import('@/components/files/WorkspaceDrawer.vue'))
 const ContainerDock = defineAsyncComponent(() => import('@/components/containers/ContainerDock.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
 const CommandPalette = defineAsyncComponent(() => import('@/components/palette/CommandPalette.vue'))
 const RuntimeTasksPanel = defineAsyncComponent(() => import('@/components/runtime/RuntimeTasksPanel.vue'))
 
-type InspectorMode = 'runtime' | 'workspace' | null
+type InspectorMode = 'runtime' | 'workspace' | 'terminal' | 'tasks'
 
 const { t } = useI18n()
 const sessionStore = useSessionStore()
 const feedback = useUiFeedback()
 
 const showSettings = ref(false)
-const showWorkspaceDrawer = ref(false)
 const showMobileSidebar = ref(false)
 const showResponsiveDock = ref(false)
 const showPalette = ref(false)
-const showRuntimeTasks = ref(false)
 const inspectorMode = ref<InspectorMode>('runtime')
+const terminalInspectorVisited = ref(false)
 
 useKeybinds([
   { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = !showPalette.value }, allowInInput: true },
@@ -55,7 +54,7 @@ useKeybinds([
 
 // Resizable panel widths
 const leftWidth = ref(220)
-const runtimeDockWidth = ref(360)
+const runtimeDockWidth = ref(344)
 const workspaceInspectorWidth = ref(620)
 
 // Window auto-adapt
@@ -63,12 +62,16 @@ const { width: windowWidth } = useWindowSize()
 
 const isBelow1200 = computed(() => windowWidth.value < 1200)
 const isBelow992 = computed(() => windowWidth.value < 992)
-const isBelow768 = computed(() => windowWidth.value < 768)
+const isBelow768 = computed(() => windowWidth.value <= 768)
 const isDesktopInspector = computed(() => !isBelow1200.value)
+const workspacePanelActive = computed(() => inspectorMode.value === 'workspace')
 const workspaceInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'workspace')
 const runtimeInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'runtime')
-const inspectorVisible = computed(() => isDesktopInspector.value && inspectorMode.value !== null)
-const workspaceVisible = computed(() => isDesktopInspector.value ? workspaceInspectorActive.value : showWorkspaceDrawer.value)
+const terminalInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'terminal')
+const tasksInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'tasks')
+const inspectorVisible = computed(() => isDesktopInspector.value)
+const workspaceVisible = computed(() => inspectorMode.value === 'workspace' && (isDesktopInspector.value || showResponsiveDock.value))
+const runtimeTasksVisible = computed(() => inspectorMode.value === 'tasks' && (isDesktopInspector.value || showResponsiveDock.value))
 const isSidebarCompact = computed(() => !isBelow768.value && (workspaceInspectorActive.value || windowWidth.value < 1320))
 
 const leftMinSize = computed(() => {
@@ -83,7 +86,7 @@ const leftMaxSize = computed(() => {
 })
 
 const dockMinSize = computed(() => {
-  if (workspaceInspectorActive.value) return 420
+  if (workspacePanelActive.value) return isBelow768.value ? 320 : 420
   if (isBelow992.value) return 240
   if (isBelow1200.value) return 280
   return 320
@@ -103,14 +106,19 @@ const effectiveLeftWidth = computed(() => {
 })
 
 const effectiveDockWidth = computed(() => {
-  if (workspaceInspectorActive.value) {
+  if (workspacePanelActive.value) {
+    if (isBelow1200.value) {
+      const sheetMargin = isBelow768.value ? 16 : 28
+      const maxWorkspace = Math.max(dockMinSize.value, Math.min(760, windowWidth.value - sheetMargin))
+      return Math.min(Math.max(workspaceInspectorWidth.value, dockMinSize.value), maxWorkspace)
+    }
     const maxWorkspace = Math.max(dockMinSize.value, Math.min(760, windowWidth.value - effectiveLeftWidth.value - 460))
     return Math.min(Math.max(workspaceInspectorWidth.value, dockMinSize.value), maxWorkspace)
   }
   if (isBelow1200.value) {
-    return Math.min(runtimeDockWidth.value, 320)
+    return Math.min(runtimeDockWidth.value, 360)
   }
-  return runtimeDockWidth.value
+  return Math.min(runtimeDockWidth.value, 500)
 })
 
 const inspectorDefaultSize = computed(() => workspaceInspectorActive.value ? 620 : 360)
@@ -133,10 +141,6 @@ function updateInspectorWidth(value: number) {
 watch(isBelow1200, (below) => {
   if (!below) {
     showResponsiveDock.value = false
-    showWorkspaceDrawer.value = false
-    if (!inspectorMode.value) {
-      inspectorMode.value = 'runtime'
-    }
   }
 })
 
@@ -145,6 +149,12 @@ watch(isBelow768, (below) => {
     showMobileSidebar.value = false
   }
 })
+
+watch(inspectorMode, (mode) => {
+  if (mode === 'terminal') {
+    terminalInspectorVisited.value = true
+  }
+}, { immediate: true })
 
 function toggleSettings() {
   showSettings.value = !showSettings.value
@@ -156,14 +166,25 @@ function toggleWorkspaceDrawer() {
     showResponsiveDock.value = false
     return
   }
-  showWorkspaceDrawer.value = !showWorkspaceDrawer.value
-  if (showWorkspaceDrawer.value) {
-    showResponsiveDock.value = false
-  }
+  toggleResponsiveInspector('workspace')
 }
 
 function toggleRuntimeTasks() {
-  showRuntimeTasks.value = !showRuntimeTasks.value
+  if (isDesktopInspector.value) {
+    inspectorMode.value = tasksInspectorActive.value ? 'runtime' : 'tasks'
+    showResponsiveDock.value = false
+    return
+  }
+  toggleResponsiveInspector('tasks')
+}
+
+function toggleTerminalInspector() {
+  if (isDesktopInspector.value) {
+    inspectorMode.value = terminalInspectorActive.value ? 'runtime' : 'terminal'
+    showResponsiveDock.value = false
+    return
+  }
+  toggleResponsiveInspector('terminal')
 }
 
 function openWorkspaceDrawer() {
@@ -172,12 +193,18 @@ function openWorkspaceDrawer() {
     showResponsiveDock.value = false
     return
   }
-  showWorkspaceDrawer.value = true
-  showResponsiveDock.value = false
+  inspectorMode.value = 'workspace'
+  showResponsiveDock.value = true
 }
 
 function openRuntimeTasks() {
-  showRuntimeTasks.value = true
+  inspectorMode.value = 'tasks'
+  showResponsiveDock.value = !isDesktopInspector.value
+}
+
+function openTerminalInspector() {
+  inspectorMode.value = 'terminal'
+  showResponsiveDock.value = !isDesktopInspector.value
 }
 
 function toggleMobileSidebar() {
@@ -185,10 +212,18 @@ function toggleMobileSidebar() {
 }
 
 function toggleResponsiveDock() {
-  showResponsiveDock.value = !showResponsiveDock.value
   if (showResponsiveDock.value) {
-    showWorkspaceDrawer.value = false
+    showResponsiveDock.value = false
+    return
   }
+  inspectorMode.value = 'runtime'
+  showResponsiveDock.value = true
+}
+
+function toggleResponsiveInspector(mode: InspectorMode) {
+  const closingCurrentPanel = showResponsiveDock.value && inspectorMode.value === mode
+  inspectorMode.value = mode
+  showResponsiveDock.value = !closingCurrentPanel
 }
 
 function openCommandPalette() {
@@ -218,6 +253,8 @@ onUnmounted(() => {
       'sidebar-compact': isSidebarCompact,
       'workspace-active': workspaceInspectorActive,
       'runtime-active': runtimeInspectorActive,
+      'terminal-active': terminalInspectorActive,
+      'tasks-active': tasksInspectorActive,
       'inspector-active': inspectorVisible,
     }"
   >
@@ -250,9 +287,10 @@ onUnmounted(() => {
         @toggle-settings="toggleSettings"
         @toggle-workspace-drawer="toggleWorkspaceDrawer"
         @toggle-runtime-tasks="toggleRuntimeTasks"
+        @toggle-terminal="toggleTerminalInspector"
         @open-command-palette="openCommandPalette"
         :workspace-drawer-visible="workspaceVisible"
-        :runtime-tasks-visible="showRuntimeTasks"
+        :runtime-tasks-visible="runtimeTasksVisible"
       />
 
       <div class="content-area">
@@ -275,14 +313,19 @@ onUnmounted(() => {
           />
 
           <aside class="inspector-panel" :class="`mode-${inspectorMode}`" :style="{ width: effectiveDockWidth + 'px' }">
-            <WorkspacePanel v-if="workspaceInspectorActive" />
-            <ContainerDock v-else />
+            <div class="inspector-switcher">
+              <SxInspectorSegmented v-model:active="inspectorMode" />
+            </div>
+            <div class="inspector-body">
+              <WorkspacePanel v-if="inspectorMode === 'workspace'" />
+              <TerminalPanel v-if="terminalInspectorVisited" v-show="inspectorMode === 'terminal'" />
+              <RuntimeTasksPanel v-if="inspectorMode === 'tasks'" :show="true" embedded />
+              <ContainerDock v-if="inspectorMode === 'runtime'" />
+            </div>
           </aside>
         </template>
       </div>
     </div>
-
-    <WorkspaceDrawer v-if="isBelow1200" v-model:show="showWorkspaceDrawer" />
 
     <div
       v-if="isBelow1200"
@@ -292,7 +335,15 @@ onUnmounted(() => {
       <button type="button" class="dock-backdrop" @click="toggleResponsiveDock" />
       <div class="dock-panel-wrap">
         <aside class="dock-panel" :style="{ width: effectiveDockWidth + 'px' }">
-          <ContainerDock />
+          <div class="inspector-switcher">
+            <SxInspectorSegmented v-model:active="inspectorMode" />
+          </div>
+          <div class="inspector-body">
+            <WorkspacePanel v-if="inspectorMode === 'workspace'" />
+            <TerminalPanel v-if="terminalInspectorVisited" v-show="inspectorMode === 'terminal'" />
+            <RuntimeTasksPanel v-if="inspectorMode === 'tasks'" :show="true" embedded />
+            <ContainerDock v-if="inspectorMode === 'runtime'" />
+          </div>
         </aside>
       </div>
     </div>
@@ -308,36 +359,32 @@ onUnmounted(() => {
       </aside>
     </div>
 
-    <NTooltip v-if="isBelow1200" trigger="hover" placement="left">
-      <template #trigger>
-        <NButton class="dock-tab" circle size="small" :aria-label="showResponsiveDock ? t('header.hideContainers') : t('header.showContainers')" @click="toggleResponsiveDock">
-          <template #icon>
-            <NIcon size="16"><Albums /></NIcon>
-          </template>
-        </NButton>
-      </template>
-      {{ showResponsiveDock ? t('header.hideContainers') : t('header.showContainers') }}
-    </NTooltip>
+    <SxIconButton
+      v-if="isBelow1200"
+      class="dock-tab"
+      icon="runtime"
+      :label="showResponsiveDock ? t('header.hideContainers') : t('header.showContainers')"
+      size="small"
+      @click="toggleResponsiveDock"
+    />
 
-    <NTooltip v-if="isBelow768" trigger="hover" placement="right">
-      <template #trigger>
-        <NButton class="sidebar-tab" circle size="small" :aria-label="showMobileSidebar ? t('header.hideSessions') : t('header.showSessions')" @click="toggleMobileSidebar">
-          <template #icon>
-            <NIcon size="16"><ChatboxEllipses /></NIcon>
-          </template>
-        </NButton>
-      </template>
-      {{ showMobileSidebar ? t('header.hideSessions') : t('header.showSessions') }}
-    </NTooltip>
+    <SxIconButton
+      v-if="isBelow768"
+      class="sidebar-tab"
+      icon="session"
+      :label="showMobileSidebar ? t('header.hideSessions') : t('header.showSessions')"
+      size="small"
+      @click="toggleMobileSidebar"
+    />
   </div>
 
   <SettingsPanel v-model:show="showSettings" />
-  <RuntimeTasksPanel v-model:show="showRuntimeTasks" />
   <CommandPalette
     v-model:show="showPalette"
     @open-settings="showSettings = true"
     @open-workspace="openWorkspaceDrawer"
     @open-runtime-tasks="openRuntimeTasks"
+    @open-terminal="openTerminalInspector"
   />
 </template>
 
@@ -369,7 +416,7 @@ onUnmounted(() => {
 /* CSS safety net — keeps layout contained if JS breakpoints lag at resize.
    Structural mounting (v-if gates) stays in JS so drawer contents unmount
    when collapsed; these rules only clamp visuals. */
-@media (max-width: 1200px) {
+@media (max-width: 1199.98px) {
   .inspector-panel {
     display: none;
   }
@@ -451,10 +498,25 @@ onUnmounted(() => {
   flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .inspector-panel.mode-workspace {
   background: var(--platform-bg-elevated);
+}
+
+.inspector-switcher {
+  flex-shrink: 0;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--platform-bg-toolbar) 82%, transparent);
+}
+
+.inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 :global(:root[data-platform="macos"] .content-area){
@@ -511,6 +573,9 @@ onUnmounted(() => {
   background: var(--platform-bg-elevated);
   backdrop-filter: blur(22px) saturate(1.2);
   box-shadow: -20px 0 36px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .mobile-sidebar-panel {

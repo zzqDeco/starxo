@@ -9,7 +9,7 @@ import MessageBubble from './MessageBubble.vue'
 import InputArea from './InputArea.vue'
 import InterruptDialog from './InterruptDialog.vue'
 import AgentStatus from '@/components/status/AgentStatus.vue'
-import TaskRailFloating from '@/components/layout/TaskRailFloating.vue'
+import SxStatusBadge from '@/components/ui/SxStatusBadge.vue'
 import { SendMessage, SetMode, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
 import { useUiFeedback } from '@/composables/useUiFeedback'
@@ -26,6 +26,13 @@ const scrollBtnBottom = ref(80)
 const { isAutoScroll, isNearBottom, scrollToBottom, onScroll } = useAutoScroll(scrollContainer)
 
 const hasMessages = computed(() => chatStore.visibleMessages.length > 0)
+const taskStats = computed(() => chatStore.unifiedTaskStats)
+const showInlineTaskStatus = computed(() => chatStore.isStreaming || taskStats.value.total > 0)
+const inlineTaskTitle = computed(() => {
+  if (chatStore.isStreaming) return t('chat.agentRunning')
+  if (taskStats.value.total > 0) return t('chat.taskProgress', { done: taskStats.value.done, total: taskStats.value.total })
+  return ''
+})
 
 // Show scroll-to-bottom button when not near bottom
 const showScrollBtn = computed(() => hasMessages.value && !isNearBottom.value)
@@ -199,7 +206,17 @@ onUnmounted(() => {
       <InterruptDialog />
 
       <div class="bottom-stack">
-        <TaskRailFloating />
+        <div v-if="showInlineTaskStatus" class="inline-task-status" aria-live="polite">
+          <div class="inline-task-copy">
+            <SxStatusBadge :tone="chatStore.isStreaming ? 'info' : 'success'">
+              {{ chatStore.isStreaming ? t('chat.statusRunning') : t('chat.statusReady') }}
+            </SxStatusBadge>
+            <span>{{ inlineTaskTitle }}</span>
+          </div>
+          <span v-if="taskStats.currentTask" class="inline-task-current">
+            {{ taskStats.currentTask.title }}
+          </span>
+        </div>
 
         <InputArea
           :is-streaming="chatStore.isStreaming"
@@ -429,6 +446,41 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.inline-task-status {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--sx-separator);
+  border-radius: var(--sx-radius-10);
+  background: color-mix(in srgb, var(--sx-toolbar-bg) 84%, transparent);
+  color: var(--sx-text-secondary);
+  font: 400 12px/16px var(--sx-font-sans);
+}
+
+.inline-task-copy {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-task-copy > span:last-child,
+.inline-task-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-task-current {
+  color: var(--sx-text-tertiary);
+  font-size: 11px;
+  text-align: right;
 }
 
 @media (max-width: 720px) {

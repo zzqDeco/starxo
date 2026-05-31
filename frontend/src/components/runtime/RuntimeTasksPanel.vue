@@ -9,7 +9,9 @@ import { ListRuntimeTasks, ReadRuntimeTaskOutput, StopRuntimeTask } from '../../
 import { EventsOn } from '../../../wailsjs/runtime/runtime'
 import type { tools } from '../../../wailsjs/go/models'
 
-const props = defineProps<{ show: boolean }>()
+const props = withDefaults(defineProps<{ show: boolean; embedded?: boolean }>(), {
+  embedded: false,
+})
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
 
 const { t } = useI18n()
@@ -234,6 +236,12 @@ onMounted(() => {
     }),
   ]
   startTimer()
+  if (props.show) {
+    refreshTasks()
+      .then(readOutput)
+      .then(() => nextTick(() => panelRef.value?.focus()))
+      .catch((e) => feedback.error(t('runtimeTasks.actions.refresh'), e))
+  }
 })
 
 onUnmounted(() => {
@@ -244,8 +252,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="runtime-tasks-shell" :class="{ open: show }">
-    <button type="button" class="tasks-backdrop" @click="close" />
+  <div class="runtime-tasks-shell" :class="{ open: show, embedded }">
+    <button v-if="!embedded" type="button" class="tasks-backdrop" @click="close" />
     <aside ref="panelRef" class="runtime-tasks-panel" tabindex="-1" :aria-label="t('runtimeTasks.title')">
       <header class="tasks-head">
         <div class="tasks-title-block">
@@ -261,7 +269,7 @@ onUnmounted(() => {
             </template>
             {{ t('runtimeTasks.refresh') }}
           </NTooltip>
-          <NButton quaternary circle size="small" :aria-label="t('common.cancel')" @click="close">
+          <NButton v-if="!embedded" quaternary circle size="small" :aria-label="t('common.cancel')" @click="close">
             <template #icon><Close /></template>
           </NButton>
         </div>
@@ -367,6 +375,15 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
+.runtime-tasks-shell.embedded {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  height: 100%;
+  min-height: 0;
+  pointer-events: auto;
+}
+
 .runtime-tasks-shell.open {
   pointer-events: auto;
 }
@@ -405,6 +422,17 @@ onUnmounted(() => {
   outline: none;
 }
 
+.runtime-tasks-shell.embedded .runtime-tasks-panel {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  border-left: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
 :global(:root[data-platform="macos"] .runtime-tasks-panel){
   top: 52px;
   width: min(780px, 92vw);
@@ -415,6 +443,18 @@ onUnmounted(() => {
 
 .runtime-tasks-shell.open .runtime-tasks-panel {
   transform: translateX(0);
+}
+
+.runtime-tasks-shell.embedded.open .runtime-tasks-panel {
+  transform: none;
+}
+
+:global(:root[data-platform="macos"] .runtime-tasks-shell.embedded .runtime-tasks-panel){
+  top: auto;
+  width: 100%;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .tasks-head {

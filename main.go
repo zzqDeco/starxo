@@ -24,7 +24,7 @@ func main() {
 		Title:            "Starxo",
 		Width:            1400,
 		Height:           900,
-		MinWidth:         1000,
+		MinWidth:         768,
 		MinHeight:        600,
 		WindowStartState: options.Maximised,
 		AssetServer: &assetserver.Options{

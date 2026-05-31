@@ -18,6 +18,8 @@
 
 ## 4. 关键实现细节
 - **CSS 变量体系**:
+  - Figma v0.5 语义层: `--sx-window-bg`、`--sx-sidebar-bg`、`--sx-toolbar-bg`、`--sx-content-bg`、`--sx-inspector-bg`、`--sx-text-*`、`--sx-accent-*`、`--sx-radius-*`、`--sx-shadow-*` 是新 UI 组件的权威 token。
+  - 兼容层: 现有 `--platform-*` 和旧 `--bg-*` / `--text-*` / `--accent-*` alias 继续保留，避免一次性破坏旧页面。
   - 平台背景层级: `--platform-bg-window` → `--platform-bg-sidebar` → `--platform-bg-toolbar` → `--platform-bg-content` → `--platform-bg-raised`
   - 文本层级: `--text-primary` → `--text-secondary` → `--text-muted` → `--text-faint`
   - 强调色: 以低饱和系统蓝为主；success/warning/danger 仅用于状态点、错误和破坏性动作。
@@ -40,10 +42,10 @@
 ## 6. 变更影响面
 - CSS 变量修改会影响所有使用这些变量的组件
 - 代码块和 Markdown 样式修改影响 MessageBubble 和 TimelineEventItem 的消息渲染
-- 需与 App.vue 中的 Naive UI themeOverrides 保持色值一致
+- 需与 App.vue 中的 Naive UI themeOverrides 保持语义 token 一致
 
 ## 7. 维护建议
 - 修改该文件后，同步更新项目级 `implementation.plan.md` 与相关规则文档。
-- 新增 CSS 变量时遵循现有的命名约定和层级体系。
+- 新增 CSS 变量时优先扩展 `--sx-*` 语义层，再视迁移需要添加兼容 alias。
 - 修改颜色值时需同步 App.vue 的 themeOverrides 配置。
 - Agent 颜色系统的修改需同步 MessageBubble.vue 和 TimelineEventItem.vue 中的 agentColor 函数。

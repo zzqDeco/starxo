@@ -106,6 +106,12 @@ function formatTime(ts: number) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
+function displaySessionTitle(title?: string) {
+  const normalized = (title || '').trim()
+  if (!normalized || normalized === 'Default Session') return t('sidebar.untitled')
+  return normalized
+}
+
 function containerStatusDot(status?: string) {
   switch (status) {
     case 'running': return 'dot-green'
@@ -189,7 +195,7 @@ function handleTitlebarDoubleClick() {
         :key="sess.id"
         :class="['session-item', { active: sess.id === sessionStore.activeSessionId, disabled: sessionStore.switching }]"
         :tabindex="sessionStore.switching ? -1 : 0"
-        :title="sess.title || t('sidebar.untitled')"
+        :title="displaySessionTitle(sess.title)"
         role="button"
         @click="handleSessionClick(sess.id)"
         @keydown.enter="handleSessionClick(sess.id)"
@@ -214,7 +220,7 @@ function handleTitlebarDoubleClick() {
             />
           </template>
           <template v-else>
-            <NEllipsis class="session-title">{{ sess.title || t('sidebar.untitled') }}</NEllipsis>
+            <NEllipsis class="session-title">{{ displaySessionTitle(sess.title) }}</NEllipsis>
             <span class="session-meta">
               {{ sess.messageCount || 0 }} {{ t('sidebar.messages') }}
               <span v-if="sess.updatedAt" class="session-time">· {{ formatTime(sess.updatedAt) }}</span>

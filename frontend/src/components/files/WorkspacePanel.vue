@@ -1,9 +1,10 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NButton, NEmpty, NIcon, NInput, NSpin, NTooltip, NTree, type TreeOption } from 'naive-ui'
+import { NButton, NIcon, NInput, NSpin, NTooltip, NTree, type TreeOption } from 'naive-ui'
 import { CloudDownload, CloudUpload, CopyOutline, Refresh, Search, TrashOutline } from '@vicons/ionicons5'
 import type { FileInfo, WorkspaceInfo } from '@/types/config'
 import SplitHandle from '@/components/layout/SplitHandle.vue'
+import SxEmptyState from '@/components/ui/SxEmptyState.vue'
 import FileTransfer from './FileTransfer.vue'
 import CodePreview from './CodePreview.vue'
 import WorktreeReviewPanel from './WorktreeReviewPanel.vue'
@@ -460,10 +461,10 @@ onUnmounted(() => {
               @update:selected-keys="handleSelect"
               class="workspace-tree"
             />
-            <NEmpty
+            <SxEmptyState
               v-else
-              size="small"
-              :description="workspaceInfo?.active ? t('workspace.noFiles') : t('workspace.noActiveWorkspace')"
+              icon="workspace"
+              :title="workspaceInfo?.active ? t('workspace.noFiles') : t('workspace.noActiveWorkspace')"
               class="tree-empty"
             />
           </NSpin>

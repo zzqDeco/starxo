@@ -18,6 +18,7 @@
 - 文件树:
   - 将 `FileInfo[]` 构造成目录/文件混合树节点
   - 目录优先排序，名称字典序排序
+  - 空目录/无 active sandbox 状态使用 `SxEmptyState`，保证和 Figma v0.5 的空状态组件一致
 - 交互:
   - 顶部按钮：上传、下载、刷新、复制 workspace 路径、清理 tmp
   - 元信息栏以 inspector 密度展示 active sandbox、runtime、SSH host、workspace path；文件数量和大小仍由后端提供但不在窄右栏里抢占首屏视觉。
@@ -43,7 +44,7 @@
 
 ## 5. 依赖关系
 - 内部依赖:
-  - `SplitHandle.vue`, `FileTransfer.vue`, `CodePreview.vue`
+  - `SplitHandle.vue`, `FileTransfer.vue`, `CodePreview.vue`, `SxEmptyState.vue`
   - `@/types/config` (`FileInfo`)
   - `@/composables/useWorkspaceBridge`
 - 外部依赖:

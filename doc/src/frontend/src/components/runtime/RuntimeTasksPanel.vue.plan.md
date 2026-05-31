@@ -13,13 +13,16 @@
 - 监听 `runtime:task_started`、`runtime:task_completed`、`runtime:task_stopped` 事件，按当前 session 过滤并更新列表。
 
 ## 3. 输入与输出
-- 输入来源: `Props.show`、`sessionStore.activeSessionId`、Runtime task Wails events。
+- 输入来源: `Props.show`、`Props.embedded`、`sessionStore.activeSessionId`、Runtime task Wails events。
 - 输出结果: `update:show` 关闭面板；用户可刷新任务、读取输出、复制输出、停止运行中任务。
 
 ## 4. 关键实现细节
 - 右侧抽屉布局:
   - 左侧任务列表按 `startedAt` 倒序稳定展示。
   - 右侧详情区展示任务 id/type/status/duration/outputSize、命令、输出和错误。
+- Embedded inspector:
+  - `embedded=true` 时不渲染 backdrop/关闭按钮，面板填满 MainLayout inspector body。
+  - 供 Figma v0.5 四态 inspector 的 `tasks` 模式使用。
 - macOS 下作为轻量 inspector sheet 处理：透明 backdrop、blur panel、低对比度行选中态，避免覆盖式网页 drawer 的厚重感。
 - 自动刷新:
   - 面板打开时拉取当前会话任务。
@@ -37,7 +40,7 @@
 
 ## 6. 变更影响面
 - Runtime V2 后台任务能力从纯后端 API 变成前端可见可控。
-- Header 和 CommandPalette 新增入口，MainLayout 负责面板显隐状态。
+- Header 和 CommandPalette 新增入口，MainLayout 负责 `tasks` inspector mode；旧 overlay 形态保留兼容。
 
 ## 7. 维护建议
 - 如果未来 task output 支持分页加载，应复用后端 `offset/limit/nextOffset` 字段，而不是一次性读取全部内容。

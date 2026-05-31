@@ -9,7 +9,7 @@
 
 ## 2. 核心职责
 - 聊天主容器，负责消息流渲染、发送/停止、模式切换、自动滚动和中断交互。
-- 作为工作台中央执行画布，在底部区域组合“任务浮层 + composer”，统一与消息区栅格对齐。
+- 作为工作台中央执行画布，在底部区域组合“inline task status + composer”，统一与消息区栅格对齐。
 
 ## 3. 输入与输出
 - 输入来源: `chatStore`、`connectionStore`、Wails ChatService
@@ -25,7 +25,7 @@
 - 空状态使用原生应用式状态说明：连接状态点、简短标题、三条能力分组行和轻量提示按钮（点击可直接发送），避免 landing/hero 化文案。
 - 底部区:
   - `InterruptDialog`
-  - `TaskRailFloating`（任务摘要浮层）
+  - inline task status（固定高度状态条，使用 `SxStatusBadge` 展示运行/同步状态）
   - `InputArea`（接收当前 agent 模式和切换 loading 状态，模式切换入口已下沉到 composer）
 - 自动滚动:
   - 使用 `useAutoScroll`
@@ -36,7 +36,7 @@
 ## 5. 依赖关系
 - 内部依赖:
   - `MessageBubble.vue`, `InputArea.vue`, `InterruptDialog.vue`
-  - `TaskRailFloating.vue`, `AgentStatus.vue`
+  - `SxStatusBadge.vue`, `AgentStatus.vue`
   - `chatStore`, `connectionStore`, `useAutoScroll`
 - 外部依赖:
   - `vue`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
@@ -45,7 +45,7 @@
 ## 6. 变更影响面
 - 旧的 `PlanPanel` 与持久 `TodoBoard` 从聊天主流中移除。
 - 模式切换入口从顶部工具条移动到 composer，减少消息流上方的固定占用。
-- 任务信息改为输入区上方浮层，减少消息区视觉干扰。
+- 任务信息改为输入区上方内联状态条，不使用悬浮 rail，避免遮挡 composer。
 - macOS 下消息区和底部 composer 使用更轻的原生工作台密度，减少网页卡片感、过强阴影和过多强调色；视觉参考 Notes/VS Code 中心编辑区。
 
 ## 7. 维护建议
