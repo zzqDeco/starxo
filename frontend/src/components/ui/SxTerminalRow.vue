@@ -10,7 +10,7 @@ withDefaults(defineProps<{
 </script>
 
 <template>
-  <div :class="['sx-terminal-row', `type-${type}`]">
+  <div :class="['sx-terminal-row', `type-${type}`, { 'no-time': !time }]">
     <span v-if="time" class="sx-terminal-time">{{ time }}</span>
     <span class="sx-terminal-prefix">{{ type === 'command' ? '$' : '' }}</span>
     <span class="sx-terminal-text">{{ text }}</span>
@@ -26,6 +26,10 @@ withDefaults(defineProps<{
   border-radius: var(--sx-radius-6);
   font: 400 12px/1.48 var(--sx-font-mono);
   color: var(--sx-text-secondary);
+}
+
+.sx-terminal-row.no-time {
+  grid-template-columns: 12px minmax(0, 1fr);
 }
 
 .sx-terminal-time {

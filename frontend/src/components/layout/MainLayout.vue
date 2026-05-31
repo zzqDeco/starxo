@@ -63,6 +63,7 @@ const isBelow1200 = computed(() => windowWidth.value < 1200)
 const isBelow992 = computed(() => windowWidth.value < 992)
 const isBelow768 = computed(() => windowWidth.value <= 768)
 const isDesktopInspector = computed(() => !isBelow1200.value)
+const workspacePanelActive = computed(() => inspectorMode.value === 'workspace')
 const workspaceInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'workspace')
 const runtimeInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'runtime')
 const terminalInspectorActive = computed(() => isDesktopInspector.value && inspectorMode.value === 'terminal')
@@ -84,7 +85,7 @@ const leftMaxSize = computed(() => {
 })
 
 const dockMinSize = computed(() => {
-  if (workspaceInspectorActive.value) return 420
+  if (workspacePanelActive.value) return isBelow768.value ? 320 : 420
   if (isBelow992.value) return 240
   if (isBelow1200.value) return 280
   return 320
@@ -104,7 +105,12 @@ const effectiveLeftWidth = computed(() => {
 })
 
 const effectiveDockWidth = computed(() => {
-  if (workspaceInspectorActive.value) {
+  if (workspacePanelActive.value) {
+    if (isBelow1200.value) {
+      const sheetMargin = isBelow768.value ? 16 : 28
+      const maxWorkspace = Math.max(dockMinSize.value, Math.min(760, windowWidth.value - sheetMargin))
+      return Math.min(Math.max(workspaceInspectorWidth.value, dockMinSize.value), maxWorkspace)
+    }
     const maxWorkspace = Math.max(dockMinSize.value, Math.min(760, windowWidth.value - effectiveLeftWidth.value - 460))
     return Math.min(Math.max(workspaceInspectorWidth.value, dockMinSize.value), maxWorkspace)
   }
@@ -153,8 +159,7 @@ function toggleWorkspaceDrawer() {
     showResponsiveDock.value = false
     return
   }
-  inspectorMode.value = 'workspace'
-  showResponsiveDock.value = !showResponsiveDock.value
+  toggleResponsiveInspector('workspace')
 }
 
 function toggleRuntimeTasks() {
@@ -163,8 +168,7 @@ function toggleRuntimeTasks() {
     showResponsiveDock.value = false
     return
   }
-  inspectorMode.value = 'tasks'
-  showResponsiveDock.value = !showResponsiveDock.value
+  toggleResponsiveInspector('tasks')
 }
 
 function toggleTerminalInspector() {
@@ -173,8 +177,7 @@ function toggleTerminalInspector() {
     showResponsiveDock.value = false
     return
   }
-  inspectorMode.value = 'terminal'
-  showResponsiveDock.value = !showResponsiveDock.value
+  toggleResponsiveInspector('terminal')
 }
 
 function openWorkspaceDrawer() {
@@ -202,7 +205,18 @@ function toggleMobileSidebar() {
 }
 
 function toggleResponsiveDock() {
-  showResponsiveDock.value = !showResponsiveDock.value
+  if (showResponsiveDock.value) {
+    showResponsiveDock.value = false
+    return
+  }
+  inspectorMode.value = 'runtime'
+  showResponsiveDock.value = true
+}
+
+function toggleResponsiveInspector(mode: InspectorMode) {
+  const closingCurrentPanel = showResponsiveDock.value && inspectorMode.value === mode
+  inspectorMode.value = mode
+  showResponsiveDock.value = !closingCurrentPanel
 }
 
 function openCommandPalette() {

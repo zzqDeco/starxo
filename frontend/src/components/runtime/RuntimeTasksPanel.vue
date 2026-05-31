@@ -236,6 +236,12 @@ onMounted(() => {
     }),
   ]
   startTimer()
+  if (props.show) {
+    refreshTasks()
+      .then(readOutput)
+      .then(() => nextTick(() => panelRef.value?.focus()))
+      .catch((e) => feedback.error(t('runtimeTasks.actions.refresh'), e))
+  }
 })
 
 onUnmounted(() => {
@@ -437,6 +443,18 @@ onUnmounted(() => {
 
 .runtime-tasks-shell.open .runtime-tasks-panel {
   transform: translateX(0);
+}
+
+.runtime-tasks-shell.embedded.open .runtime-tasks-panel {
+  transform: none;
+}
+
+:global(:root[data-platform="macos"] .runtime-tasks-shell.embedded .runtime-tasks-panel){
+  top: auto;
+  width: 100%;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .tasks-head {
