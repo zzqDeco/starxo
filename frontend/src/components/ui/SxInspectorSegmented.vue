@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { resolveSxIcon } from './icons'
 
 const props = withDefaults(defineProps<{
@@ -9,12 +11,14 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ (e: 'update:active', value: 'runtime' | 'workspace' | 'terminal' | 'tasks'): void }>()
 
-const items = [
-  { value: 'runtime', label: '运行时', icon: resolveSxIcon('runtime') },
-  { value: 'workspace', label: '工作区', icon: resolveSxIcon('workspace') },
-  { value: 'terminal', label: '终端', icon: resolveSxIcon('terminal') },
-  { value: 'tasks', label: '任务', icon: resolveSxIcon('tasks') },
-] as const
+const { t } = useI18n()
+
+const items = computed(() => [
+  { value: 'runtime', label: t('runtime.title'), icon: resolveSxIcon('runtime') },
+  { value: 'workspace', label: t('workspace.title'), icon: resolveSxIcon('workspace') },
+  { value: 'terminal', label: t('layout.terminal'), icon: resolveSxIcon('terminal') },
+  { value: 'tasks', label: t('runtimeTasks.title'), icon: resolveSxIcon('tasks') },
+] as const)
 </script>
 
 <template>

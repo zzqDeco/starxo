@@ -32,6 +32,7 @@ const showMobileSidebar = ref(false)
 const showResponsiveDock = ref(false)
 const showPalette = ref(false)
 const inspectorMode = ref<InspectorMode>('runtime')
+const terminalInspectorVisited = ref(false)
 
 useKeybinds([
   { combo: { key: 'k', meta: true }, handler: () => { showPalette.value = !showPalette.value }, allowInInput: true },
@@ -148,6 +149,12 @@ watch(isBelow768, (below) => {
     showMobileSidebar.value = false
   }
 })
+
+watch(inspectorMode, (mode) => {
+  if (mode === 'terminal') {
+    terminalInspectorVisited.value = true
+  }
+}, { immediate: true })
 
 function toggleSettings() {
   showSettings.value = !showSettings.value
@@ -311,9 +318,9 @@ onUnmounted(() => {
             </div>
             <div class="inspector-body">
               <WorkspacePanel v-if="inspectorMode === 'workspace'" />
-              <TerminalPanel v-else-if="inspectorMode === 'terminal'" />
-              <RuntimeTasksPanel v-else-if="inspectorMode === 'tasks'" :show="true" embedded />
-              <ContainerDock v-else />
+              <TerminalPanel v-if="terminalInspectorVisited" v-show="inspectorMode === 'terminal'" />
+              <RuntimeTasksPanel v-if="inspectorMode === 'tasks'" :show="true" embedded />
+              <ContainerDock v-if="inspectorMode === 'runtime'" />
             </div>
           </aside>
         </template>
@@ -333,9 +340,9 @@ onUnmounted(() => {
           </div>
           <div class="inspector-body">
             <WorkspacePanel v-if="inspectorMode === 'workspace'" />
-            <TerminalPanel v-else-if="inspectorMode === 'terminal'" />
-            <RuntimeTasksPanel v-else-if="inspectorMode === 'tasks'" :show="true" embedded />
-            <ContainerDock v-else />
+            <TerminalPanel v-if="terminalInspectorVisited" v-show="inspectorMode === 'terminal'" />
+            <RuntimeTasksPanel v-if="inspectorMode === 'tasks'" :show="true" embedded />
+            <ContainerDock v-if="inspectorMode === 'runtime'" />
           </div>
         </aside>
       </div>
@@ -409,7 +416,7 @@ onUnmounted(() => {
 /* CSS safety net — keeps layout contained if JS breakpoints lag at resize.
    Structural mounting (v-if gates) stays in JS so drawer contents unmount
    when collapsed; these rules only clamp visuals. */
-@media (max-width: 1200px) {
+@media (max-width: 1199.98px) {
   .inspector-panel {
     display: none;
   }
