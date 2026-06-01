@@ -12,3 +12,5 @@
 
 ## 维护要点
 - 后端服务名和事件名仍有 container 兼容命名，前端用户文案应保持 sandbox。
+- 销毁确认框必须主动聚焦真实 input，并通过 `useNativeTextInputSync` 支持键盘、粘贴和辅助技术输入；输入匹配后 Enter 与按钮点击都应触发销毁。
+- 销毁 active sandbox 只清 active sandbox/workspace 状态，不应断开 SSH。

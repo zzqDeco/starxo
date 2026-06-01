@@ -7,7 +7,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/pkg/sftp"
 )
@@ -15,6 +17,13 @@ import (
 // FileTransfer provides file transfer capabilities using SFTP over SSH.
 type FileTransfer struct {
 	ssh *SSHClient
+}
+
+type RemoteFileInfo struct {
+	Name     string
+	Path     string
+	Size     int64
+	Modified string
 }
 
 // NewFileTransfer creates a new FileTransfer backed by the given SSH client.
@@ -88,6 +97,82 @@ func (t *FileTransfer) DownloadFile(ctx context.Context, remotePath, localPath s
 	}
 
 	return nil
+}
+
+func (t *FileTransfer) ListFiles(ctx context.Context, root string, maxDepth int) ([]RemoteFileInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+	root = cleanRemotePath(root)
+	if root == "" || root == "/" || root == "." {
+		return nil, fmt.Errorf("refusing to list unsafe remote path %q", root)
+	}
+
+	sftpClient, err := t.newSFTP()
+	if err != nil {
+		return nil, err
+	}
+	defer sftpClient.Close()
+
+	var files []RemoteFileInfo
+	var walk func(dir, rel string, depth int) error
+	walk = func(dir, rel string, depth int) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if depth >= maxDepth {
+			return nil
+		}
+		entries, err := sftpClient.ReadDir(dir)
+		if err != nil {
+			if rel == "" {
+				return fmt.Errorf("failed to list remote directory %s: %w", dir, err)
+			}
+			return nil
+		}
+		sort.SliceStable(entries, func(i, j int) bool {
+			if entries[i].IsDir() != entries[j].IsDir() {
+				return entries[i].IsDir()
+			}
+			return entries[i].Name() < entries[j].Name()
+		})
+		for _, entry := range entries {
+			name := entry.Name()
+			if name == "." || name == ".." {
+				continue
+			}
+			childRel := name
+			if rel != "" {
+				childRel = path.Join(rel, name)
+			}
+			childPath := path.Join(root, childRel)
+			if entry.IsDir() {
+				if depth+1 < maxDepth {
+					if err := walk(childPath, childRel, depth+1); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			files = append(files, RemoteFileInfo{
+				Name:     name,
+				Path:     childPath,
+				Size:     entry.Size(),
+				Modified: entry.ModTime().Format(time.RFC3339),
+			})
+		}
+		return nil
+	}
+	if err := walk(root, "", 0); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
+	return files, nil
 }
 
 // UploadToContainer uploads a local file into the active sandbox workspace.

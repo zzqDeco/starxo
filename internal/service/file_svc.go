@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -176,54 +175,31 @@ func (s *FileService) ListWorkspaceFiles() ([]FileInfoDTO, error) {
 		return nil, fmt.Errorf("sandbox is not connected")
 	}
 
-	op := mgr.Operator()
-	if op == nil {
-		return nil, fmt.Errorf("sandbox operator is not available")
+	transfer := mgr.Transfer()
+	if transfer == nil {
+		return nil, fmt.Errorf("file transfer is not available")
 	}
 
-	script := `import json, os, time
-root = os.getcwd()
-max_depth = 3
-items = []
-for dirpath, dirnames, filenames in os.walk(root):
-    rel_dir = os.path.relpath(dirpath, root)
-    depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
-    if depth >= max_depth:
-        dirnames[:] = []
-        continue
-    if depth >= max_depth - 1:
-        dirnames[:] = []
-    for name in filenames:
-        full = os.path.join(dirpath, name)
-        try:
-            st = os.stat(full)
-        except OSError:
-            continue
-        rel = os.path.relpath(full, root).replace(os.sep, "/")
-        items.append({
-            "name": name,
-            "path": os.path.join(root, rel).replace(os.sep, "/"),
-            "size": st.st_size,
-            "modified": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(st.st_mtime)),
-        })
-items.sort(key=lambda item: item["path"])
-print(json.dumps(items))`
-	cmd := "cd " + shellQuoteRuntime(s.workspacePath()) + " && python3 -c " + shellQuoteRuntime(script)
-	output, err := op.RunCommand(s.ctx, []string{"sh", "-lc", cmd})
+	workspace := s.workspacePath()
+	remoteFiles, err := transfer.ListFiles(s.ctx, workspace, 3)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list files: %w", err)
-	}
-	if output.ExitCode != 0 {
-		return nil, fmt.Errorf("failed to list files (exit %d): %s", output.ExitCode, output.Stderr)
+		return nil, fmt.Errorf("failed to list workspace files under %s: %w", workspace, err)
 	}
 
-	var files []FileInfoDTO
-	if stdout := strings.TrimSpace(output.Stdout); stdout != "" {
-		if err := json.Unmarshal([]byte(stdout), &files); err != nil {
-			return nil, fmt.Errorf("failed to parse workspace file list: %w", err)
-		}
+	files := make([]FileInfoDTO, 0, len(remoteFiles))
+	for _, file := range remoteFiles {
+		files = append(files, FileInfoDTO{
+			Name:     file.Name,
+			Path:     file.Path,
+			Size:     file.Size,
+			Modified: file.Modified,
+			IsOutput: false,
+		})
 	}
 	sort.SliceStable(files, func(i, j int) bool {
+		if files[i].Path == files[j].Path {
+			return files[i].Name < files[j].Name
+		}
 		return files[i].Path < files[j].Path
 	})
 	return files, nil

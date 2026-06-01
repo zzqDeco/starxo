@@ -1,8 +1,9 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue'
-import { NInput, NButton, NIcon, NTooltip, NButtonGroup } from 'naive-ui'
+import { nextTick, ref, computed } from 'vue'
+import { NButton, NIcon, NTooltip, NButtonGroup } from 'naive-ui'
 import { Send, Attach, StopCircle, GitBranch, DocumentText } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
+import { useNativeTextInputSync } from '@/composables/useNativeTextInputSync'
 
 const { t } = useI18n()
 
@@ -20,18 +21,49 @@ const emit = defineEmits<{
 
 const inputText = ref('')
 const attachedFile = ref('')
+const composerInputProps = computed(() => ({
+  'aria-label': t('input.placeholder'),
+  'data-testid': 'chat-composer-input',
+}) as Record<string, string>)
+const {
+  inputRef,
+  rootRef,
+  focusInput,
+  syncFromDom,
+  onFocusIn,
+  onFocusOut,
+  onInputLike,
+} = useNativeTextInputSync(inputText)
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !props.isStreaming)
 
+function resizeComposer() {
+  nextTick(() => {
+    const el = inputRef.value instanceof HTMLTextAreaElement ? inputRef.value : null
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 96)}px`
+  })
+}
+
+function handleInputLike() {
+  onInputLike()
+  resizeComposer()
+}
+
 function handleSend() {
+  syncFromDom()
   const text = inputText.value.trim()
   if (!text || props.isStreaming) return
   emit('send', text, attachedFile.value || undefined)
   inputText.value = ''
   attachedFile.value = ''
+  resizeComposer()
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  syncFromDom()
+  resizeComposer()
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSend()
@@ -110,7 +142,18 @@ const attachedFileName = computed(() => {
       <span class="composer-hint">{{ t('input.shiftEnter') }}</span>
     </div>
 
-    <div class="input-shell">
+    <div
+      ref="rootRef"
+      class="input-shell"
+      data-testid="chat-composer-input-shell"
+      @click="focusInput"
+      @focusin="onFocusIn"
+      @focusout="onFocusOut"
+      @input.capture="handleInputLike"
+      @change.capture="handleInputLike"
+      @keyup.capture="handleInputLike"
+      @paste.capture="handleInputLike"
+    >
       <NTooltip trigger="hover" placement="top">
         <template #trigger>
           <NButton
@@ -129,11 +172,12 @@ const attachedFileName = computed(() => {
         {{ t('input.attachFile') }}
       </NTooltip>
 
-      <NInput
-        v-model:value="inputText"
-        type="textarea"
+      <textarea
+        ref="inputRef"
+        v-model="inputText"
         :placeholder="t('input.placeholder')"
-        :autosize="{ minRows: 1, maxRows: 4 }"
+        v-bind="composerInputProps"
+        rows="1"
         class="chat-input"
         @keydown="handleKeydown"
         :disabled="isStreaming"
@@ -313,10 +357,6 @@ const attachedFileName = computed(() => {
   box-shadow: none;
 }
 
-:global(:root[data-platform="macos"] .chat-input .n-input-wrapper){
-  padding-left: 2px;
-}
-
 .input-shell:focus-within {
   border-color: var(--border-strong);
   box-shadow: 0 0 0 3px var(--platform-accent-soft);
@@ -324,26 +364,21 @@ const attachedFileName = computed(() => {
 
 .chat-input {
   flex: 1;
-}
-
-.chat-input :deep(.n-input-wrapper) {
-  background: transparent !important;
-  box-shadow: none !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-
-.chat-input :deep(textarea) {
+  min-width: 0;
+  max-height: 96px;
   font-family: var(--font-sans) !important;
   font-size: var(--fs-sm) !important;
   line-height: var(--lh-normal) !important;
   padding: 6px 0 !important;
   background: transparent !important;
   border: none !important;
+  outline: none !important;
   resize: none !important;
+  color: var(--text-primary);
+  overflow-y: auto;
 }
 
-.chat-input :deep(textarea::placeholder) {
+.chat-input::placeholder {
   color: var(--text-faint) !important;
 }
 

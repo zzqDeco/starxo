@@ -1,8 +1,9 @@
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NProgress, NInput } from 'naive-ui'
+import { NButton, NIcon, NEmpty, NSpin, NCollapse, NCollapseItem, NProgress } from 'naive-ui'
 import { Refresh, Play, Stop, Trash, Server, Add, RadioButtonOn, RadioButtonOff, Close } from '@vicons/ionicons5'
 import { useFocusTrap } from '@/composables/useFocusTrap'
+import { useNativeTextInputSync } from '@/composables/useNativeTextInputSync'
 import { useContainerStore } from '@/stores/containerStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -19,14 +20,28 @@ const panelBusy = computed(() => containerStore.loading || containerStore.creati
 
 const destroyTarget = ref<ContainerInfo | null>(null)
 const destroyInput = ref('')
+const destroyInputProps = computed(() => ({
+  'aria-label': t('containers.destroyTypeToConfirm'),
+  'data-testid': 'destroy-sandbox-input',
+}) as Record<string, string>)
 const destroyDialogRef = ref<HTMLElement | null>(null)
 const destroyActive = computed(() => !!destroyTarget.value)
 useFocusTrap(destroyDialogRef, destroyActive)
+const {
+  inputRef: destroyInputRef,
+  rootRef: destroyInputRootRef,
+  focusInput: focusDestroyInput,
+  syncFromDom: syncDestroyInputFromDom,
+  onFocusIn: onDestroyInputFocusIn,
+  onFocusOut: onDestroyInputFocusOut,
+  onInputLike: onDestroyInputLike,
+} = useNativeTextInputSync(destroyInput)
 
 function openDestroy(container: ContainerInfo) {
   destroyTarget.value = container
   destroyInput.value = ''
   if (typeof document !== 'undefined') document.body.style.overflow = 'hidden'
+  window.setTimeout(() => focusDestroyInput(), 0)
 }
 
 function closeDestroy() {
@@ -44,6 +59,7 @@ const destroyName = computed(() => {
 const destroyMatches = computed(() => destroyInput.value.trim() === destroyName.value)
 
 async function confirmDestroy() {
+  syncDestroyInputFromDom()
   if (!destroyTarget.value || !destroyMatches.value) return
   const id = destroyTarget.value.id
   closeDestroy()
@@ -51,6 +67,7 @@ async function confirmDestroy() {
 }
 
 function onDestroyKeydown(e: KeyboardEvent) {
+  syncDestroyInputFromDom()
   if (e.key === 'Escape') {
     e.preventDefault()
     closeDestroy()
@@ -373,13 +390,28 @@ function sessionTitle(sessionID: string): string {
                 {{ t('containers.destroyTypeToConfirm') }}
                 <code class="destroy-name">{{ destroyName }}</code>
               </p>
-              <NInput
-                v-model:value="destroyInput"
-                :placeholder="destroyName"
-                autofocus
-                size="small"
-                class="destroy-input"
-              />
+              <div
+                ref="destroyInputRootRef"
+                class="destroy-input-wrap"
+                data-testid="destroy-sandbox-input-wrap"
+                @click="focusDestroyInput"
+                @focusin="onDestroyInputFocusIn"
+                @focusout="onDestroyInputFocusOut"
+                @input.capture="onDestroyInputLike"
+                @change.capture="onDestroyInputLike"
+                @keyup.capture="onDestroyInputLike"
+                @paste.capture="onDestroyInputLike"
+              >
+                <input
+                  ref="destroyInputRef"
+                  v-model="destroyInput"
+                  type="text"
+                  :placeholder="destroyName"
+                  autofocus
+                  class="destroy-input"
+                  v-bind="destroyInputProps"
+                />
+              </div>
             </div>
             <footer class="destroy-footer">
               <NButton size="small" @click="closeDestroy">{{ t('common.cancel') }}</NButton>
@@ -754,6 +786,33 @@ function sessionTitle(sessionID: string): string {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--accent-cyan);
+}
+
+.destroy-input-wrap {
+  display: flex;
+}
+
+.destroy-input {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.destroy-input:focus {
+  border-color: var(--accent-rose);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-rose) 18%, transparent);
+}
+
+.destroy-input::placeholder {
+  color: var(--text-faint);
 }
 
 .destroy-footer {

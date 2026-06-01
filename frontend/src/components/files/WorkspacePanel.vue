@@ -39,6 +39,7 @@ const previewContent = ref('')
 const query = ref('')
 const treeWidth = ref(220)
 const showTransfer = ref(false)
+const workspaceError = ref('')
 const { t } = useI18n()
 const feedback = useUiFeedback()
 const sessionStore = useSessionStore()
@@ -135,6 +136,7 @@ const treeData = computed<WorkspaceTreeNode[]>(() => buildTree(filteredFiles.val
 async function refreshFiles() {
   const requestID = ++refreshRequestID
   loading.value = true
+  workspaceError.value = ''
   try {
     const info = await GetWorkspaceInfo() as WorkspaceInfo
     if (requestID !== refreshRequestID) return
@@ -149,6 +151,11 @@ async function refreshFiles() {
     const result = await ListWorkspaceFiles()
     if (requestID !== refreshRequestID) return
     files.value = (result as unknown as FileInfo[]) || []
+    console.debug('[workspace] refreshed file list', {
+      activeContainerID: info.activeContainerID,
+      workspacePath: info.workspacePath,
+      fileCount: files.value.length,
+    })
 
     if (selectedPath.value && !files.value.find(f => f.path === selectedPath.value)) {
       selectedPath.value = ''
@@ -157,7 +164,7 @@ async function refreshFiles() {
   } catch (e) {
     console.warn('Failed to list files:', e)
     if (requestID === refreshRequestID) {
-      workspaceInfo.value = null
+      workspaceError.value = e instanceof Error ? e.message : String(e || t('workspace.listError'))
       files.value = []
       selectedPath.value = ''
       previewContent.value = ''
@@ -219,6 +226,7 @@ function clearWorkspaceState(invalidateRequests = true) {
   pendingPreviewReloadPath = ''
   previewRequestID++
   workspaceInfo.value = null
+  workspaceError.value = ''
   currentWorkspaceContainerID.value = ''
   files.value = []
   selectedPath.value = ''
@@ -463,10 +471,15 @@ onUnmounted(() => {
             />
             <SxEmptyState
               v-else
-              icon="workspace"
-              :title="workspaceInfo?.active ? t('workspace.noFiles') : t('workspace.noActiveWorkspace')"
+              :icon="workspaceError ? 'warn' : 'workspace'"
+              :title="workspaceError ? t('workspace.listError') : (workspaceInfo?.active ? t('workspace.noFiles') : t('workspace.noActiveWorkspace'))"
+              :description="workspaceError"
               class="tree-empty"
-            />
+            >
+              <template v-if="workspaceError" #actions>
+                <NButton size="small" secondary @click="refreshFiles">{{ t('workspace.refresh') }}</NButton>
+              </template>
+            </SxEmptyState>
           </NSpin>
         </div>
       </div>

@@ -289,6 +289,7 @@ export default {
     refresh: '刷新',
     noFiles: '暂无文件',
     noActiveWorkspace: '未激活沙箱工作区',
+    listError: '无法读取工作区文件',
     openFile: '在工作区打开文件',
     sandbox: '沙箱',
     runtime: '运行时',

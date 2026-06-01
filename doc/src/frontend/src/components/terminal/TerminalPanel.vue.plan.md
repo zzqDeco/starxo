@@ -33,6 +33,7 @@
 - **命令输入条**:
   - SSH 未连接或没有 active sandbox 时禁用
   - 提交后调用 `RunTerminalCommand`，命令输出仍通过 `terminal:output` 写入面板
+  - 使用 `useNativeTextInputSync` 主动聚焦并同步 Naive UI 内层 input，避免 xterm 输出区抢焦点或辅助技术设置 value 后按钮仍 disabled
 - **行数计数**: `lineCount` ref 跟踪终端输出总行数，clearTerminal 时重置
 
 ## 5. 依赖关系
@@ -50,4 +51,5 @@
 - xterm.js 使用动态导入，加载失败时自动回退。
 - 状态栏依赖 connectionStore/containerStore，store 接口变更时需同步更新。
 - 当前命令输入是一次性 shell command runner；如果后续做完整 PTY，需要新增专门的 process/session 生命周期和 resize/stdin/stdout 通道。
+- 点击命令栏区域必须聚焦命令 input；xterm 输出区域不能成为提交命令的输入路径。
 - 终端面板在 native UI pass 中按 inspector 工具面板处理：白色/中性输出面、轻 toolbar、底部状态栏使用系统字体，减少彩色终端装饰。
