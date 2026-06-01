@@ -1,12 +1,13 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { NButton, NIcon, NInput, NTooltip } from 'naive-ui'
+import { NButton, NIcon, NTooltip } from 'naive-ui'
 import { TrashOutline, Cube, PaperPlaneOutline } from '@vicons/ionicons5'
 import SxTerminalRow from '@/components/ui/SxTerminalRow.vue'
 import { useWailsEvent } from '@/composables/useWailsEvent'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useContainerStore } from '@/stores/containerStore'
 import { useI18n } from 'vue-i18n'
+import { useNativeTextInputSync } from '@/composables/useNativeTextInputSync'
 import { RunTerminalCommand } from '../../../wailsjs/go/service/SandboxService'
 
 const { t } = useI18n()
@@ -19,6 +20,19 @@ const autoScroll = ref(true)
 const lineCount = ref(0)
 const commandInput = ref('')
 const commandRunning = ref(false)
+const commandInputProps = computed(() => ({
+  'aria-label': t('terminal.commandPlaceholder'),
+  'data-testid': 'terminal-command-input',
+}) as Record<string, string>)
+const {
+  inputRef: commandInputRef,
+  rootRef: commandInputRootRef,
+  focusInput: focusCommandInput,
+  syncFromDom: syncCommandInputFromDom,
+  onFocusIn: onCommandFocusIn,
+  onFocusOut: onCommandFocusOut,
+  onInputLike: onCommandInputLike,
+} = useNativeTextInputSync(commandInput)
 
 let termInstance: any = null
 let fitAddon: any = null
@@ -174,6 +188,7 @@ function errorMessage(error: unknown): string {
 }
 
 async function submitCommand() {
+  syncCommandInputFromDom()
   const command = commandInput.value.trim()
   if (!command || !canRunCommand.value) return
   commandInput.value = ''
@@ -288,16 +303,28 @@ onUnmounted(() => {
         </div>
       </template>
     </div>
-    <form class="terminal-command-bar" @submit.prevent="submitCommand">
+    <form
+      ref="commandInputRootRef"
+      class="terminal-command-bar"
+      data-testid="terminal-command-bar"
+      @submit.prevent="submitCommand"
+      @click="focusCommandInput"
+      @focusin="onCommandFocusIn"
+      @focusout="onCommandFocusOut"
+      @input.capture="onCommandInputLike"
+      @change.capture="onCommandInputLike"
+      @keyup.capture="onCommandInputLike"
+      @paste.capture="onCommandInputLike"
+    >
       <span class="terminal-prompt">$</span>
-      <NInput
-        v-model:value="commandInput"
-        size="small"
+      <input
+        ref="commandInputRef"
+        v-model="commandInput"
+        type="text"
         class="terminal-command-input"
         :placeholder="commandPlaceholder"
+        v-bind="commandInputProps"
         :disabled="!sshConnected || !activeContainer"
-        :loading="commandRunning"
-        clearable
       />
       <NButton
         size="small"
@@ -398,6 +425,23 @@ onUnmounted(() => {
 .terminal-command-input {
   flex: 1;
   min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  padding: 4px 0;
+}
+
+.terminal-command-input::placeholder {
+  color: var(--text-faint);
+}
+
+.terminal-command-input:disabled {
+  cursor: not-allowed;
+  color: var(--text-faint);
 }
 
 .term-line {

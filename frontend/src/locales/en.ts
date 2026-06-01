@@ -289,6 +289,7 @@ export default {
     refresh: 'Refresh',
     noFiles: 'No files',
     noActiveWorkspace: 'No active sandbox workspace',
+    listError: 'Unable to read workspace files',
     openFile: 'Open file in workspace',
     sandbox: 'Sandbox',
     runtime: 'Runtime',

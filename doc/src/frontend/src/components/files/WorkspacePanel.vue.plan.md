@@ -19,6 +19,7 @@
   - 将 `FileInfo[]` 构造成目录/文件混合树节点
   - 目录优先排序，名称字典序排序
   - 空目录/无 active sandbox 状态使用 `SxEmptyState`，保证和 Figma v0.5 的空状态组件一致
+  - 列表失败时显示错误空状态和重试按钮，不能静默伪装成空目录
 - 交互:
   - 顶部按钮：上传、下载、刷新、复制 workspace 路径、清理 tmp
   - 元信息栏以 inspector 密度展示 active sandbox、runtime、SSH host、workspace path；文件数量和大小仍由后端提供但不在窄右栏里抢占首屏视觉。
@@ -41,6 +42,7 @@
 - worktree review 成功 merge 或 exit 后触发 `refreshFiles`，确保文件树跟随后端 active workspace 状态。
 - 刷新和预览请求使用请求序号校验，避免 sandbox 销毁后旧响应写回 stale 文件内容。
 - `currentWorkspaceContainerID` 只来自 lifecycle event payload 或 `GetWorkspaceInfo.activeContainerID`，避免从全局 store 读取到异步切换过程中的旧 active container。
+- 刷新成功时保留 debug 日志，记录 active container、workspace path 和文件数量，便于定位后端枚举失败与 UI 状态未更新的差异。
 
 ## 5. 依赖关系
 - 内部依赖:
