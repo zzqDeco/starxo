@@ -110,8 +110,10 @@ func (a *App) startup(ctx context.Context) {
 		if containerRegID != "" {
 			go a.sandboxService.ActivateContainer(containerRegID)
 		} else {
-			// No container bound — deactivate current container (SSH stays connected)
-			_ = a.sandboxService.DeactivateContainer()
+			// No sandbox is bound to the new active session. Keep any existing
+			// sandbox attached so background runs from the previous session are
+			// not canceled; active-session guards reject terminal/file/agent use.
+			logger.Info("Active session has no sandbox binding; preserving background sandbox")
 		}
 	})
 

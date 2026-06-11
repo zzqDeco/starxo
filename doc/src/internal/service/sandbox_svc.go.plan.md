@@ -12,6 +12,7 @@
 - `destroyActiveSandbox` 删除当前 active sandbox workspace 并停用 sandbox，但保留 SSH manager 和 health monitor。
 - `RunTerminalCommand` 在当前 active sandbox workspace 中执行用户提交的非交互式 shell 命令。
   - 命令成功退出后发出带 active sandbox registry ID、source/action 和时间戳的 `workspace:changed`，让 workspace inspector 自动刷新 terminal 产物。
+  - 执行前必须校验 active session 绑定的 sandbox 与当前 active sandbox 一致；未绑定会话不能复用旧会话 sandbox。
 - `GetStatus` 同时返回新 `runtimeAvailable/sandboxActive/activeSandbox*` 字段和旧 Docker/Container 兼容字段。
 - `StartHealthMonitor`/`healthCheck` 负责保守的远端健康监控：
   - 先用 raw SSH `echo ping` 判断 SSH liveness。

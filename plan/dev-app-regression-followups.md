@@ -14,8 +14,9 @@
 - Make `WorkspacePanel` consume the dirty revision on mount and while mounted, then refresh through the same guarded `refreshFiles` path.
 - Add short retry after recent dirty events to avoid remote command/SFTP list races.
 - Include optional `createdAt` in `WorkspaceChangedEvent`; terminal, upload and agent workspace events now send observable source/action/container metadata.
-- Add `SessionService.GetSessionBoundContainerID(sessionID)` and validate `ChatService.SendMessage` against that session binding before starting a runtime turn.
-- Session creation/switch callbacks now consistently notify listeners with the target session binding, including empty binding for detach-only transitions.
+- Add `SessionService.GetSessionBoundContainerID(sessionID)` and validate `ChatService.SendMessage` / interrupt resume against that session binding before starting a runtime turn.
+- Session creation/switch callbacks now consistently notify listeners with the target session binding. Empty bindings update the active-session UI state but do not physically detach the global sandbox, so background runs from the previous session are not canceled.
+- Terminal and FileService workspace entry points also validate the active session binding, so an unbound session cannot use a sandbox left attached for background work.
 - Remove old complexity heuristic from default-mode user turns. Explicit plan-mode intent can still switch to plan mode.
 - Render code preview line counts through a defensive computed label so i18n interpolation cannot leak `{count}`.
 

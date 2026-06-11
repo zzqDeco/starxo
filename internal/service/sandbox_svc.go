@@ -505,6 +505,7 @@ func (s *SandboxService) RunTerminalCommand(command string) (TerminalCommandResu
 	appCtx := s.ctx
 	eventCtx := s.ctx
 	activeContainerID := s.activeContainerRegID
+	sessionService := s.sessionService
 	s.mu.RUnlock()
 	if appCtx == nil {
 		appCtx = context.Background()
@@ -515,6 +516,15 @@ func (s *SandboxService) RunTerminalCommand(command string) (TerminalCommandResu
 	}
 	if !mgr.HasActiveContainer() {
 		return TerminalCommandResult{}, fmt.Errorf("no sandbox is active")
+	}
+	if sessionService != nil {
+		boundContainerID := sessionService.GetBoundContainerID()
+		if boundContainerID == "" {
+			return TerminalCommandResult{}, fmt.Errorf("please activate a sandbox for this session")
+		}
+		if activeContainerID != boundContainerID {
+			return TerminalCommandResult{}, fmt.Errorf("active sandbox %s does not match session sandbox %s", activeContainerID, boundContainerID)
+		}
 	}
 	op := mgr.Operator()
 	if op == nil {

@@ -887,10 +887,16 @@ func (s *ChatService) validateActiveSessionSandbox(sessionID string) error {
 	return nil
 }
 
-func (s *ChatService) activeWorkspaceContainerID() string {
+func (s *ChatService) activeWorkspaceContainerID(sessionID string) string {
 	s.mu.Lock()
+	sessionService := s.sessionService
 	sandboxService := s.sandboxService
 	s.mu.Unlock()
+	if sessionService != nil {
+		if containerID := sessionService.GetSessionBoundContainerID(sessionID); containerID != "" {
+			return containerID
+		}
+	}
 	if sandboxService == nil {
 		return ""
 	}
@@ -2317,7 +2323,7 @@ func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, argsJSON
 	if strings.HasPrefix(strings.TrimSpace(result), "Error:") {
 		return
 	}
-	activeContainerID := s.activeWorkspaceContainerID()
+	activeContainerID := s.activeWorkspaceContainerID(sessionID)
 	now := time.Now().UnixMilli()
 	switch toolName {
 	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
@@ -2565,6 +2571,24 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		return fmt.Errorf("no pending interrupt to resume")
 	}
 	sessionID := run.sessionID
+	s.mu.Unlock()
+	if err := s.validateActiveSessionSandbox(sessionID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	run = s.sessions[sessionID]
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.running || run.starting {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
+	}
+	if run.pendingInterrupt != pending {
+		s.mu.Unlock()
+		return fmt.Errorf("pending interrupt changed for session %s", sessionID)
+	}
 	item := s.newRuntimeResumeAnswerItem(sessionID, pending, answer)
 	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
@@ -2616,6 +2640,24 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		return fmt.Errorf("no pending interrupt to resume")
 	}
 	sessionID := run.sessionID
+	s.mu.Unlock()
+	if err := s.validateActiveSessionSandbox(sessionID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	run = s.sessions[sessionID]
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.running || run.starting {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
+	}
+	if run.pendingInterrupt != pending {
+		s.mu.Unlock()
+		return fmt.Errorf("pending interrupt changed for session %s", sessionID)
+	}
 	item := s.newRuntimeResumeChoiceItem(sessionID, pending, selectedIndex)
 	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)

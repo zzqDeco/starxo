@@ -118,6 +118,134 @@ func TestChatServiceSendMessageRejectsMismatchedActiveSandbox(t *testing.T) {
 	}
 }
 
+func TestChatServiceResumeWithAnswerRequiresMatchingSessionSandbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	if _, err := ss.CreateSession("Pending interrupt"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+	chat.mu.Lock()
+	run := chat.activeRun()
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID: runtimeTurnCheckpointID(run.sessionID),
+		InterruptID:  "interrupt-1",
+		RunnerKind:   RunnerKindDefault,
+	}
+	pending := run.pendingInterrupt
+	chat.mu.Unlock()
+
+	err = chat.ResumeWithAnswer("continue")
+	if err == nil || !strings.Contains(err.Error(), "active sandbox ctr-other does not match session sandbox ctr-bound") {
+		t.Fatalf("expected mismatched sandbox error, got %v", err)
+	}
+	chat.mu.Lock()
+	defer chat.mu.Unlock()
+	if run.pendingInterrupt != pending {
+		t.Fatalf("expected pending interrupt to remain after guard failure")
+	}
+}
+
+func TestChatServiceResumeWithChoiceRequiresMatchingSessionSandbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	if _, err := ss.CreateSession("Pending choice"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+	chat.mu.Lock()
+	run := chat.activeRun()
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID: runtimeTurnCheckpointID(run.sessionID),
+		InterruptID:  "interrupt-choice",
+		RunnerKind:   RunnerKindDefault,
+	}
+	pending := run.pendingInterrupt
+	chat.mu.Unlock()
+
+	err = chat.ResumeWithChoice(0)
+	if err == nil || !strings.Contains(err.Error(), "active sandbox ctr-other does not match session sandbox ctr-bound") {
+		t.Fatalf("expected mismatched sandbox error, got %v", err)
+	}
+	chat.mu.Lock()
+	defer chat.mu.Unlock()
+	if run.pendingInterrupt != pending {
+		t.Fatalf("expected pending interrupt to remain after guard failure")
+	}
+}
+
+func TestChatServiceWorkspaceChangeContainerUsesSessionBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	sess, err := ss.CreateSession("Bound session")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+
+	if got := chat.activeWorkspaceContainerID(sess.ID); got != "ctr-bound" {
+		t.Fatalf("expected session-bound container id, got %q", got)
+	}
+}
+
+func TestFileServiceRejectsUnboundSessionWorkspaceAccess(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	ss := NewSessionService(sessionStore, nil)
+	if _, err := ss.CreateSession("No sandbox"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-old"
+	fileSvc := NewFileService(sandboxSvc)
+	fileSvc.SetSessionService(ss)
+
+	_, err = fileSvc.ensureActiveSessionSandbox()
+	if err == nil || !strings.Contains(err.Error(), "activate a sandbox for this session") {
+		t.Fatalf("expected unbound session workspace error, got %v", err)
+	}
+}
+
 func TestSessionServiceSaveSessionByIDPreservesDeferredDiscoveryAcrossModes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

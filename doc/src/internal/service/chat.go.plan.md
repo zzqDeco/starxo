@@ -117,8 +117,8 @@
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`
   - 启动放弃、session 删除、runner/context 创建失败时立即清掉并触发 retired cleanup
 - `contextWithSessionID(...)` 是所有 per-model-call deferred 计算的唯一 sessionID 注入入口；下游只能从 `context.Context` 读取，不从 shared runner 或全局 active session 推断。
-- `SendMessage` 启动 runtime turn 前会校验当前 session 的 `ActiveContainerID` 与 active sandbox registry ID 一致；未绑定或不匹配时返回可读错误，不允许新会话复用上一会话 sandbox。
-- runtime tool 写入/worktree 变更发出的 `workspace:changed` 会携带 sessionID、active containerID、source/action、path 和 createdAt，供前端在面板未挂载时也能追踪 dirty revision。
+- `SendMessage` 和 `ResumeWithAnswer` / `ResumeWithChoice` 启动 runtime turn 前会校验当前 session 的 `ActiveContainerID` 与 active sandbox registry ID 一致；未绑定或不匹配时返回可读错误，不允许新会话复用上一会话 sandbox。
+- runtime tool 写入/worktree 变更发出的 `workspace:changed` 会携带 sessionID、该 session 绑定的 containerID、source/action、path 和 createdAt，供前端在面板未挂载时也能追踪 dirty revision，并避免后台 session 事件被当前全局 active sandbox 污染。
 - shared runtime bundle 已收敛为 `RunnerBundle`：
   - `Generation`
   - `ConfigDigest`

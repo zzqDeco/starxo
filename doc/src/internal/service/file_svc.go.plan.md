@@ -12,6 +12,7 @@
 - `GetWorkspaceInfo` 返回当前 SSH、sandbox、runtime、workspace 路径、active container registry ID、文件数量和大小。
 - `CleanupSandboxTmp` 只清理当前 active sandbox 的 `tmp` 目录。
 - 文件浏览和 workspace metadata 会通过 ChatService 的 runtime worktree state 解析当前 active session workspace；如果当前 session 进入 worktree，文件树会跟随 worktree。
+- 上传、下载、列表、预览、tmp 清理和 workspace info 都要按 active session 的 sandbox binding 做 guard；未绑定或绑定与全局 active sandbox 不一致时，不得读取旧会话 sandbox。
 
 ## 维护要点
 - `workspacePath` 先取 active runtime 的真实 workspace 作为默认值，再按 active session 的 runtime worktree state 覆盖；旧 `/workspace` 会由 transfer/operator 映射。
