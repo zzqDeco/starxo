@@ -2714,6 +2714,10 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.activeSessionID != sessionID {
+		s.mu.Unlock()
+		return fmt.Errorf("active session changed before resume")
+	}
 	run = s.sessions[sessionID]
 	if run == nil {
 		s.mu.Unlock()
@@ -2783,6 +2787,10 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.activeSessionID != sessionID {
+		s.mu.Unlock()
+		return fmt.Errorf("active session changed before resume")
+	}
 	run = s.sessions[sessionID]
 	if run == nil {
 		s.mu.Unlock()

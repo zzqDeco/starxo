@@ -276,12 +276,40 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 		return fmt.Errorf("sandbox %s is a legacy Docker record and cannot be activated by the dockerless runtime", containerRegID)
 	}
 
+	s.mu.RLock()
+	sessionSvc := s.sessionService
+	s.mu.RUnlock()
+	activeSessionID := ""
+	if sessionSvc != nil {
+		if active := sessionSvc.GetActiveSession(); active != nil {
+			activeSessionID = active.ID
+		}
+	}
+	if container.SessionID != "" && container.SessionID != activeSessionID {
+		return fmt.Errorf("sandbox %s belongs to another session; switch to that session before activating it", containerRegID)
+	}
+
 	// Validate SSH host matches
 	cfg := s.store.Get()
 	if container.SSHHost != cfg.SSH.Host || container.SSHPort != cfg.SSH.Port {
 		return fmt.Errorf("sandbox is on %s:%d but SSH is connected to %s:%d; disconnect and reconnect SSH to the correct host first",
 			container.SSHHost, container.SSHPort, cfg.SSH.Host, cfg.SSH.Port)
 	}
+
+	s.mu.RLock()
+	if s.activeContainerRegID == containerRegID && s.manager != nil && s.manager.SSHConnected() && s.manager.HasActiveContainer() {
+		appCtx := s.ctx
+		boundCb := s.onContainerBound
+		s.mu.RUnlock()
+		if boundCb != nil {
+			boundCb(containerRegID, container.WorkspacePath)
+		}
+		wailsruntime.EventsEmit(appCtx, "container:activated", map[string]string{
+			"containerID": containerRegID,
+		})
+		return nil
+	}
+	s.mu.RUnlock()
 
 	if err := s.runBeforeSandboxActivation(containerRegID); err != nil {
 		return fmt.Errorf("sandbox activation blocked: %w", err)

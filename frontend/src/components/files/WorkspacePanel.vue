@@ -211,9 +211,13 @@ function scheduleWorkspaceRefresh(data?: WorkspaceChangedEvent) {
       if (workspaceRetryTimer) {
         clearTimeout(workspaceRetryTimer)
       }
-      workspaceRetryTimer = setTimeout(() => {
+      const retryPreviewPath = previewPath
+      workspaceRetryTimer = setTimeout(async () => {
         workspaceRetryTimer = null
-        refreshFiles()
+        await refreshFiles()
+        if (retryPreviewPath && selectedPath.value === retryPreviewPath) {
+          await loadPreview(retryPreviewPath)
+        }
       }, 900)
     }
   }, 180)
