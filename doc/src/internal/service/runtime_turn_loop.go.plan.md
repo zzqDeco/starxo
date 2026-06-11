@@ -12,6 +12,7 @@
 ## 3. 关键实现细节
 - 每个 session 维护一个可重建 TurnLoop，checkpoint id 为 `runtime-turn:<sessionID>`。
 - user turn 在 `GenInput` 中完成 bundle 准备、objective 创建、prompt messages 组装和 default/plan agent 选择。
+- default mode 不再按复杂度启发式自动进入 plan mode；只有 UI 已设置 plan mode，或用户明确写出 `plan mode`/`计划模式`/`进入计划` 等意图时，才切换到 plan runner。
 - user turn / objective 会在 bundle 准备前写入内存历史；即使模型、sandbox 或 config refresh 初始化失败，用户刚提交的请求也不会从 session 状态中丢失。
 - starting 状态下的新 user turn 不走 TurnLoop safe-point preempt；先取消当前 startup wait 并等待其收敛，再启动替换 objective。
 - running 状态下的新消息通过 `WithPreemptTimeout(AfterToolCalls, 15s)` 进入队列，旧 turn 到安全点后让位给新 objective。

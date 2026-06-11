@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NSpin, NTooltip, NTree, type TreeOption } from 'naive-ui'
 import { CloudDownload, CloudUpload, CopyOutline, Refresh, Search, TrashOutline } from '@vicons/ionicons5'
 import type { FileInfo, WorkspaceInfo } from '@/types/config'
@@ -14,6 +14,7 @@ import { consumePendingWorkspacePath, onWorkspaceOpenPath } from '@/composables/
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { useWailsEvent } from '@/composables/useWailsEvent'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useWorkspaceDirtyStore, type WorkspaceChangedEvent } from '@/stores/workspaceDirtyStore'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -21,14 +22,6 @@ interface WorkspaceTreeNode extends TreeOption {
   path?: string
   isLeaf?: boolean
   children?: WorkspaceTreeNode[]
-}
-
-interface WorkspaceChangedEvent {
-  sessionId?: string
-  containerID?: string
-  path?: string
-  source?: string
-  action?: string
 }
 
 const files = ref<FileInfo[]>([])
@@ -43,12 +36,14 @@ const workspaceError = ref('')
 const { t } = useI18n()
 const feedback = useUiFeedback()
 const sessionStore = useSessionStore()
+const workspaceDirtyStore = useWorkspaceDirtyStore()
 const workspaceInfo = ref<WorkspaceInfo | null>(null)
 const currentWorkspaceContainerID = ref('')
 const cleaningTmp = ref(false)
 let refreshRequestID = 0
 let previewRequestID = 0
 let workspaceRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let workspaceRetryTimer: ReturnType<typeof setTimeout> | null = null
 let pendingPreviewReloadPath = ''
 
 const selectedFile = computed(() => files.value.find(f => f.path === selectedPath.value) || null)
@@ -212,6 +207,19 @@ function scheduleWorkspaceRefresh(data?: WorkspaceChangedEvent) {
     if (previewPath && selectedPath.value === previewPath) {
       await loadPreview(previewPath)
     }
+    if (data?.createdAt && Date.now() - data.createdAt < 5000) {
+      if (workspaceRetryTimer) {
+        clearTimeout(workspaceRetryTimer)
+      }
+      const retryPreviewPath = previewPath
+      workspaceRetryTimer = setTimeout(async () => {
+        workspaceRetryTimer = null
+        await refreshFiles()
+        if (retryPreviewPath && selectedPath.value === retryPreviewPath) {
+          await loadPreview(retryPreviewPath)
+        }
+      }, 900)
+    }
   }, 180)
 }
 
@@ -222,6 +230,10 @@ function clearWorkspaceState(invalidateRequests = true) {
   if (workspaceRefreshTimer) {
     clearTimeout(workspaceRefreshTimer)
     workspaceRefreshTimer = null
+  }
+  if (workspaceRetryTimer) {
+    clearTimeout(workspaceRetryTimer)
+    workspaceRetryTimer = null
   }
   pendingPreviewReloadPath = ''
   previewRequestID++
@@ -354,12 +366,16 @@ useWailsEvent('ssh:disconnected', () => {
   clearWorkspaceState()
 })
 
-useWailsEvent('workspace:changed', (data: WorkspaceChangedEvent) => {
-  scheduleWorkspaceRefresh(data)
+watch(() => workspaceDirtyStore.revision, () => {
+  scheduleWorkspaceRefresh(workspaceDirtyStore.lastEvent || undefined)
 })
 
 onMounted(async () => {
   await refreshFiles()
+  const lastDirtyEvent = workspaceDirtyStore.lastEvent
+  if (lastDirtyEvent?.createdAt && Date.now() - lastDirtyEvent.createdAt < 10000) {
+    scheduleWorkspaceRefresh(lastDirtyEvent)
+  }
   const pending = consumePendingWorkspacePath()
   if (pending) {
     await openPath(pending)
@@ -373,6 +389,10 @@ onUnmounted(() => {
   if (workspaceRefreshTimer) {
     clearTimeout(workspaceRefreshTimer)
     workspaceRefreshTimer = null
+  }
+  if (workspaceRetryTimer) {
+    clearTimeout(workspaceRetryTimer)
+    workspaceRetryTimer = null
   }
   pendingPreviewReloadPath = ''
   stopWorkspaceBridge?.()

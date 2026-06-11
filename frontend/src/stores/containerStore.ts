@@ -25,12 +25,26 @@ export const useContainerStore = defineStore('container', () => {
 
   const sessionStore = useSessionStore()
 
+  const activeSessionBoundContainerID = computed(() => sessionStore.activeSession?.activeContainerID || '')
+  const activeSessionContainerIDs = computed(() => {
+    const ids = new Set<string>()
+    for (const container of containers.value) {
+      if (container.sessionID === sessionStore.activeSessionId) {
+        ids.add(container.id)
+      }
+    }
+    if (activeSessionBoundContainerID.value) {
+      ids.add(activeSessionBoundContainerID.value)
+    }
+    return ids
+  })
+
   const activeSessionContainers = computed(() =>
-    containers.value.filter(c => c.sessionID === sessionStore.activeSessionId)
+    containers.value.filter(c => activeSessionContainerIDs.value.has(c.id))
   )
 
   const otherContainers = computed(() =>
-    containers.value.filter(c => c.sessionID !== sessionStore.activeSessionId)
+    containers.value.filter(c => !activeSessionContainerIDs.value.has(c.id))
   )
 
   function setActionPending(key: string, pending: boolean) {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,6 +107,30 @@ func (s *SessionService) GetBoundContainerID() string {
 	return s.activeSession.ActiveContainerID
 }
 
+// GetSessionBoundContainerID returns the active sandbox binding for a specific
+// session without relying on whichever session is active by the time it runs.
+func (s *SessionService) GetSessionBoundContainerID(sessionID string) string {
+	if strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	s.mu.Lock()
+	if s.activeSession != nil && s.activeSession.ID == sessionID {
+		containerID := s.activeSession.ActiveContainerID
+		s.mu.Unlock()
+		return containerID
+	}
+	store := s.sessionStore
+	s.mu.Unlock()
+	if store == nil {
+		return ""
+	}
+	sess, err := store.Get(sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	return sess.ActiveContainerID
+}
+
 // GetWorkspacePath returns the workspace path for the active session.
 func (s *SessionService) GetWorkspacePath() string {
 	s.mu.Lock()
@@ -128,7 +153,6 @@ func (s *SessionService) ListSessions() ([]model.Session, error) {
 // Does NOT cancel any running agent — the old session continues running in the background.
 func (s *SessionService) CreateSession(title string) (*model.Session, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Auto-save current session
 	if s.activeSession != nil {
@@ -141,6 +165,7 @@ func (s *SessionService) CreateSession(title string) (*model.Session, error) {
 
 	sess, err := s.sessionStore.Create(title)
 	if err != nil {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
@@ -154,6 +179,30 @@ func (s *SessionService) CreateSession(title string) (*model.Session, error) {
 	tools.ClearTodosForSession(sess.ID)
 
 	s.activeSession = sess
+	switchEvt := SessionSwitchedEvent{
+		Session:     *sess,
+		ContainerID: sess.ActiveContainerID,
+		Mode:        model.ModeDefault,
+	}
+	if s.chatService != nil {
+		running, currentAgent, mode, interrupt := s.chatService.GetSessionRunSnapshot(sess.ID)
+		switchEvt.AgentRunning = running
+		switchEvt.CurrentAgent = currentAgent
+		switchEvt.Mode = mode
+		switchEvt.HasInterrupt = interrupt != nil
+		switchEvt.Interrupt = interrupt
+	}
+	ctx := s.ctx
+	onSwitch := s.onSessionSwitch
+	containerID := sess.ActiveContainerID
+	s.mu.Unlock()
+
+	if ctx != nil {
+		wailsruntime.EventsEmit(ctx, "session:switched", switchEvt)
+	}
+	if onSwitch != nil {
+		onSwitch(containerID)
+	}
 	return sess, nil
 }
 

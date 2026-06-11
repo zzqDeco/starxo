@@ -56,10 +56,18 @@ const (
 )
 
 const (
-	orphanRepairSupersededReason = "Error: tool execution was superseded by a newer user request"
-	orphanRepairStoppedReason    = "Error: tool execution was stopped before the user provided interrupt input"
-	orphanRepairSandboxReason    = "Error: tool execution was stopped because the sandbox connection was lost"
+	orphanRepairSupersededReason    = "Error: tool execution was superseded by a newer user request"
+	orphanRepairStoppedReason       = "Error: tool execution was stopped before the user provided interrupt input"
+	orphanRepairSandboxReason       = "Error: tool execution was stopped because the sandbox connection was lost"
+	orphanRepairSandboxSwitchReason = "Error: tool execution was stopped because the active sandbox changed"
 )
+
+const sandboxChangedAgentText = "Active sandbox changed; the agent run was stopped."
+
+type runtimeRunWaiter struct {
+	sessionID string
+	done      <-chan struct{}
+}
 
 // PendingInterrupt holds the state needed to resume after an interrupt.
 type PendingInterrupt struct {
@@ -607,6 +615,7 @@ type ChatService struct {
 
 	// Service deps
 	sessionService *SessionService
+	sandboxService *SandboxService
 	onAgentDone    func(sessionID string)
 
 	permissionMu       sync.Mutex
@@ -693,6 +702,136 @@ func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 			emitted[sessionID] = struct{}{}
 		}
 	}
+}
+
+// StopRunsNotBoundToSandbox stops any in-flight agent run whose session binding
+// does not match targetContainerID. The desktop app has one mutable sandbox
+// manager, so switching that manager to another sandbox while old runs continue
+// would let their later tool calls execute in the wrong workspace.
+func (s *ChatService) StopRunsNotBoundToSandbox(targetContainerID string) ([]string, error) {
+	sessionBindings := s.sessionSandboxBindings()
+
+	s.mu.Lock()
+	stoppedSessions, clearedInterruptSessions, repairedSessions, waiters := s.stopRunsNotBoundToSandboxLocked(targetContainerID, sessionBindings)
+	ctx := s.ctx
+	s.mu.Unlock()
+
+	timeoutSession := ""
+	for _, waiter := range waiters {
+		if waiter.done == nil {
+			continue
+		}
+		select {
+		case <-waiter.done:
+		case <-time.After(5 * time.Second):
+			logger.Warn("[CHAT] Timed out waiting for run to stop before sandbox switch",
+				"session", waiter.sessionID,
+				"target_container", targetContainerID,
+			)
+			timeoutSession = waiter.sessionID
+		}
+		if timeoutSession != "" {
+			break
+		}
+	}
+
+	for _, sessionID := range stoppedSessions {
+		wailsEmit(ctx, "agent:error", map[string]interface{}{
+			"sessionId": sessionID,
+			"error":     sandboxChangedAgentText,
+		})
+		s.emitRunState(sessionID)
+	}
+	emitted := stringSet(stoppedSessions)
+	for sessionID, repair := range repairedSessions {
+		s.saveSessionAfterHistoryRepair(sessionID, repair)
+		if _, ok := emitted[sessionID]; !ok {
+			s.emitRunState(sessionID)
+			emitted[sessionID] = struct{}{}
+		}
+	}
+	for _, sessionID := range clearedInterruptSessions {
+		if _, ok := emitted[sessionID]; !ok {
+			s.emitRunState(sessionID)
+			emitted[sessionID] = struct{}{}
+		}
+	}
+	if timeoutSession != "" {
+		return stoppedSessions, fmt.Errorf("timed out waiting for session %s to stop before switching sandbox", timeoutSession)
+	}
+	return stoppedSessions, nil
+}
+
+func (s *ChatService) sessionSandboxBindings() map[string]string {
+	s.mu.Lock()
+	sessionSvc := s.sessionService
+	sessionIDs := make([]string, 0, len(s.sessions))
+	for sessionID := range s.sessions {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	s.mu.Unlock()
+
+	bindings := make(map[string]string, len(sessionIDs))
+	if sessionSvc == nil {
+		return bindings
+	}
+	for _, sessionID := range sessionIDs {
+		bindings[sessionID] = sessionSvc.GetSessionBoundContainerID(sessionID)
+	}
+	return bindings
+}
+
+func (s *ChatService) stopRunsNotBoundToSandboxLocked(targetContainerID string, sessionBindings map[string]string) ([]string, []string, map[string]agentctx.RepairResult, []runtimeRunWaiter) {
+	stopped := make([]string, 0)
+	clearedInterrupts := make([]string, 0)
+	repaired := make(map[string]agentctx.RepairResult)
+	waiters := make([]runtimeRunWaiter, 0)
+
+	for sessionID, run := range s.sessions {
+		if run == nil {
+			continue
+		}
+		if boundContainerID := sessionBindings[sessionID]; targetContainerID != "" && boundContainerID == targetContainerID {
+			continue
+		}
+		if !run.running && !run.starting {
+			if run.pendingInterrupt != nil {
+				_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxSwitchReason)
+				clearedInterrupts = append(clearedInterrupts, sessionID)
+				s.logHistoryRepair(sessionID, "sandbox_switch", repair)
+				if repair.Count > 0 {
+					repaired[sessionID] = repair
+				}
+			}
+			continue
+		}
+		if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("sandbox_changed")...)
+		} else if run.cancelFn != nil {
+			run.cancelFn()
+		}
+		run.cancelFn = nil
+		if run.pendingInterrupt != nil {
+			clearedInterrupts = append(clearedInterrupts, sessionID)
+		}
+		_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxSwitchReason)
+		s.logHistoryRepair(sessionID, "sandbox_switch", repair)
+		if repair.Count > 0 {
+			repaired[sessionID] = repair
+		}
+		if run.starting && run.startDone != nil {
+			waiters = append(waiters, runtimeRunWaiter{sessionID: sessionID, done: run.startDone})
+		} else if run.running && run.runDone != nil {
+			waiters = append(waiters, runtimeRunWaiter{sessionID: sessionID, done: run.runDone})
+		}
+		stopped = append(stopped, sessionID)
+	}
+	if len(stopped) > 0 {
+		s.cleanupRetiredBundlesLocked()
+	}
+	sort.Strings(stopped)
+	sort.Strings(clearedInterrupts)
+	return stopped, compactStringSlice(clearedInterrupts), repaired, waiters
 }
 
 func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, []string, map[string]agentctx.RepairResult) {
@@ -841,6 +980,65 @@ func (s *ChatService) SetSessionService(ss *SessionService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessionService = ss
+}
+
+// SetSandboxService injects the sandbox service for active session/runtime guards.
+func (s *ChatService) SetSandboxService(ss *SandboxService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sandboxService = ss
+}
+
+func (s *ChatService) validateActiveSessionSandbox(sessionID string) error {
+	s.mu.Lock()
+	sessionService := s.sessionService
+	sandboxService := s.sandboxService
+	mgr := s.sandbox
+	s.mu.Unlock()
+
+	if sessionService == nil {
+		// Unit-level callers can exercise the runtime loop without the desktop
+		// session/sandbox services. The Wails app always injects SessionService,
+		// so product paths still enforce session-scoped sandbox binding below.
+		return nil
+	}
+
+	boundContainerID := sessionService.GetSessionBoundContainerID(sessionID)
+	if boundContainerID == "" {
+		return fmt.Errorf("please activate a sandbox for this session before running the agent")
+	}
+	if sandboxService != nil {
+		activeContainerID := sandboxService.ActiveContainerRegID()
+		if activeContainerID == "" {
+			return fmt.Errorf("please activate sandbox %s before running the agent", boundContainerID)
+		}
+		if activeContainerID != boundContainerID {
+			return fmt.Errorf("active sandbox %s does not match session sandbox %s", activeContainerID, boundContainerID)
+		}
+	}
+	if mgr == nil || !mgr.SSHConnected() {
+		return fmt.Errorf("SSH not connected")
+	}
+	if !mgr.HasActiveContainer() {
+		return fmt.Errorf("please activate sandbox %s before running the agent", boundContainerID)
+	}
+	return nil
+}
+
+func (s *ChatService) activeWorkspaceContainerID(sessionID string) string {
+	s.mu.Lock()
+	sessionService := s.sessionService
+	sandboxService := s.sandboxService
+	s.mu.Unlock()
+	if sessionService != nil {
+		if containerID := sessionService.GetSessionBoundContainerID(sessionID); containerID != "" {
+			return containerID
+		}
+	}
+	if sandboxService == nil {
+		return ""
+	}
+	return sandboxService.ActiveContainerRegID()
 }
 
 // ---------------------------------------------------------------------------
@@ -1465,16 +1663,30 @@ func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration
 func (s *ChatService) SendMessage(userMessage string) error {
 	for {
 		s.mu.Lock()
+		sessionID := s.activeSessionID
+		s.mu.Unlock()
+		if sessionID == "" {
+			return fmt.Errorf("no active session")
+		}
+		if err := s.validateActiveSessionSandbox(sessionID); err != nil {
+			return err
+		}
+
+		s.mu.Lock()
 		if s.activeSessionID == "" {
 			s.mu.Unlock()
 			return fmt.Errorf("no active session")
+		}
+		if s.activeSessionID != sessionID {
+			s.mu.Unlock()
+			continue
 		}
 		run := s.activeRun()
 		if run == nil {
 			s.mu.Unlock()
 			return fmt.Errorf("no active session")
 		}
-		sessionID := run.sessionID
+		sessionID = run.sessionID
 		if run.starting && !run.running {
 			if run.cancelFn != nil {
 				run.cancelFn()
@@ -2249,19 +2461,29 @@ func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, argsJSON
 	if strings.HasPrefix(strings.TrimSpace(result), "Error:") {
 		return
 	}
+	activeContainerID := s.activeWorkspaceContainerID(sessionID)
+	now := time.Now().UnixMilli()
 	switch toolName {
 	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
 		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sessionID, "action": toolName})
-		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{SessionID: sessionID, Source: "agent", Action: toolName})
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+			SessionID:   sessionID,
+			ContainerID: activeContainerID,
+			Source:      "agent",
+			Action:      toolName,
+			CreatedAt:   now,
+		})
 	case tools.RuntimeToolWorktreeDiff:
 		wailsEmit(s.ctx, "runtime:worktree_reviewed", map[string]string{"sessionId": sessionID})
 	}
 	if path, ok := runtimeToolWorkspaceChangePath(toolName, argsJSON, result); ok {
 		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
-			SessionID: sessionID,
-			Path:      path,
-			Source:    "agent",
-			Action:    toolName,
+			SessionID:   sessionID,
+			ContainerID: activeContainerID,
+			Path:        path,
+			Source:      "agent",
+			Action:      toolName,
+			CreatedAt:   now,
 		})
 	}
 }
@@ -2487,6 +2709,28 @@ func (s *ChatService) ResumeWithAnswer(answer string) error {
 		return fmt.Errorf("no pending interrupt to resume")
 	}
 	sessionID := run.sessionID
+	s.mu.Unlock()
+	if err := s.validateActiveSessionSandbox(sessionID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.activeSessionID != sessionID {
+		s.mu.Unlock()
+		return fmt.Errorf("active session changed before resume")
+	}
+	run = s.sessions[sessionID]
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.running || run.starting {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
+	}
+	if run.pendingInterrupt != pending {
+		s.mu.Unlock()
+		return fmt.Errorf("pending interrupt changed for session %s", sessionID)
+	}
 	item := s.newRuntimeResumeAnswerItem(sessionID, pending, answer)
 	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
@@ -2538,6 +2782,28 @@ func (s *ChatService) ResumeWithChoice(selectedIndex int) error {
 		return fmt.Errorf("no pending interrupt to resume")
 	}
 	sessionID := run.sessionID
+	s.mu.Unlock()
+	if err := s.validateActiveSessionSandbox(sessionID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.activeSessionID != sessionID {
+		s.mu.Unlock()
+		return fmt.Errorf("active session changed before resume")
+	}
+	run = s.sessions[sessionID]
+	if run == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if run.running || run.starting {
+		s.mu.Unlock()
+		return fmt.Errorf("agent is already running in this session")
+	}
+	if run.pendingInterrupt != pending {
+		s.mu.Unlock()
+		return fmt.Errorf("pending interrupt changed for session %s", sessionID)
+	}
 	item := s.newRuntimeResumeChoiceItem(sessionID, pending, selectedIndex)
 	run.pendingInterrupt = nil
 	s.resetRuntimeTurnLoopLocked(run)
@@ -3616,54 +3882,6 @@ func truncateResult(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "... (truncated)"
-}
-
-// shouldAutoPlanMode applies a deterministic heuristic to decide whether a
-// user request is complex enough to auto-enter plan mode.
-func shouldAutoPlanMode(userMessage string) bool {
-	msg := strings.ToLower(strings.TrimSpace(userMessage))
-	if msg == "" {
-		return false
-	}
-
-	// Explicit intent to plan.
-	explicitPlanSignals := []string{
-		"plan mode", "planning mode", "plan-mode",
-		"计划模式", "规划模式", "进入计划", "进入规划",
-	}
-	for _, k := range explicitPlanSignals {
-		if strings.Contains(msg, k) {
-			return true
-		}
-	}
-
-	stepSignals := []string{
-		"and then", "then ", "after that", "step by step",
-		"先", "然后", "再", "并且", "同时", "步骤",
-	}
-	workSignals := []string{
-		"write", "edit", "refactor", "implement", "fix", "debug",
-		"run", "test", "verify", "validate", "build",
-		"写", "改", "重构", "实现", "修复", "调试",
-		"运行", "测试", "验证", "构建", "编译",
-	}
-
-	stepCount := 0
-	for _, k := range stepSignals {
-		if strings.Contains(msg, k) {
-			stepCount++
-		}
-	}
-
-	workCount := 0
-	for _, k := range workSignals {
-		if strings.Contains(msg, k) {
-			workCount++
-		}
-	}
-
-	// Complex multi-action intent: contains sequencing and multiple work signals.
-	return stepCount > 0 && workCount >= 2
 }
 
 // buildAgentContext constructs an AgentContext from the current session and sandbox state.

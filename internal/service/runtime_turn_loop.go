@@ -59,6 +59,22 @@ func runtimeTurnLoopStopOptions(cause string) []adk.StopOption {
 	}
 }
 
+func explicitPlanModeRequested(userMessage string) bool {
+	msg := strings.ToLower(strings.TrimSpace(userMessage))
+	if msg == "" {
+		return false
+	}
+	for _, signal := range []string{
+		"plan mode", "planning mode", "plan-mode",
+		"计划模式", "规划模式", "进入计划", "进入规划",
+	} {
+		if strings.Contains(msg, signal) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ChatService) newRuntimeUserTurnItem(sessionID, userMessage string) runtimeTurnItem {
 	now := s.now()
 	return runtimeTurnItem{
@@ -185,19 +201,30 @@ func (s *ChatService) runtimeTurnLoopGenInput(sessionID string) func(context.Con
 			startCancel()
 			loop.Stop(runtimeTurnLoopStopOptions("user_stop")...)
 		}
-		if run.mode == model.ModeDefault && shouldAutoPlanMode(item.UserMessage) {
-			run.mode = model.ModePlan
-			logger.Info("[CHAT] Auto-switched to plan mode",
-				"session", sessionID,
-				"reason", "complexity_trigger",
-			)
-			wailsEmit(s.ctx, "agent:mode_changed", ModeChangedEvent{
-				Mode:      model.ModePlan,
-				SessionID: sessionID,
-			})
-		}
 		mode := run.mode
+		changedMode := false
+		if mode == model.ModeDefault && explicitPlanModeRequested(item.UserMessage) {
+			mode = model.ModePlan
+			run.mode = mode
+			changedMode = true
+		}
+		sessionSvc := s.sessionService
+		appCtx := s.ctx
 		s.mu.Unlock()
+		if changedMode {
+			logger.Info("[CHAT] Mode changed from explicit user request", "mode", mode, "session", sessionID)
+			if appCtx != nil {
+				wailsEmit(appCtx, "agent:mode_changed", ModeChangedEvent{
+					Mode:      mode,
+					SessionID: sessionID,
+				})
+			}
+			if sessionSvc != nil {
+				if err := sessionSvc.SaveSessionByID(sessionID); err != nil {
+					logger.Warn("[CHAT] Failed to schedule explicit mode save", "session", sessionID, "error", err)
+				}
+			}
+		}
 		s.emitRunState(sessionID)
 
 		run.addUserMessage(item.UserMessage)
@@ -592,7 +619,7 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 
 func runtimeTurnStopCauseSuppressesError(cause string) bool {
 	switch strings.TrimSpace(cause) {
-	case "user_stop", "sandbox_lost":
+	case "user_stop", "sandbox_lost", "sandbox_changed":
 		return true
 	default:
 		return false

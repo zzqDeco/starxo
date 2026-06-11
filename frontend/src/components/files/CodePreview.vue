@@ -77,6 +77,10 @@ const highlightedLines = computed(() => {
 })
 
 const lineCount = computed(() => highlightedLines.value.length)
+const lineCountLabel = computed(() => {
+  const rendered = t('codePreview.lines', { count: lineCount.value })
+  return rendered.includes('{count}') ? rendered.replace('{count}', String(lineCount.value)) : rendered
+})
 
 function copyAll() {
   if (!props.content) return
@@ -109,7 +113,7 @@ function formatSize(bytes: number): string {
           <span>·</span>
           <span>{{ formatSize(fileSize) }}</span>
           <span v-if="content">·</span>
-          <span v-if="content">{{ t('codePreview.lines', { count: lineCount }) }}</span>
+          <span v-if="content">{{ lineCountLabel }}</span>
         </div>
       </div>
       <div class="code-actions">

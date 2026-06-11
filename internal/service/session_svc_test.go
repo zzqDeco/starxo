@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,320 @@ func (t *stubTool) Info(context.Context) (*schema.ToolInfo, error) {
 
 func (t *stubTool) InvokableRun(context.Context, string, ...einotool.Option) (string, error) {
 	return "ok", nil
+}
+
+func TestSessionServiceSwitchSessionNotifiesTargetSandboxBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	bound, err := ss.CreateSession("Bound")
+	if err != nil {
+		t.Fatalf("create bound session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+	unbound, err := ss.CreateSession("Unbound")
+	if err != nil {
+		t.Fatalf("create unbound session: %v", err)
+	}
+
+	var switched []string
+	ss.SetOnSessionSwitch(func(containerRegID string) {
+		switched = append(switched, containerRegID)
+	})
+
+	if err := ss.SwitchSession(bound.ID); err != nil {
+		t.Fatalf("switch to bound session: %v", err)
+	}
+	if err := ss.SwitchSession(unbound.ID); err != nil {
+		t.Fatalf("switch to unbound session: %v", err)
+	}
+	if len(switched) != 2 {
+		t.Fatalf("expected 2 switch callbacks, got %#v", switched)
+	}
+	if switched[0] != "ctr-bound" {
+		t.Fatalf("expected bound session callback to target ctr-bound, got %#v", switched)
+	}
+	if switched[1] != "" {
+		t.Fatalf("expected unbound session callback to detach sandbox, got %#v", switched)
+	}
+}
+
+func TestChatServiceSendMessageRequiresBoundSandboxForActiveSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	chat.SetSandboxService(NewSandboxService(nil, nil))
+
+	if _, err := ss.CreateSession("No sandbox"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	err = chat.SendMessage("create a file")
+	if err == nil || !strings.Contains(err.Error(), "activate a sandbox for this session") {
+		t.Fatalf("expected session-bound sandbox error, got %v", err)
+	}
+}
+
+func TestChatServiceSendMessageRejectsMismatchedActiveSandbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	if _, err := ss.CreateSession("Bound sandbox"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+
+	err = chat.SendMessage("create a file")
+	if err == nil || !strings.Contains(err.Error(), "active sandbox ctr-other does not match session sandbox ctr-bound") {
+		t.Fatalf("expected mismatched sandbox error, got %v", err)
+	}
+}
+
+func TestChatServiceResumeWithAnswerRequiresMatchingSessionSandbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	if _, err := ss.CreateSession("Pending interrupt"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+	chat.mu.Lock()
+	run := chat.activeRun()
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID: runtimeTurnCheckpointID(run.sessionID),
+		InterruptID:  "interrupt-1",
+		RunnerKind:   RunnerKindDefault,
+	}
+	pending := run.pendingInterrupt
+	chat.mu.Unlock()
+
+	err = chat.ResumeWithAnswer("continue")
+	if err == nil || !strings.Contains(err.Error(), "active sandbox ctr-other does not match session sandbox ctr-bound") {
+		t.Fatalf("expected mismatched sandbox error, got %v", err)
+	}
+	chat.mu.Lock()
+	defer chat.mu.Unlock()
+	if run.pendingInterrupt != pending {
+		t.Fatalf("expected pending interrupt to remain after guard failure")
+	}
+}
+
+func TestChatServiceResumeWithChoiceRequiresMatchingSessionSandbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	if _, err := ss.CreateSession("Pending choice"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+	chat.mu.Lock()
+	run := chat.activeRun()
+	run.pendingInterrupt = &PendingInterrupt{
+		CheckpointID: runtimeTurnCheckpointID(run.sessionID),
+		InterruptID:  "interrupt-choice",
+		RunnerKind:   RunnerKindDefault,
+	}
+	pending := run.pendingInterrupt
+	chat.mu.Unlock()
+
+	err = chat.ResumeWithChoice(0)
+	if err == nil || !strings.Contains(err.Error(), "active sandbox ctr-other does not match session sandbox ctr-bound") {
+		t.Fatalf("expected mismatched sandbox error, got %v", err)
+	}
+	chat.mu.Lock()
+	defer chat.mu.Unlock()
+	if run.pendingInterrupt != pending {
+		t.Fatalf("expected pending interrupt to remain after guard failure")
+	}
+}
+
+func TestChatServiceWorkspaceChangeContainerUsesSessionBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	sess, err := ss.CreateSession("Bound session")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+
+	if got := chat.activeWorkspaceContainerID(sess.ID); got != "ctr-bound" {
+		t.Fatalf("expected session-bound container id, got %q", got)
+	}
+}
+
+func TestChatServiceStopRunsNotBoundToSandboxCancelsOnlyMismatchedSessions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	sessionA, err := ss.CreateSession("Session A")
+	if err != nil {
+		t.Fatalf("create session A: %v", err)
+	}
+	ss.BindContainer("ctr-a", "/workspace-a")
+	sessionB, err := ss.CreateSession("Session B")
+	if err != nil {
+		t.Fatalf("create session B: %v", err)
+	}
+	ss.BindContainer("ctr-b", "/workspace-b")
+
+	cancelledA := false
+	cancelledB := false
+	chat.mu.Lock()
+	runA := chat.getOrCreateRun(sessionA.ID)
+	runA.running = true
+	runA.cancelFn = func() { cancelledA = true }
+	runB := chat.getOrCreateRun(sessionB.ID)
+	runB.running = true
+	runB.cancelFn = func() { cancelledB = true }
+	chat.mu.Unlock()
+
+	stopped, err := chat.StopRunsNotBoundToSandbox("ctr-a")
+	if err != nil {
+		t.Fatalf("stop mismatched runs: %v", err)
+	}
+	if len(stopped) != 1 || stopped[0] != sessionB.ID {
+		t.Fatalf("expected only session B to stop, got %#v", stopped)
+	}
+	if cancelledA {
+		t.Fatal("session A should keep running for the target sandbox")
+	}
+	if !cancelledB {
+		t.Fatal("session B should be canceled before switching to ctr-a")
+	}
+}
+
+func TestChatServiceStopRunsNotBoundToSandboxCancelsAllForUnboundTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	sessionA, err := ss.CreateSession("Session A")
+	if err != nil {
+		t.Fatalf("create session A: %v", err)
+	}
+	ss.BindContainer("ctr-a", "/workspace-a")
+	sessionB, err := ss.CreateSession("Session B")
+	if err != nil {
+		t.Fatalf("create session B: %v", err)
+	}
+	ss.BindContainer("ctr-b", "/workspace-b")
+
+	cancelled := map[string]bool{}
+	chat.mu.Lock()
+	runA := chat.getOrCreateRun(sessionA.ID)
+	runA.running = true
+	runA.cancelFn = func() { cancelled[sessionA.ID] = true }
+	runB := chat.getOrCreateRun(sessionB.ID)
+	runB.running = true
+	runB.cancelFn = func() { cancelled[sessionB.ID] = true }
+	chat.mu.Unlock()
+
+	stopped, err := chat.StopRunsNotBoundToSandbox("")
+	if err != nil {
+		t.Fatalf("stop runs for unbound target: %v", err)
+	}
+	if len(stopped) != 2 {
+		t.Fatalf("expected both sessions to stop, got %#v", stopped)
+	}
+	if !cancelled[sessionA.ID] || !cancelled[sessionB.ID] {
+		t.Fatalf("expected both sessions to be canceled, got %#v", cancelled)
+	}
+}
+
+func TestFileServiceRejectsUnboundSessionWorkspaceAccess(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	ss := NewSessionService(sessionStore, nil)
+	if _, err := ss.CreateSession("No sandbox"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-old"
+	fileSvc := NewFileService(sandboxSvc)
+	fileSvc.SetSessionService(ss)
+
+	_, err = fileSvc.ensureActiveSessionSandbox()
+	if err == nil || !strings.Contains(err.Error(), "activate a sandbox for this session") {
+		t.Fatalf("expected unbound session workspace error, got %v", err)
+	}
 }
 
 func TestSessionServiceSaveSessionByIDPreservesDeferredDiscoveryAcrossModes(t *testing.T) {

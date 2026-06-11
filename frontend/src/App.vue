@@ -8,6 +8,7 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useContainerStore } from '@/stores/containerStore'
+import { useWorkspaceDirtyStore, type WorkspaceChangedEvent } from '@/stores/workspaceDirtyStore'
 import { ApproveToolPermission, DenyToolPermission, GetMode, ListToolPermissionRequests } from '../wailsjs/go/service/ChatService'
 import { GetPlatformUIInfo } from '../wailsjs/go/service/PlatformService'
 import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -19,6 +20,7 @@ const connectionStore = useConnectionStore()
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const containerStore = useContainerStore()
+const workspaceDirtyStore = useWorkspaceDirtyStore()
 const { t } = useI18n()
 
 interface RuntimePermissionRequest {
@@ -545,12 +547,15 @@ onMounted(async () => {
     if (data?.containerID) {
       containerStore.setActiveContainer(data.containerID)
       containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
+      sessionStore.loadSessions().catch((e) => console.error('Failed to refresh sessions:', e))
     }
   })
 
   // Container deactivated
   onWailsEvent('container:deactivated', () => {
     containerStore.clearActiveContainer()
+    containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
+    sessionStore.loadSessions().catch((e) => console.error('Failed to refresh sessions:', e))
   })
 
   // Container destroyed
@@ -559,6 +564,10 @@ onMounted(async () => {
       containerStore.clearActiveContainer()
     }
     containerStore.loadContainers().catch((e) => console.error('Failed to refresh containers:', e))
+  })
+
+  onWailsEvent('workspace:changed', (data: WorkspaceChangedEvent) => {
+    workspaceDirtyStore.markChanged(data)
   })
 
   // Timeline events (unified event stream — filtered by sessionId)

@@ -31,7 +31,7 @@
 - 输入来源:
   - Wails 绑定调用：`SendMessage`、`ResumeWithAnswer`、`ResumeWithChoice`、`SetMode`、`BuildRunners`
   - Runtime V2 绑定调用：`ListRuntimeTasks`、`ReadRuntimeTaskOutput`、`StopRuntimeTask`、`ApproveToolPermission`、`DenyToolPermission`、`GetRuntimeWorktreeState`、`ReviewRuntimeWorktree`、`MergeRuntimeWorktree`、`ExitRuntimeWorktree`
-  - 依赖注入：`config.Store`、`sandbox.SandboxManager`、`SessionService`
+  - 依赖注入：`config.Store`、`sandbox.SandboxManager`、`SessionService`、`SandboxService`
   - 运行时上下文：`contextWithSessionID(...)` 注入的 `sessionID`
 - 输出结果:
   - Wails 事件：`agent:timeline`、`agent:error`、`agent:done`、`agent:interrupt`、`agent:mode_changed`、`agent:run_state`
@@ -117,6 +117,8 @@
   - 写入 `run.running=true` 时迁移为 `activeBundleGeneration`
   - 启动放弃、session 删除、runner/context 创建失败时立即清掉并触发 retired cleanup
 - `contextWithSessionID(...)` 是所有 per-model-call deferred 计算的唯一 sessionID 注入入口；下游只能从 `context.Context` 读取，不从 shared runner 或全局 active session 推断。
+- `SendMessage` 和 `ResumeWithAnswer` / `ResumeWithChoice` 启动 runtime turn 前会校验当前 session 的 `ActiveContainerID` 与 active sandbox registry ID 一致；未绑定或不匹配时返回可读错误，不允许新会话复用上一会话 sandbox。
+- runtime tool 写入/worktree 变更发出的 `workspace:changed` 会携带 sessionID、该 session 绑定的 containerID、source/action、path 和 createdAt，供前端在面板未挂载时也能追踪 dirty revision，并避免后台 session 事件被当前全局 active sandbox 污染。
 - shared runtime bundle 已收敛为 `RunnerBundle`：
   - `Generation`
   - `ConfigDigest`

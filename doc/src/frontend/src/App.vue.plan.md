@@ -35,8 +35,10 @@
   - `ssh:disconnected` -> 标记 SSH 断开，清除活跃容器
   - `container:progress` -> 更新 containerStore 容器创建进度
   - `container:ready` -> 设置活跃容器、刷新容器和会话列表
-  - `container:activated` -> 设置活跃容器、刷新容器列表
-  - `container:deactivated` -> 清除活跃容器
+  - `container:activated` -> 设置活跃容器、刷新容器和会话列表，确保 session.activeContainerID 及时反映绑定关系
+  - `container:deactivated` -> 清除活跃容器、刷新容器和会话列表
+  - `workspace:changed` -> 写入全局 workspace dirty store；WorkspacePanel 未挂载时也不会丢 terminal/agent/upload 产生的文件变化
+- `SessionService` 切换到未绑定会话时，前端依据 `session:switched.containerID` 清空 active container 展示；后端保留全局 sandbox attachment 以支持后台 run，但用户入口由 session-bound guard 拦截。
   - `agent:timeline` -> **过滤 sessionId**，仅处理活跃会话事件
   - `agent:done` -> **过滤 sessionId**（接收对象而非 nil，含 sessionId），仅处理活跃会话事件
   - `agent:error` -> **过滤 sessionId**（接收对象，含 sessionId + error），仅处理活跃会话事件

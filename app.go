@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"starxo/internal/config"
 	"starxo/internal/logger"
 	"starxo/internal/sandbox"
@@ -82,6 +84,7 @@ func (a *App) startup(ctx context.Context) {
 	// Manager may be nil at startup since sandbox is not yet connected.
 	a.chatService.SetDependencies(a.sandboxService.Manager(), nil)
 	a.chatService.SetSessionService(a.sessionService)
+	a.chatService.SetSandboxService(a.sandboxService)
 	a.sessionService.SetChatService(a.chatService)
 	a.fileService.SetSessionService(a.sessionService)
 
@@ -104,13 +107,44 @@ func (a *App) startup(ctx context.Context) {
 		a.chatService.UpdateSandbox(nil)
 	})
 
+	// Before the shared sandbox manager is rebound to a new workspace, stop any
+	// in-flight run whose session is not bound to that target sandbox.
+	a.sandboxService.SetBeforeSandboxActivation(func(containerRegID string) error {
+		stopped, err := a.chatService.StopRunsNotBoundToSandbox(containerRegID)
+		if err != nil {
+			logger.Warn("Blocked sandbox activation because existing runs did not stop",
+				"target_container", containerRegID,
+				"stopped_sessions", stopped,
+				"error", err,
+			)
+			return err
+		}
+		if len(stopped) > 0 {
+			logger.Info("Stopped runs before switching active sandbox",
+				"target_container", containerRegID,
+				"stopped_sessions", stopped,
+			)
+		}
+		return nil
+	})
+
 	// When the active session switches, switch the active container (SSH stays connected)
 	a.sessionService.SetOnSessionSwitch(func(containerRegID string) {
 		if containerRegID != "" {
-			go a.sandboxService.ActivateContainer(containerRegID)
+			go func() {
+				if err := a.sandboxService.ActivateContainer(containerRegID); err != nil {
+					logger.Warn("Failed to activate sandbox for switched session",
+						"target_container", containerRegID,
+						"error", err,
+					)
+					wailsruntime.EventsEmit(a.ctx, "container:deactivated", map[string]string{
+						"containerID": containerRegID,
+						"reason":      "sandbox activation failed",
+					})
+				}
+			}()
 		} else {
-			// No container bound — deactivate current container (SSH stays connected)
-			_ = a.sandboxService.DeactivateContainer()
+			logger.Info("Active session has no sandbox binding; preserving current sandbox for background runs")
 		}
 	})
 

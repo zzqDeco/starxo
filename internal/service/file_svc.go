@@ -68,6 +68,29 @@ func (s *FileService) workspacePath() string {
 	return defaultWorkspace
 }
 
+func (s *FileService) ensureActiveSessionSandbox() (string, error) {
+	if s.sandbox == nil {
+		return "", fmt.Errorf("sandbox service is not available")
+	}
+	activeContainerID := s.sandbox.ActiveContainerRegID()
+	if s.sessionService != nil {
+		boundContainerID := s.sessionService.GetBoundContainerID()
+		if boundContainerID == "" {
+			return "", fmt.Errorf("please activate a sandbox for this session")
+		}
+		if activeContainerID == "" {
+			return "", fmt.Errorf("please activate sandbox %s before using workspace files", boundContainerID)
+		}
+		if activeContainerID != boundContainerID {
+			return "", fmt.Errorf("active sandbox %s does not match session sandbox %s", activeContainerID, boundContainerID)
+		}
+	}
+	if activeContainerID == "" {
+		return "", fmt.Errorf("no sandbox is active")
+	}
+	return activeContainerID, nil
+}
+
 // SelectAndUploadFile opens a native file dialog, then uploads the selected file
 // to the sandbox container's /workspace directory.
 func (s *FileService) SelectAndUploadFile() (FileInfoDTO, error) {
@@ -86,6 +109,10 @@ func (s *FileService) SelectAndUploadFile() (FileInfoDTO, error) {
 
 // UploadFile uploads a file at the given local path to the sandbox container.
 func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
+	activeContainerID, err := s.ensureActiveSessionSandbox()
+	if err != nil {
+		return FileInfoDTO{}, err
+	}
 	mgr := s.sandbox.Manager()
 	if mgr == nil || !mgr.IsConnected() {
 		return FileInfoDTO{}, fmt.Errorf("sandbox is not connected")
@@ -100,7 +127,6 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 	if runtime == nil {
 		return FileInfoDTO{}, fmt.Errorf("sandbox runtime manager is not available")
 	}
-	activeContainerID := s.sandbox.ActiveContainerRegID()
 
 	// Get file info
 	info, err := os.Stat(localPath)
@@ -120,6 +146,7 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 		Path:        containerPath,
 		Source:      "file",
 		Action:      "upload",
+		CreatedAt:   time.Now().UnixMilli(),
 	})
 
 	return FileInfoDTO{
@@ -133,6 +160,9 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 // DownloadFile opens a save dialog, then downloads a file from the sandbox container
 // to the selected local path.
 func (s *FileService) DownloadFile(containerPath string) error {
+	if _, err := s.ensureActiveSessionSandbox(); err != nil {
+		return err
+	}
 	mgr := s.sandbox.Manager()
 	if mgr == nil || !mgr.IsConnected() {
 		return fmt.Errorf("sandbox is not connected")
@@ -170,6 +200,9 @@ func (s *FileService) DownloadFile(containerPath string) error {
 
 // ListWorkspaceFiles lists files in the container's /workspace directory up to 3 levels deep.
 func (s *FileService) ListWorkspaceFiles() ([]FileInfoDTO, error) {
+	if _, err := s.ensureActiveSessionSandbox(); err != nil {
+		return nil, err
+	}
 	mgr := s.sandbox.Manager()
 	if mgr == nil || !mgr.IsConnected() {
 		return nil, fmt.Errorf("sandbox is not connected")
@@ -221,8 +254,18 @@ func (s *FileService) GetWorkspaceInfo() (WorkspaceInfoDTO, error) {
 	if runtime == nil {
 		return info, nil
 	}
+	activeContainerID := s.sandbox.ActiveContainerRegID()
+	if s.sessionService != nil {
+		boundContainerID := s.sessionService.GetBoundContainerID()
+		if boundContainerID == "" || activeContainerID != boundContainerID {
+			info.Active = false
+			info.ActiveContainerID = boundContainerID
+			info.WorkspacePath = s.sessionService.GetWorkspacePath()
+			return info, nil
+		}
+	}
 	info.Active = runtime.IsActive()
-	info.ActiveContainerID = s.sandbox.ActiveContainerRegID()
+	info.ActiveContainerID = activeContainerID
 	info.SandboxID = runtime.RuntimeID()
 	info.SandboxName = runtime.RuntimeName()
 	info.Runtime = runtime.RuntimeKind()
@@ -254,6 +297,9 @@ func (s *FileService) GetWorkspaceInfo() (WorkspaceInfoDTO, error) {
 }
 
 func (s *FileService) CleanupSandboxTmp() (WorkspaceCleanupResultDTO, error) {
+	if _, err := s.ensureActiveSessionSandbox(); err != nil {
+		return WorkspaceCleanupResultDTO{}, err
+	}
 	mgr := s.sandbox.Manager()
 	if mgr == nil || !mgr.SSHConnected() {
 		return WorkspaceCleanupResultDTO{}, fmt.Errorf("sandbox is not connected")
@@ -275,6 +321,9 @@ func (s *FileService) CleanupSandboxTmp() (WorkspaceCleanupResultDTO, error) {
 
 // ReadFilePreview reads the first N bytes of a file in the container for preview.
 func (s *FileService) ReadFilePreview(containerPath string) (string, error) {
+	if _, err := s.ensureActiveSessionSandbox(); err != nil {
+		return "", err
+	}
 	mgr := s.sandbox.Manager()
 	if mgr == nil || !mgr.IsConnected() {
 		return "", fmt.Errorf("sandbox is not connected")
