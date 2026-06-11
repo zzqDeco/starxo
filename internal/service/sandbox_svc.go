@@ -34,6 +34,7 @@ type SandboxService struct {
 	onConnect              func(mgr *sandbox.SandboxManager)
 	onContainerBound       func(containerRegID, workspacePath string)
 	onContainerDeactivated func()
+	beforeSandboxActivate  func(containerRegID string) error
 	// activeContainerRegID tracks the registry ID of the currently connected container
 	activeContainerRegID string
 	healthCancel         context.CancelFunc
@@ -87,6 +88,24 @@ func (s *SandboxService) SetOnContainerDeactivated(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onContainerDeactivated = fn
+}
+
+// SetBeforeSandboxActivation registers a guard that runs before any operation
+// rebinds the shared sandbox manager to a different active sandbox.
+func (s *SandboxService) SetBeforeSandboxActivation(fn func(containerRegID string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.beforeSandboxActivate = fn
+}
+
+func (s *SandboxService) runBeforeSandboxActivation(containerRegID string) error {
+	s.mu.RLock()
+	fn := s.beforeSandboxActivate
+	s.mu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(containerRegID)
 }
 
 // --- New SSH-independent methods ---
@@ -152,18 +171,26 @@ func (s *SandboxService) DisconnectSSH() error {
 // CreateAndActivateContainer creates a new sandbox on the connected SSH host,
 // registers it, and activates it for agent use.
 func (s *SandboxService) CreateAndActivateContainer() error {
+	s.mu.RLock()
+	if s.manager == nil || !s.manager.SSHConnected() {
+		s.mu.RUnlock()
+		return fmt.Errorf("SSH not connected")
+	}
+	s.mu.RUnlock()
+
+	if err := s.runBeforeSandboxActivation(""); err != nil {
+		return fmt.Errorf("sandbox activation blocked: %w", err)
+	}
+
 	s.mu.Lock()
 	if s.manager == nil || !s.manager.SSHConnected() {
 		s.mu.Unlock()
 		return fmt.Errorf("SSH not connected")
 	}
-
-	// Detach current container if any
 	if s.activeContainerRegID != "" {
 		s.manager.DetachContainer()
 		s.activeContainerRegID = ""
 	}
-
 	mgr := s.manager
 	appCtx := s.ctx
 	s.mu.Unlock()
@@ -241,15 +268,6 @@ func (s *SandboxService) CreateAndActivateContainer() error {
 // ActivateContainer switches the active container to a previously registered one.
 // The container must be on the same SSH host as the current connection.
 func (s *SandboxService) ActivateContainer(containerRegID string) error {
-	s.mu.Lock()
-	if s.manager == nil || !s.manager.SSHConnected() {
-		s.mu.Unlock()
-		return fmt.Errorf("SSH not connected")
-	}
-	mgr := s.manager
-	appCtx := s.ctx
-	s.mu.Unlock()
-
 	container, err := s.containerStore.Get(containerRegID)
 	if err != nil {
 		return fmt.Errorf("sandbox not found: %w", err)
@@ -265,8 +283,17 @@ func (s *SandboxService) ActivateContainer(containerRegID string) error {
 			container.SSHHost, container.SSHPort, cfg.SSH.Host, cfg.SSH.Port)
 	}
 
-	// Detach current container if any
+	if err := s.runBeforeSandboxActivation(containerRegID); err != nil {
+		return fmt.Errorf("sandbox activation blocked: %w", err)
+	}
+
 	s.mu.Lock()
+	if s.manager == nil || !s.manager.SSHConnected() {
+		s.mu.Unlock()
+		return fmt.Errorf("SSH not connected")
+	}
+	mgr := s.manager
+	appCtx := s.ctx
 	if s.activeContainerRegID != "" {
 		s.manager.DetachContainer()
 		s.activeContainerRegID = ""

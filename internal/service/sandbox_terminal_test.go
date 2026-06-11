@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -24,4 +25,19 @@ func TestRunTerminalCommandRequiresSSHConnection(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SSH not connected")
+}
+
+func TestBeforeSandboxActivationHookReceivesTargetAndCanBlock(t *testing.T) {
+	svc := NewSandboxService(nil, nil)
+	var gotTarget string
+	svc.SetBeforeSandboxActivation(func(containerRegID string) error {
+		gotTarget = containerRegID
+		return fmt.Errorf("blocked")
+	})
+
+	err := svc.runBeforeSandboxActivation("ctr-target")
+
+	require.Error(t, err)
+	assert.Equal(t, "ctr-target", gotTarget)
+	assert.Contains(t, err.Error(), "blocked")
 }

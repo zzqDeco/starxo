@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"starxo/internal/config"
 	"starxo/internal/logger"
 	"starxo/internal/sandbox"
@@ -105,37 +107,44 @@ func (a *App) startup(ctx context.Context) {
 		a.chatService.UpdateSandbox(nil)
 	})
 
+	// Before the shared sandbox manager is rebound to a new workspace, stop any
+	// in-flight run whose session is not bound to that target sandbox.
+	a.sandboxService.SetBeforeSandboxActivation(func(containerRegID string) error {
+		stopped, err := a.chatService.StopRunsNotBoundToSandbox(containerRegID)
+		if err != nil {
+			logger.Warn("Blocked sandbox activation because existing runs did not stop",
+				"target_container", containerRegID,
+				"stopped_sessions", stopped,
+				"error", err,
+			)
+			return err
+		}
+		if len(stopped) > 0 {
+			logger.Info("Stopped runs before switching active sandbox",
+				"target_container", containerRegID,
+				"stopped_sessions", stopped,
+			)
+		}
+		return nil
+	})
+
 	// When the active session switches, switch the active container (SSH stays connected)
 	a.sessionService.SetOnSessionSwitch(func(containerRegID string) {
 		if containerRegID != "" {
 			go func() {
-				if stopped, err := a.chatService.StopRunsNotBoundToSandbox(containerRegID); err != nil {
-					logger.Warn("Canceled sandbox activation because existing runs did not stop",
+				if err := a.sandboxService.ActivateContainer(containerRegID); err != nil {
+					logger.Warn("Failed to activate sandbox for switched session",
 						"target_container", containerRegID,
-						"stopped_sessions", stopped,
 						"error", err,
 					)
-					return
-				} else if len(stopped) > 0 {
-					logger.Info("Stopped runs before switching active sandbox",
-						"target_container", containerRegID,
-						"stopped_sessions", stopped,
-					)
+					wailsruntime.EventsEmit(a.ctx, "container:deactivated", map[string]string{
+						"containerID": containerRegID,
+						"reason":      "sandbox activation failed",
+					})
 				}
-				a.sandboxService.ActivateContainer(containerRegID)
 			}()
 		} else {
-			go func() {
-				if stopped, err := a.chatService.StopRunsNotBoundToSandbox(""); err != nil {
-					logger.Warn("Timed out stopping runs for unbound active session",
-						"stopped_sessions", stopped,
-						"error", err,
-					)
-				} else if len(stopped) > 0 {
-					logger.Info("Stopped runs for unbound active session", "stopped_sessions", stopped)
-				}
-			}()
-			logger.Info("Active session has no sandbox binding; preserving SSH and stopping sandbox-bound runs")
+			logger.Info("Active session has no sandbox binding; preserving current sandbox for background runs")
 		}
 	})
 
