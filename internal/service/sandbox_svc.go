@@ -531,6 +531,7 @@ func (s *SandboxService) RunTerminalCommand(command string) (TerminalCommandResu
 			ContainerID: activeContainerID,
 			Source:      "terminal",
 			Action:      "command",
+			CreatedAt:   time.Now().UnixMilli(),
 		})
 	}
 	return TerminalCommandResult{

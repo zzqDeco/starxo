@@ -9,7 +9,7 @@
 
 ## 2. 核心职责
 - Pinia store，管理容器全生命周期：列表查看、**新建容器**、**激活/取消激活**（切换活跃容器）、启动、停止、销毁。跟踪活跃容器 ID 和创建进度。
-- 提供按会话筛选的容器视图（当前会话容器 vs 其他容器）。
+- 提供按会话筛选的容器视图（当前会话容器 vs 其他容器），优先使用 `session.activeContainerID` 作为当前会话绑定事实源，兼容旧 `container.sessionID` 不一致的数据。
 - 该文件的变更应与项目级规则文档和接口文档保持一致。
 
 ## 3. 输入与输出
@@ -25,7 +25,7 @@
   - `containerProgress: Ref<number>` — 创建进度百分比
   - `containerStep: Ref<string>` — 创建进度步骤描述
 - **计算属性**:
-  - `activeSessionContainers` — 当前会话的容器
+  - `activeSessionContainers` — 当前会话的容器，包含 session.activeContainerID 指向的容器
   - `otherContainers` — 其他会话的容器
 - **操作方法**:
   - `loadContainers()` — 获取全部容器列表

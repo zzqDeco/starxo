@@ -45,6 +45,8 @@
   - 同一条调用链只记录一次 normalize warning
   - `session:switched.mode` 继续来自 `GetSessionRunSnapshot(...)`，因此会反映 restore 后的 persisted mode
 - session create 会清空新 session 的 todo bucket；session switch / startup 会从 `SessionData.RuntimeContextCompact.Todos` 恢复对应 `sessionID` 的 todo bucket；没有 compact todos 时只清空对应 session，避免跨会话泄漏。
+- `GetSessionBoundContainerID(sessionID)` 按目标 session 读取 sandbox 绑定，避免 agent 启动校验在会话切换竞态中误读当前 active session。
+- `CreateSession` 和 `SwitchSession` 都会在锁外调用 `onSessionSwitch(activeContainerID)`；空绑定会触发 sandbox detach，但不会断开 SSH。
 - save-time discovery 剪枝已经收敛为“结构性剪枝”：
   - current config 始终可用于删除空 canonical 和已移除 server
   - 当前没有 installed bundle，或 installed bundle config/freshness 不可信时，会停用 runtime-metadata-based 删除并 fail-open 保留 history

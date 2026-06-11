@@ -9,7 +9,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 ## Features
 
 - **Claude Code-style Agent Runtime** — Eino v0.9 runtime with direct tools, `ToolSearch`, dynamic `Agent` subagents, task management, worktree isolation, Skill, and AGENTS.md context
-- **Dual Execution Modes** — Default mode runs direct ReAct tool use; Plan mode narrows the same runtime loop to read/search/planning until `ExitPlanMode` approval
+- **Dual Execution Modes** — Default mode runs direct ReAct tool use without complexity-based auto-plan; Plan mode is explicit and narrows the same runtime loop to read/search/planning until `ExitPlanMode` approval
 - **Interrupt/Resume** — `ask_user` / `ask_choice` tools pause agent execution for user input, state preserved via CheckPointStore
 - **Sandbox Isolation** — SSH + lightweight OS sandbox runtime: Linux `bubblewrap` (`bwrap`) or macOS Seatbelt (`sandbox-exec`)
 - **Sandbox Diagnostics** — Settings panel checks bwrap/Seatbelt, Python, venv, user namespaces, AppArmor restrictions, and returns copyable remote fix commands
@@ -20,7 +20,7 @@ Starxo is an AI coding agent desktop application built on the [CloudWeGo Eino](h
 - **Multi-LLM Support** — OpenAI / DeepSeek / Volcengine Ark / Ollama
 - **Bilingual UI** — Chinese/English (vue-i18n)
 - **Real-time Event Stream** — Unified `agent:timeline` event stream via Wails Events for live agent activity display, all events tagged with `sessionId` for multi-session isolation
-- **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch
+- **Multi-Session Parallel Execution** — Multiple sessions can run agents concurrently; switching sessions does not cancel background agents, with full state restore on switch. Agent execution is bound to the active session's sandbox and cannot reuse another session's active sandbox.
 - **Session Persistence** — Full session management with unified session data (messages + timeline + streaming state)
 - **File Transfer** — Upload/download support via SFTP directly into each persistent sandbox workspace, with workspace metadata, path copy, and tmp cleanup
 - **Developer Workbench UI** — Dense dark workbench with command palette, session rail, centered execution canvas, lifecycle-aware workspace drawer, persistent runtime dock, sandbox command terminal, and composer-level mode controls

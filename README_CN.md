@@ -9,7 +9,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 ## 核心特性
 
 - **Claude Code 风格 Agent Runtime** — 基于 Eino v0.9，提供直接工具、`ToolSearch`、动态 `Agent` 子 Agent、任务管理、worktree 隔离、Skill 和 AGENTS.md 上下文
-- **双模式运行** — 默认模式使用直接 ReAct 工具循环；计划模式在同一个 runtime loop 上收窄为读取/搜索/规划，直到 `ExitPlanMode` 获批
+- **双模式运行** — 默认模式使用直接 ReAct 工具循环，不再按任务复杂度自动进入计划模式；计划模式需要显式选择或明确请求，并在同一个 runtime loop 上收窄为读取/搜索/规划，直到 `ExitPlanMode` 获批
 - **中断/恢复** — 支持 `ask_user` / `ask_choice` 工具暂停等待用户输入，状态通过 CheckPointStore 保持
 - **沙箱隔离** — SSH + 轻量系统沙箱运行时：Linux `bubblewrap` (`bwrap`) 或 macOS Seatbelt (`sandbox-exec`)
 - **沙箱诊断** — 设置页检测 bwrap/Seatbelt、Python、venv、user namespace、AppArmor 限制，并返回可复制的远端修复命令
@@ -20,7 +20,7 @@ Starxo 是一款基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框�
 - **多 LLM 支持** — OpenAI / DeepSeek / 火山引擎 Ark / Ollama
 - **多语言界面** — 中文/英文（vue-i18n）
 - **实时事件流** — 通过 Wails Events 实现 `agent:timeline` 统一事件流，前端实时展示 Agent 活动，所有事件携带 `sessionId` 实现多会话隔离
-- **多会话并行执行** — 多个会话可同时运行 Agent；切换会话不会取消后台运行的 Agent，切换时完整恢复状态快照
+- **多会话并行执行** — 多个会话可同时运行 Agent；切换会话不会取消后台运行的 Agent，切换时完整恢复状态快照。Agent 执行上下文绑定当前会话的沙箱，不能复用其他会话的 active sandbox。
 - **会话持久化** — 完整的会话管理，统一存储消息历史、timeline 事件和流式状态
 - **文件传输** — 通过 SFTP 直接上传/下载到每个持久沙箱工作区，并提供工作区元信息、路径复制和 tmp 清理
 - **开发工作台 UI** — 高信息密度深色工作台，包含命令面板、会话栏、中央执行画布、随沙箱生命周期同步的工作区抽屉、右侧运行时 Dock、沙箱命令终端和 composer 内模式控制

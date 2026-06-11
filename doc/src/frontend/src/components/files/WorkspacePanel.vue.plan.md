@@ -29,7 +29,9 @@
   - 收到工具时间线发来的 workspace path 后，自动选择路径并加载预览
   - 收到 `container:ready` / `container:activated` / `session:switched` 后自动刷新 workspace 信息与文件树
   - 收到 `container:deactivated` / `ssh:disconnected` 后清空文件树、选中路径、预览和搜索；`container:destroyed` 只在销毁当前 tracked registry container ID 时清空
-  - 收到 `workspace:changed` 后按 session/container 过滤并 debounce 刷新；如果当前预览文件被更新则自动重载预览
+  - 从全局 workspace dirty store 消费 `workspace:changed` revision；即使面板未挂载，打开后也会按最近 dirty event 走同一条 refresh path
+  - 收到 dirty revision 后按 session/container 过滤并 debounce 刷新；如果当前预览文件被更新则自动重载预览
+  - 对最近发生的 dirty event 做一次短延迟重试，降低 terminal 命令返回与 SFTP 列表可见性之间的竞态
 - 分栏:
   - 左侧树 + 右侧 `CodePreview`
   - 中间 `SplitHandle` 拖拽宽度（`starxo-workspace-tree-width`）

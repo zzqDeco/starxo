@@ -607,6 +607,7 @@ type ChatService struct {
 
 	// Service deps
 	sessionService *SessionService
+	sandboxService *SandboxService
 	onAgentDone    func(sessionID string)
 
 	permissionMu       sync.Mutex
@@ -841,6 +842,59 @@ func (s *ChatService) SetSessionService(ss *SessionService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessionService = ss
+}
+
+// SetSandboxService injects the sandbox service for active session/runtime guards.
+func (s *ChatService) SetSandboxService(ss *SandboxService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sandboxService = ss
+}
+
+func (s *ChatService) validateActiveSessionSandbox(sessionID string) error {
+	s.mu.Lock()
+	sessionService := s.sessionService
+	sandboxService := s.sandboxService
+	mgr := s.sandbox
+	s.mu.Unlock()
+
+	if sessionService == nil {
+		// Unit-level callers can exercise the runtime loop without the desktop
+		// session/sandbox services. The Wails app always injects SessionService,
+		// so product paths still enforce session-scoped sandbox binding below.
+		return nil
+	}
+
+	boundContainerID := sessionService.GetSessionBoundContainerID(sessionID)
+	if boundContainerID == "" {
+		return fmt.Errorf("please activate a sandbox for this session before running the agent")
+	}
+	if sandboxService != nil {
+		activeContainerID := sandboxService.ActiveContainerRegID()
+		if activeContainerID == "" {
+			return fmt.Errorf("please activate sandbox %s before running the agent", boundContainerID)
+		}
+		if activeContainerID != boundContainerID {
+			return fmt.Errorf("active sandbox %s does not match session sandbox %s", activeContainerID, boundContainerID)
+		}
+	}
+	if mgr == nil || !mgr.SSHConnected() {
+		return fmt.Errorf("SSH not connected")
+	}
+	if !mgr.HasActiveContainer() {
+		return fmt.Errorf("please activate sandbox %s before running the agent", boundContainerID)
+	}
+	return nil
+}
+
+func (s *ChatService) activeWorkspaceContainerID() string {
+	s.mu.Lock()
+	sandboxService := s.sandboxService
+	s.mu.Unlock()
+	if sandboxService == nil {
+		return ""
+	}
+	return sandboxService.ActiveContainerRegID()
 }
 
 // ---------------------------------------------------------------------------
@@ -1465,16 +1519,30 @@ func (s *ChatService) WaitForSessionDone(sessionID string, timeout time.Duration
 func (s *ChatService) SendMessage(userMessage string) error {
 	for {
 		s.mu.Lock()
+		sessionID := s.activeSessionID
+		s.mu.Unlock()
+		if sessionID == "" {
+			return fmt.Errorf("no active session")
+		}
+		if err := s.validateActiveSessionSandbox(sessionID); err != nil {
+			return err
+		}
+
+		s.mu.Lock()
 		if s.activeSessionID == "" {
 			s.mu.Unlock()
 			return fmt.Errorf("no active session")
+		}
+		if s.activeSessionID != sessionID {
+			s.mu.Unlock()
+			continue
 		}
 		run := s.activeRun()
 		if run == nil {
 			s.mu.Unlock()
 			return fmt.Errorf("no active session")
 		}
-		sessionID := run.sessionID
+		sessionID = run.sessionID
 		if run.starting && !run.running {
 			if run.cancelFn != nil {
 				run.cancelFn()
@@ -2249,19 +2317,29 @@ func (s *ChatService) emitRuntimeWorktreeToolEvent(sessionID, toolName, argsJSON
 	if strings.HasPrefix(strings.TrimSpace(result), "Error:") {
 		return
 	}
+	activeContainerID := s.activeWorkspaceContainerID()
+	now := time.Now().UnixMilli()
 	switch toolName {
 	case tools.RuntimeToolEnterWorktree, tools.RuntimeToolExitWorktree, tools.RuntimeToolWorktreeMerge:
 		wailsEmit(s.ctx, "runtime:worktree_changed", map[string]string{"sessionId": sessionID, "action": toolName})
-		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{SessionID: sessionID, Source: "agent", Action: toolName})
+		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
+			SessionID:   sessionID,
+			ContainerID: activeContainerID,
+			Source:      "agent",
+			Action:      toolName,
+			CreatedAt:   now,
+		})
 	case tools.RuntimeToolWorktreeDiff:
 		wailsEmit(s.ctx, "runtime:worktree_reviewed", map[string]string{"sessionId": sessionID})
 	}
 	if path, ok := runtimeToolWorkspaceChangePath(toolName, argsJSON, result); ok {
 		wailsEmit(s.ctx, "workspace:changed", WorkspaceChangedEvent{
-			SessionID: sessionID,
-			Path:      path,
-			Source:    "agent",
-			Action:    toolName,
+			SessionID:   sessionID,
+			ContainerID: activeContainerID,
+			Path:        path,
+			Source:      "agent",
+			Action:      toolName,
+			CreatedAt:   now,
 		})
 	}
 }
@@ -3616,54 +3694,6 @@ func truncateResult(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "... (truncated)"
-}
-
-// shouldAutoPlanMode applies a deterministic heuristic to decide whether a
-// user request is complex enough to auto-enter plan mode.
-func shouldAutoPlanMode(userMessage string) bool {
-	msg := strings.ToLower(strings.TrimSpace(userMessage))
-	if msg == "" {
-		return false
-	}
-
-	// Explicit intent to plan.
-	explicitPlanSignals := []string{
-		"plan mode", "planning mode", "plan-mode",
-		"计划模式", "规划模式", "进入计划", "进入规划",
-	}
-	for _, k := range explicitPlanSignals {
-		if strings.Contains(msg, k) {
-			return true
-		}
-	}
-
-	stepSignals := []string{
-		"and then", "then ", "after that", "step by step",
-		"先", "然后", "再", "并且", "同时", "步骤",
-	}
-	workSignals := []string{
-		"write", "edit", "refactor", "implement", "fix", "debug",
-		"run", "test", "verify", "validate", "build",
-		"写", "改", "重构", "实现", "修复", "调试",
-		"运行", "测试", "验证", "构建", "编译",
-	}
-
-	stepCount := 0
-	for _, k := range stepSignals {
-		if strings.Contains(msg, k) {
-			stepCount++
-		}
-	}
-
-	workCount := 0
-	for _, k := range workSignals {
-		if strings.Contains(msg, k) {
-			workCount++
-		}
-	}
-
-	// Complex multi-action intent: contains sequencing and multiple work signals.
-	return stepCount > 0 && workCount >= 2
 }
 
 // buildAgentContext constructs an AgentContext from the current session and sandbox state.

@@ -150,6 +150,80 @@ func TestRuntimeTurnLoopGenInputPersistsUserTurnBeforeBundleFailure(t *testing.T
 	}
 }
 
+func TestRuntimeTurnLoopGenInputKeepsComplexDefaultTurnInDefaultMode(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	sessionID := "sess-default-complex"
+	chat.SetActiveSessionID(sessionID)
+	targetDigest := mustConfigDigest(t, chat)
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		return &RunnerBundle{
+			ConfigDigest: targetDigest,
+			DefaultAgent: runtimeTurnTestAgent{},
+			PlanAgent:    runtimeTurnTestAgent{},
+		}, nil
+	}
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.mode = model.ModeDefault
+	chat.mu.Unlock()
+
+	item := chat.newRuntimeUserTurnItem(sessionID, "write a file, then run tests, then verify the result")
+	result, err := chat.runtimeTurnLoopGenInput(sessionID)(context.Background(), nil, []runtimeTurnItem{item})
+	if err != nil {
+		t.Fatalf("gen input: %v", err)
+	}
+	if len(result.Consumed) != 1 {
+		t.Fatalf("expected one consumed item, got %#v", result.Consumed)
+	}
+	if result.Consumed[0].RunnerKind != RunnerKindDefault {
+		t.Fatalf("expected default runner for complex default turn, got %s", result.Consumed[0].RunnerKind)
+	}
+	chat.mu.Lock()
+	mode := run.mode
+	chat.mu.Unlock()
+	if mode != model.ModeDefault {
+		t.Fatalf("expected run mode to remain default, got %s", mode)
+	}
+}
+
+func TestRuntimeTurnLoopGenInputAllowsExplicitPlanModeRequest(t *testing.T) {
+	store := newTestConfigStore(t)
+	chat := NewChatService(store)
+	sessionID := "sess-explicit-plan"
+	chat.SetActiveSessionID(sessionID)
+	targetDigest := mustConfigDigest(t, chat)
+	chat.prepareRunnerBundleFn = func(context.Context, *config.AppConfig, string, map[string]cachedMCPServerSurface) (*RunnerBundle, error) {
+		return &RunnerBundle{
+			ConfigDigest: targetDigest,
+			DefaultAgent: runtimeTurnTestAgent{},
+			PlanAgent:    runtimeTurnTestAgent{},
+		}, nil
+	}
+	chat.mu.Lock()
+	run := chat.getOrCreateRun(sessionID)
+	run.mode = model.ModeDefault
+	chat.mu.Unlock()
+
+	item := chat.newRuntimeUserTurnItem(sessionID, "进入计划模式，先给我方案")
+	result, err := chat.runtimeTurnLoopGenInput(sessionID)(context.Background(), nil, []runtimeTurnItem{item})
+	if err != nil {
+		t.Fatalf("gen input: %v", err)
+	}
+	if len(result.Consumed) != 1 {
+		t.Fatalf("expected one consumed item, got %#v", result.Consumed)
+	}
+	if result.Consumed[0].RunnerKind != RunnerKindPlan {
+		t.Fatalf("expected plan runner for explicit plan request, got %s", result.Consumed[0].RunnerKind)
+	}
+	chat.mu.Lock()
+	mode := run.mode
+	chat.mu.Unlock()
+	if mode != model.ModePlan {
+		t.Fatalf("expected run mode to switch to plan, got %s", mode)
+	}
+}
+
 func TestSendMessageCancelsStartupBeforeReplacementTurn(t *testing.T) {
 	store := newTestConfigStore(t)
 	chat := NewChatService(store)

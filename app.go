@@ -82,6 +82,7 @@ func (a *App) startup(ctx context.Context) {
 	// Manager may be nil at startup since sandbox is not yet connected.
 	a.chatService.SetDependencies(a.sandboxService.Manager(), nil)
 	a.chatService.SetSessionService(a.sessionService)
+	a.chatService.SetSandboxService(a.sandboxService)
 	a.sessionService.SetChatService(a.chatService)
 	a.fileService.SetSessionService(a.sessionService)
 

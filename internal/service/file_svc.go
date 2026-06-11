@@ -120,6 +120,7 @@ func (s *FileService) UploadFile(localPath string) (FileInfoDTO, error) {
 		Path:        containerPath,
 		Source:      "file",
 		Action:      "upload",
+		CreatedAt:   time.Now().UnixMilli(),
 	})
 
 	return FileInfoDTO{

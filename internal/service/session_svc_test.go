@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,98 @@ func (t *stubTool) Info(context.Context) (*schema.ToolInfo, error) {
 
 func (t *stubTool) InvokableRun(context.Context, string, ...einotool.Option) (string, error) {
 	return "ok", nil
+}
+
+func TestSessionServiceSwitchSessionNotifiesTargetSandboxBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	bound, err := ss.CreateSession("Bound")
+	if err != nil {
+		t.Fatalf("create bound session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+	unbound, err := ss.CreateSession("Unbound")
+	if err != nil {
+		t.Fatalf("create unbound session: %v", err)
+	}
+
+	var switched []string
+	ss.SetOnSessionSwitch(func(containerRegID string) {
+		switched = append(switched, containerRegID)
+	})
+
+	if err := ss.SwitchSession(bound.ID); err != nil {
+		t.Fatalf("switch to bound session: %v", err)
+	}
+	if err := ss.SwitchSession(unbound.ID); err != nil {
+		t.Fatalf("switch to unbound session: %v", err)
+	}
+	if len(switched) != 2 {
+		t.Fatalf("expected 2 switch callbacks, got %#v", switched)
+	}
+	if switched[0] != "ctr-bound" {
+		t.Fatalf("expected bound session callback to target ctr-bound, got %#v", switched)
+	}
+	if switched[1] != "" {
+		t.Fatalf("expected unbound session callback to detach sandbox, got %#v", switched)
+	}
+}
+
+func TestChatServiceSendMessageRequiresBoundSandboxForActiveSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	chat.SetSandboxService(NewSandboxService(nil, nil))
+
+	if _, err := ss.CreateSession("No sandbox"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	err = chat.SendMessage("create a file")
+	if err == nil || !strings.Contains(err.Error(), "activate a sandbox for this session") {
+		t.Fatalf("expected session-bound sandbox error, got %v", err)
+	}
+}
+
+func TestChatServiceSendMessageRejectsMismatchedActiveSandbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+	if _, err := ss.CreateSession("Bound sandbox"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ss.BindContainer("ctr-bound", "/workspace")
+
+	sandboxSvc := NewSandboxService(nil, nil)
+	sandboxSvc.activeContainerRegID = "ctr-other"
+	chat.SetSandboxService(sandboxSvc)
+
+	err = chat.SendMessage("create a file")
+	if err == nil || !strings.Contains(err.Error(), "active sandbox ctr-other does not match session sandbox ctr-bound") {
+		t.Fatalf("expected mismatched sandbox error, got %v", err)
+	}
 }
 
 func TestSessionServiceSaveSessionByIDPreservesDeferredDiscoveryAcrossModes(t *testing.T) {

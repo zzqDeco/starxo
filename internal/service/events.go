@@ -90,6 +90,7 @@ type WorkspaceChangedEvent struct {
 	Path        string `json:"path,omitempty"`
 	Source      string `json:"source,omitempty"`
 	Action      string `json:"action,omitempty"`
+	CreatedAt   int64  `json:"createdAt,omitempty"`
 }
 
 // SandboxStatusDTO represents the current sandbox connection status.
