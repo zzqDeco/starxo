@@ -50,8 +50,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const sess = await CreateSession(title || '')
       if (sess) {
-        sessions.value.unshift(sess as Session)
-        activeSessionId.value = sess.id
+        setActiveSession(sess as Session)
       }
       return sess
     } catch (e) {
