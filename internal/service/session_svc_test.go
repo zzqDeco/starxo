@@ -224,6 +224,100 @@ func TestChatServiceWorkspaceChangeContainerUsesSessionBinding(t *testing.T) {
 	}
 }
 
+func TestChatServiceStopRunsNotBoundToSandboxCancelsOnlyMismatchedSessions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	sessionA, err := ss.CreateSession("Session A")
+	if err != nil {
+		t.Fatalf("create session A: %v", err)
+	}
+	ss.BindContainer("ctr-a", "/workspace-a")
+	sessionB, err := ss.CreateSession("Session B")
+	if err != nil {
+		t.Fatalf("create session B: %v", err)
+	}
+	ss.BindContainer("ctr-b", "/workspace-b")
+
+	cancelledA := false
+	cancelledB := false
+	chat.mu.Lock()
+	runA := chat.getOrCreateRun(sessionA.ID)
+	runA.running = true
+	runA.cancelFn = func() { cancelledA = true }
+	runB := chat.getOrCreateRun(sessionB.ID)
+	runB.running = true
+	runB.cancelFn = func() { cancelledB = true }
+	chat.mu.Unlock()
+
+	stopped, err := chat.StopRunsNotBoundToSandbox("ctr-a")
+	if err != nil {
+		t.Fatalf("stop mismatched runs: %v", err)
+	}
+	if len(stopped) != 1 || stopped[0] != sessionB.ID {
+		t.Fatalf("expected only session B to stop, got %#v", stopped)
+	}
+	if cancelledA {
+		t.Fatal("session A should keep running for the target sandbox")
+	}
+	if !cancelledB {
+		t.Fatal("session B should be canceled before switching to ctr-a")
+	}
+}
+
+func TestChatServiceStopRunsNotBoundToSandboxCancelsAllForUnboundTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sessionStore, err := storage.NewSessionStore()
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	chat := NewChatService(nil)
+	ss := NewSessionService(sessionStore, nil)
+	ss.SetChatService(chat)
+	chat.SetSessionService(ss)
+
+	sessionA, err := ss.CreateSession("Session A")
+	if err != nil {
+		t.Fatalf("create session A: %v", err)
+	}
+	ss.BindContainer("ctr-a", "/workspace-a")
+	sessionB, err := ss.CreateSession("Session B")
+	if err != nil {
+		t.Fatalf("create session B: %v", err)
+	}
+	ss.BindContainer("ctr-b", "/workspace-b")
+
+	cancelled := map[string]bool{}
+	chat.mu.Lock()
+	runA := chat.getOrCreateRun(sessionA.ID)
+	runA.running = true
+	runA.cancelFn = func() { cancelled[sessionA.ID] = true }
+	runB := chat.getOrCreateRun(sessionB.ID)
+	runB.running = true
+	runB.cancelFn = func() { cancelled[sessionB.ID] = true }
+	chat.mu.Unlock()
+
+	stopped, err := chat.StopRunsNotBoundToSandbox("")
+	if err != nil {
+		t.Fatalf("stop runs for unbound target: %v", err)
+	}
+	if len(stopped) != 2 {
+		t.Fatalf("expected both sessions to stop, got %#v", stopped)
+	}
+	if !cancelled[sessionA.ID] || !cancelled[sessionB.ID] {
+		t.Fatalf("expected both sessions to be canceled, got %#v", cancelled)
+	}
+}
+
 func TestFileServiceRejectsUnboundSessionWorkspaceAccess(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

@@ -56,10 +56,18 @@ const (
 )
 
 const (
-	orphanRepairSupersededReason = "Error: tool execution was superseded by a newer user request"
-	orphanRepairStoppedReason    = "Error: tool execution was stopped before the user provided interrupt input"
-	orphanRepairSandboxReason    = "Error: tool execution was stopped because the sandbox connection was lost"
+	orphanRepairSupersededReason    = "Error: tool execution was superseded by a newer user request"
+	orphanRepairStoppedReason       = "Error: tool execution was stopped before the user provided interrupt input"
+	orphanRepairSandboxReason       = "Error: tool execution was stopped because the sandbox connection was lost"
+	orphanRepairSandboxSwitchReason = "Error: tool execution was stopped because the active sandbox changed"
 )
+
+const sandboxChangedAgentText = "Active sandbox changed; the agent run was stopped."
+
+type runtimeRunWaiter struct {
+	sessionID string
+	done      <-chan struct{}
+}
 
 // PendingInterrupt holds the state needed to resume after an interrupt.
 type PendingInterrupt struct {
@@ -694,6 +702,136 @@ func (s *ChatService) UpdateSandbox(sbx *sandbox.SandboxManager) {
 			emitted[sessionID] = struct{}{}
 		}
 	}
+}
+
+// StopRunsNotBoundToSandbox stops any in-flight agent run whose session binding
+// does not match targetContainerID. The desktop app has one mutable sandbox
+// manager, so switching that manager to another sandbox while old runs continue
+// would let their later tool calls execute in the wrong workspace.
+func (s *ChatService) StopRunsNotBoundToSandbox(targetContainerID string) ([]string, error) {
+	sessionBindings := s.sessionSandboxBindings()
+
+	s.mu.Lock()
+	stoppedSessions, clearedInterruptSessions, repairedSessions, waiters := s.stopRunsNotBoundToSandboxLocked(targetContainerID, sessionBindings)
+	ctx := s.ctx
+	s.mu.Unlock()
+
+	timeoutSession := ""
+	for _, waiter := range waiters {
+		if waiter.done == nil {
+			continue
+		}
+		select {
+		case <-waiter.done:
+		case <-time.After(5 * time.Second):
+			logger.Warn("[CHAT] Timed out waiting for run to stop before sandbox switch",
+				"session", waiter.sessionID,
+				"target_container", targetContainerID,
+			)
+			timeoutSession = waiter.sessionID
+		}
+		if timeoutSession != "" {
+			break
+		}
+	}
+
+	for _, sessionID := range stoppedSessions {
+		wailsEmit(ctx, "agent:error", map[string]interface{}{
+			"sessionId": sessionID,
+			"error":     sandboxChangedAgentText,
+		})
+		s.emitRunState(sessionID)
+	}
+	emitted := stringSet(stoppedSessions)
+	for sessionID, repair := range repairedSessions {
+		s.saveSessionAfterHistoryRepair(sessionID, repair)
+		if _, ok := emitted[sessionID]; !ok {
+			s.emitRunState(sessionID)
+			emitted[sessionID] = struct{}{}
+		}
+	}
+	for _, sessionID := range clearedInterruptSessions {
+		if _, ok := emitted[sessionID]; !ok {
+			s.emitRunState(sessionID)
+			emitted[sessionID] = struct{}{}
+		}
+	}
+	if timeoutSession != "" {
+		return stoppedSessions, fmt.Errorf("timed out waiting for session %s to stop before switching sandbox", timeoutSession)
+	}
+	return stoppedSessions, nil
+}
+
+func (s *ChatService) sessionSandboxBindings() map[string]string {
+	s.mu.Lock()
+	sessionSvc := s.sessionService
+	sessionIDs := make([]string, 0, len(s.sessions))
+	for sessionID := range s.sessions {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	s.mu.Unlock()
+
+	bindings := make(map[string]string, len(sessionIDs))
+	if sessionSvc == nil {
+		return bindings
+	}
+	for _, sessionID := range sessionIDs {
+		bindings[sessionID] = sessionSvc.GetSessionBoundContainerID(sessionID)
+	}
+	return bindings
+}
+
+func (s *ChatService) stopRunsNotBoundToSandboxLocked(targetContainerID string, sessionBindings map[string]string) ([]string, []string, map[string]agentctx.RepairResult, []runtimeRunWaiter) {
+	stopped := make([]string, 0)
+	clearedInterrupts := make([]string, 0)
+	repaired := make(map[string]agentctx.RepairResult)
+	waiters := make([]runtimeRunWaiter, 0)
+
+	for sessionID, run := range s.sessions {
+		if run == nil {
+			continue
+		}
+		if boundContainerID := sessionBindings[sessionID]; targetContainerID != "" && boundContainerID == targetContainerID {
+			continue
+		}
+		if !run.running && !run.starting {
+			if run.pendingInterrupt != nil {
+				_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxSwitchReason)
+				clearedInterrupts = append(clearedInterrupts, sessionID)
+				s.logHistoryRepair(sessionID, "sandbox_switch", repair)
+				if repair.Count > 0 {
+					repaired[sessionID] = repair
+				}
+			}
+			continue
+		}
+		if run.turnLoop != nil {
+			run.turnLoop.Stop(runtimeTurnLoopStopOptions("sandbox_changed")...)
+		} else if run.cancelFn != nil {
+			run.cancelFn()
+		}
+		run.cancelFn = nil
+		if run.pendingInterrupt != nil {
+			clearedInterrupts = append(clearedInterrupts, sessionID)
+		}
+		_, repair := s.clearPendingInterruptLocked(run, orphanRepairSandboxSwitchReason)
+		s.logHistoryRepair(sessionID, "sandbox_switch", repair)
+		if repair.Count > 0 {
+			repaired[sessionID] = repair
+		}
+		if run.starting && run.startDone != nil {
+			waiters = append(waiters, runtimeRunWaiter{sessionID: sessionID, done: run.startDone})
+		} else if run.running && run.runDone != nil {
+			waiters = append(waiters, runtimeRunWaiter{sessionID: sessionID, done: run.runDone})
+		}
+		stopped = append(stopped, sessionID)
+	}
+	if len(stopped) > 0 {
+		s.cleanupRetiredBundlesLocked()
+	}
+	sort.Strings(stopped)
+	sort.Strings(clearedInterrupts)
+	return stopped, compactStringSlice(clearedInterrupts), repaired, waiters
 }
 
 func (s *ChatService) cancelRunsForSandboxLossLocked() ([]string, []string, map[string]agentctx.RepairResult) {

@@ -108,12 +108,34 @@ func (a *App) startup(ctx context.Context) {
 	// When the active session switches, switch the active container (SSH stays connected)
 	a.sessionService.SetOnSessionSwitch(func(containerRegID string) {
 		if containerRegID != "" {
-			go a.sandboxService.ActivateContainer(containerRegID)
+			go func() {
+				if stopped, err := a.chatService.StopRunsNotBoundToSandbox(containerRegID); err != nil {
+					logger.Warn("Canceled sandbox activation because existing runs did not stop",
+						"target_container", containerRegID,
+						"stopped_sessions", stopped,
+						"error", err,
+					)
+					return
+				} else if len(stopped) > 0 {
+					logger.Info("Stopped runs before switching active sandbox",
+						"target_container", containerRegID,
+						"stopped_sessions", stopped,
+					)
+				}
+				a.sandboxService.ActivateContainer(containerRegID)
+			}()
 		} else {
-			// No sandbox is bound to the new active session. Keep any existing
-			// sandbox attached so background runs from the previous session are
-			// not canceled; active-session guards reject terminal/file/agent use.
-			logger.Info("Active session has no sandbox binding; preserving background sandbox")
+			go func() {
+				if stopped, err := a.chatService.StopRunsNotBoundToSandbox(""); err != nil {
+					logger.Warn("Timed out stopping runs for unbound active session",
+						"stopped_sessions", stopped,
+						"error", err,
+					)
+				} else if len(stopped) > 0 {
+					logger.Info("Stopped runs for unbound active session", "stopped_sessions", stopped)
+				}
+			}()
+			logger.Info("Active session has no sandbox binding; preserving SSH and stopping sandbox-bound runs")
 		}
 	})
 

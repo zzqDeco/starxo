@@ -619,7 +619,7 @@ func (s *ChatService) finishRuntimeTurnLoop(sessionID string, loop *adk.TurnLoop
 
 func runtimeTurnStopCauseSuppressesError(cause string) bool {
 	switch strings.TrimSpace(cause) {
-	case "user_stop", "sandbox_lost":
+	case "user_stop", "sandbox_lost", "sandbox_changed":
 		return true
 	default:
 		return false
