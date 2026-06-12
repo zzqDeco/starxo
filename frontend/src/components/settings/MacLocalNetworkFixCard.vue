@@ -1,20 +1,15 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
 import { NAlert, NButton, NIcon } from 'naive-ui'
-import { ClipboardOutline, Reload } from '@vicons/ionicons5'
+import { Reload } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { SSHConfig } from '@/types/config'
-import { MAC_LOCAL_NETWORK_RESET_COMMAND } from '@/utils/sshErrorHints'
 import { CheckMacLocalNetworkAccess } from '../../../wailsjs/go/service/SettingsService'
 
 interface MacLocalNetworkCheckResult {
   appDialOK?: boolean
-  cliAttempted?: boolean
-  cliReachable?: boolean
   likelyPermissionIssue?: boolean
-  confirmedPermissionIssue?: boolean
   summary?: string
-  resetCommand?: string
 }
 
 const props = defineProps<{
@@ -24,14 +19,11 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const diagnosing = ref(false)
-const copied = ref(false)
 const diagnostic = ref<MacLocalNetworkCheckResult | null>(null)
 const diagnosticError = ref('')
 
-const resetCommand = computed(() => diagnostic.value?.resetCommand || MAC_LOCAL_NETWORK_RESET_COMMAND)
 const diagnosticSummary = computed(() => {
   if (diagnostic.value?.appDialOK) return t('settings.ssh.localNetwork.appDialOK')
-  if (diagnostic.value?.confirmedPermissionIssue) return t('settings.ssh.localNetwork.confirmedSummary')
   if (diagnostic.value?.likelyPermissionIssue) return t('settings.ssh.localNetwork.likelySummary')
   if (diagnostic.value?.summary) return diagnostic.value.summary
   return ''
@@ -48,12 +40,6 @@ async function runDiagnostic() {
     diagnosing.value = false
   }
 }
-
-async function copyResetCommand() {
-  await navigator.clipboard.writeText(resetCommand.value)
-  copied.value = true
-  window.setTimeout(() => { copied.value = false }, 1600)
-}
 </script>
 
 <template>
@@ -66,6 +52,7 @@ async function copyResetCommand() {
           <li>{{ t('settings.ssh.localNetwork.stepSettings') }}</li>
           <li>{{ t('settings.ssh.localNetwork.stepEnable') }}</li>
           <li>{{ t('settings.ssh.localNetwork.stepRestart') }}</li>
+          <li>{{ t('settings.ssh.localNetwork.stepRetest') }}</li>
         </ol>
         <p v-if="diagnosticSummary" class="diagnostic-summary">{{ diagnosticSummary }}</p>
         <p v-if="diagnosticError" class="diagnostic-error">{{ diagnosticError }}</p>
@@ -75,12 +62,7 @@ async function copyResetCommand() {
           <template #icon><NIcon><Reload /></NIcon></template>
           {{ t('settings.ssh.localNetwork.diagnose') }}
         </NButton>
-        <NButton size="tiny" secondary @click="copyResetCommand">
-          <template #icon><NIcon><ClipboardOutline /></NIcon></template>
-          {{ copied ? t('settings.ssh.localNetwork.copied') : t('settings.ssh.localNetwork.copyReset') }}
-        </NButton>
       </div>
-      <code v-if="!compact" class="reset-command">{{ resetCommand }}</code>
     </div>
   </NAlert>
 </template>
@@ -126,18 +108,5 @@ async function copyResetCommand() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.reset-command {
-  display: block;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 </style>

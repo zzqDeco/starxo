@@ -1,7 +1,5 @@
 import type { SSHConfig } from '@/types/config'
 
-export const MAC_LOCAL_NETWORK_RESET_COMMAND = 'tccutil reset LocalNetwork com.starxo.app'
-
 export function formatSSHError(error: unknown, ssh?: Partial<SSHConfig>): string {
   const message = errorMessage(error)
   if (!shouldShowMacOSLocalNetworkHint(message, ssh?.host)) {
@@ -11,7 +9,7 @@ export function formatSSHError(error: unknown, ssh?: Partial<SSHConfig>): string
 }
 
 export function shouldShowMacOSLocalNetworkHint(message: string, host?: string): boolean {
-  return isMacPlatform() && isNoRouteToHost(message) && isLocalNetworkHost(host)
+  return isMacPlatform() && isPermissionLikeLocalNetworkError(message) && isLocalNetworkHost(host)
 }
 
 export function errorMessage(error: unknown): string {
@@ -31,8 +29,11 @@ function isMacPlatform(): boolean {
   return platform.includes('mac') || userAgent.includes('mac os x')
 }
 
-function isNoRouteToHost(message: string): boolean {
-  return /\bno route to host\b/i.test(message)
+function isPermissionLikeLocalNetworkError(message: string): boolean {
+  return /\bno route to host\b/i.test(message) ||
+    /\bnetwork is unreachable\b/i.test(message) ||
+    /\boperation not permitted\b/i.test(message) ||
+    /\bpermission denied\b/i.test(message)
 }
 
 function isLocalNetworkHost(host?: string): boolean {

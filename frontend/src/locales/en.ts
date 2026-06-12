@@ -384,12 +384,10 @@ export default {
         stepSettings: 'Open System Settings > Privacy & Security > Local Network.',
         stepEnable: 'Allow Starxo to access the local network.',
         stepRestart: 'Fully quit and reopen Starxo, then retry the connection.',
+        stepRetest: 'If a development test state remains stuck, retest from a new macOS user account or a VM snapshot.',
         diagnose: 'Check again',
-        copyReset: 'Copy reset command',
-        copied: 'Copied',
         appDialOK: 'The Starxo app can reach this SSH host.',
         likelySummary: 'The Starxo app process cannot reach this LAN host. Check Local Network permission.',
-        confirmedSummary: 'Terminal can reach the host, but the Starxo app process cannot; handle macOS Local Network permission or bundle identity cache first.',
       },
     },
     sandbox: {

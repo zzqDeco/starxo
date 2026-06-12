@@ -7,8 +7,8 @@
 
 ## Implementation
 - `SettingsService.CheckMacLocalNetworkAccess` 只做 host/port 级 TCP 诊断，不读取或输出 SSH 密码、私钥。
-- macOS + 私网 host + app dial 失败时，返回 Local Network 权限/旧 bundle identity 缓存的可读诊断；若 CLI `nc` 可达但 app 不可达，则标记为更明确的权限路径问题。
-- 前端 SSH 错误区和 SSH 设置页显示本地化修复卡片，提供 copy-only `tccutil reset LocalNetwork com.starxo.app`，不自动执行系统权限修改。
+- macOS + 私网 host + app dial 出现 `no route to host`、`network is unreachable`、`operation not permitted` 或 `permission denied` 时，返回 Local Network 权限/旧 bundle identity 缓存的可读诊断。
+- 前端 SSH 错误区和 SSH 设置页显示本地化修复卡片，提供系统设置、重开 app、新用户/VM snapshot 复测建议，不提供不可靠的 `tccutil` reset 命令。
 - `scripts/sign-darwin-app.sh` 和 release workflow 校验渲染后的 app plist 必须包含 `NSLocalNetworkUsageDescription` 与 `NSAppTransportSecurity.NSAllowsLocalNetworking=true`。
 - 用户可见的 task/line/count 文案走 `formatNamedMessage`，当 vue-i18n 未插值时做显示层 fallback。
 

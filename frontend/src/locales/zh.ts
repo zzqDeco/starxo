@@ -384,12 +384,10 @@ export default {
         stepSettings: '打开系统设置 > 隐私与安全性 > 本地网络。',
         stepEnable: '允许 Starxo 访问本地网络。',
         stepRestart: '完全退出并重新打开 Starxo 后再重试连接。',
+        stepRetest: '如果开发测试状态仍然卡住，请使用新的 macOS 用户账户或 VM 快照重新测试。',
         diagnose: '重新检测',
-        copyReset: '复制重置命令',
-        copied: '已复制',
         appDialOK: 'Starxo app 已可访问该 SSH 主机。',
         likelySummary: 'Starxo app 进程无法访问该局域网主机，请检查本地网络权限。',
-        confirmedSummary: '终端可达，但 Starxo app 进程不可达；优先处理 macOS 本地网络权限或 bundle 身份缓存。',
       },
     },
     sandbox: {

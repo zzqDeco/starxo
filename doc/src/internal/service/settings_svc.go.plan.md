@@ -15,4 +15,4 @@
 ## 维护要点
 - 检测/安装不依赖当前已连接 SandboxService，适合设置保存前验证。
 - 特权或安全策略修复只作为 copy-only 命令返回给前端，不在设置服务中自动执行。
-- macOS Local Network 修复同样只返回诊断和 copy-only reset 命令，不能自动执行 `tccutil` 或修改系统隐私设置。
+- macOS Local Network 修复只返回诊断和手动系统设置建议，不返回不可靠的 `tccutil` reset 命令，也不能修改系统隐私设置。

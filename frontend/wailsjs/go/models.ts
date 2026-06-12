@@ -1588,14 +1588,9 @@ export namespace service {
 	    isLocalNetworkHost: boolean;
 	    appDialOK: boolean;
 	    appDialError?: string;
-	    cliAttempted: boolean;
-	    cliReachable: boolean;
-	    cliError?: string;
 	    likelyPermissionIssue: boolean;
-	    confirmedPermissionIssue: boolean;
 	    summary: string;
 	    fixSteps: string[];
-	    resetCommand: string;
 
 	    static createFrom(source: any = {}) {
 	        return new MacLocalNetworkCheckResult(source);
@@ -1610,14 +1605,9 @@ export namespace service {
 	        this.isLocalNetworkHost = source["isLocalNetworkHost"];
 	        this.appDialOK = source["appDialOK"];
 	        this.appDialError = source["appDialError"];
-	        this.cliAttempted = source["cliAttempted"];
-	        this.cliReachable = source["cliReachable"];
-	        this.cliError = source["cliError"];
 	        this.likelyPermissionIssue = source["likelyPermissionIssue"];
-	        this.confirmedPermissionIssue = source["confirmedPermissionIssue"];
 	        this.summary = source["summary"];
 	        this.fixSteps = source["fixSteps"];
-	        this.resetCommand = source["resetCommand"];
 	    }
 	}
 	export class PlatformUIInfo {
@@ -2027,7 +2017,6 @@ export namespace service {
 	}
 
 }
-
 export namespace tools {
 
 	export class RuntimeTaskOutput {
