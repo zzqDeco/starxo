@@ -8,15 +8,15 @@
 - 所属模块: frontend/src/utils
 
 ## 2. 核心职责
-- 统一 SSH 错误文本提取和用户可读提示。
-- 针对 macOS app 访问局域网 SSH 主机时报 `no route to host` 的场景，附加 Local Network 权限修复指引。
+- 统一 SSH 错误文本提取。
+- 针对 macOS app 访问局域网 SSH 主机时报 `no route to host` 的场景，提供 Local Network 权限风险判断。
 
 ## 3. 输入与输出
 - 输入来源: Wails 调用抛出的 error/string，以及当前 SSH 配置中的 host。
-- 输出结果: 用于 Sidebar 状态、ConnectionStatus、SSH 设置页测试结果的最终错误文案。
+- 输出结果: 原始错误文案，以及供 Sidebar/SSH 设置页决定是否显示 Local Network 修复卡片的布尔判断。
 
 ## 4. 关键实现细节
-- 仅在 macOS 平台、错误包含 `no route to host`、host 属于 localhost/private/link-local/mDNS 等本地网络地址时追加提示。
+- 仅在 macOS 平台、错误包含 `no route to host`、host 属于 localhost/private/link-local/mDNS 等本地网络地址时返回 true。
 - 不修改后端错误语义，不吞掉原始错误，避免掩盖真实网络或认证失败。
 - 不自动执行 `tccutil` 或系统设置变更，权限恢复仍由用户在系统设置中完成。
 

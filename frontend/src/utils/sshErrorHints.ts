@@ -1,14 +1,13 @@
 import type { SSHConfig } from '@/types/config'
 
-const MAC_LOCAL_NETWORK_HINT =
-  'macOS may be blocking Local Network access for Starxo. Open System Settings > Privacy & Security > Local Network, enable Starxo, then quit and reopen the app before retrying.'
+export const MAC_LOCAL_NETWORK_RESET_COMMAND = 'tccutil reset LocalNetwork com.starxo.app'
 
 export function formatSSHError(error: unknown, ssh?: Partial<SSHConfig>): string {
   const message = errorMessage(error)
   if (!shouldShowMacOSLocalNetworkHint(message, ssh?.host)) {
     return message
   }
-  return `${message}\n\n${MAC_LOCAL_NETWORK_HINT}`
+  return message
 }
 
 export function shouldShowMacOSLocalNetworkHint(message: string, host?: string): boolean {

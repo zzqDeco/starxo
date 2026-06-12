@@ -13,6 +13,7 @@ import SxStatusBadge from '@/components/ui/SxStatusBadge.vue'
 import { SendMessage, SetMode, StopGeneration } from '../../../wailsjs/go/service/ChatService'
 import { useI18n } from 'vue-i18n'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { formatNamedMessage } from '@/utils/i18nFormat'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -30,7 +31,9 @@ const taskStats = computed(() => chatStore.unifiedTaskStats)
 const showInlineTaskStatus = computed(() => chatStore.isStreaming || taskStats.value.total > 0)
 const inlineTaskTitle = computed(() => {
   if (chatStore.isStreaming) return t('chat.agentRunning')
-  if (taskStats.value.total > 0) return t('chat.taskProgress', { done: taskStats.value.done, total: taskStats.value.total })
+  if (taskStats.value.total > 0) {
+    return formatNamedMessage(t, 'chat.taskProgress', { done: taskStats.value.done, total: taskStats.value.total })
+  }
   return ''
 })
 

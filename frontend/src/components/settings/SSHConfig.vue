@@ -1,10 +1,11 @@
 <script lang="ts" setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { NAlert, NForm, NFormItem, NInput, NInputNumber, NButton, NIcon } from 'naive-ui'
 import { Checkmark, Key } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { TestSSHConnection } from '../../../wailsjs/go/service/SettingsService'
-import { formatSSHError } from '@/utils/sshErrorHints'
+import { formatSSHError, shouldShowMacOSLocalNetworkHint } from '@/utils/sshErrorHints'
+import MacLocalNetworkFixCard from './MacLocalNetworkFixCard.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -12,6 +13,9 @@ const settingsStore = useSettingsStore()
 const testing = ref(false)
 const testResult = ref<'success' | 'error' | null>(null)
 const testError = ref('')
+const showMacLocalNetworkFix = computed(() =>
+  shouldShowMacOSLocalNetworkHint(testError.value, settingsStore.settings.ssh.host)
+)
 
 async function testConnection() {
   testing.value = true
@@ -100,6 +104,11 @@ async function testConnection() {
     <NAlert v-if="testError" type="warning" class="ssh-test-error">
       {{ testError }}
     </NAlert>
+
+    <MacLocalNetworkFixCard
+      v-if="showMacLocalNetworkFix"
+      :ssh="settingsStore.settings.ssh"
+    />
   </div>
 </template>
 

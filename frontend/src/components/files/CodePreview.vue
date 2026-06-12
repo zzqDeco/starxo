@@ -4,6 +4,7 @@ import { NButton, NIcon, NSpin } from 'naive-ui'
 import { CopyOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { escapeHtml, getHighlighter } from '@/composables/highlight'
+import { formatNamedMessage } from '@/utils/i18nFormat'
 
 const props = withDefaults(defineProps<{
   path?: string
@@ -78,8 +79,7 @@ const highlightedLines = computed(() => {
 
 const lineCount = computed(() => highlightedLines.value.length)
 const lineCountLabel = computed(() => {
-  const rendered = t('codePreview.lines', { count: lineCount.value })
-  return rendered.includes('{count}') ? rendered.replace('{count}', String(lineCount.value)) : rendered
+  return formatNamedMessage(t, 'codePreview.lines', { count: lineCount.value })
 })
 
 function copyAll() {

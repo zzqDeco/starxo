@@ -15,6 +15,7 @@ import { useUiFeedback } from '@/composables/useUiFeedback'
 import { useWailsEvent } from '@/composables/useWailsEvent'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useWorkspaceDirtyStore, type WorkspaceChangedEvent } from '@/stores/workspaceDirtyStore'
+import { formatNamedMessage } from '@/utils/i18nFormat'
 
 interface WorkspaceTreeNode extends TreeOption {
   key: string
@@ -300,7 +301,7 @@ async function cleanupTmp() {
   cleaningTmp.value = true
   try {
     const result = await CleanupSandboxTmp()
-    feedback.success(t('workspace.cleanupTmpDone', {
+    feedback.success(formatNamedMessage(t, 'workspace.cleanupTmpDone', {
       count: result?.removedEntries || 0,
       size: formatBytes(result?.reclaimedBytes || 0),
     }))

@@ -9,6 +9,7 @@
 - 自定义 server 支持 language、executable、command args、extensions、disabled。
 - 调用 `ChatService.GetRuntimeLSPStatus` 查看当前 session 的常驻 LSP server 状态。
 - 状态面板同时展示 configured server mappings 和已启动的 server processes，方便区分“已配置”和“当前正在运行”。
+- request count 文案通过 `formatNamedMessage` 格式化，避免 `{count}` 占位符直出。
 
 ## 维护建议
 - 该面板只保存配置，不直接安装远端 language server。

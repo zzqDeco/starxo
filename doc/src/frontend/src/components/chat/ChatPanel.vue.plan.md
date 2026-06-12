@@ -25,7 +25,7 @@
 - 空状态使用原生应用式状态说明：连接状态点、简短标题、三条能力分组行和轻量提示按钮（点击可直接发送），避免 landing/hero 化文案。
 - 底部区:
   - `InterruptDialog`
-  - inline task status（固定高度状态条，使用 `SxStatusBadge` 展示运行/同步状态）
+  - inline task status（固定高度状态条，使用 `SxStatusBadge` 展示运行/同步状态；任务进度文案通过 `formatNamedMessage` 防止 `{done}/{total}` 直出）
   - `InputArea`（接收当前 agent 模式和切换 loading 状态，模式切换入口已下沉到 composer）
 - 自动滚动:
   - 使用 `useAutoScroll`
@@ -37,7 +37,7 @@
 - 内部依赖:
   - `MessageBubble.vue`, `InputArea.vue`, `InterruptDialog.vue`
   - `SxStatusBadge.vue`, `AgentStatus.vue`
-  - `chatStore`, `connectionStore`, `useAutoScroll`
+  - `chatStore`, `connectionStore`, `useAutoScroll`, `@/utils/i18nFormat`
 - 外部依赖:
   - `vue`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
   - Wails: `SendMessage`, `SetMode`, `StopGeneration`
