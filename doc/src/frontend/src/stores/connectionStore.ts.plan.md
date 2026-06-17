@@ -32,7 +32,7 @@
   - `updateProgress(step, percent)` — 更新连接进度（由 `ssh:progress` 事件触发）
   - `setSSHConnected()` — 标记 SSH 已连接（由 `ssh:connected` 事件触发）
   - `setSSHDisconnected()` — 标记 SSH 已断开（由 `ssh:disconnected` 事件触发）
-- 连接错误通过 `frontend/src/utils/sshErrorHints.ts` 统一格式化；在 macOS + 局域网 host + `no route to host` 时，附加 Local Network 权限修复指引。
+- 连接错误通过 `frontend/src/utils/sshErrorHints.ts` 统一格式化；在 macOS + 局域网 host + permission-like dial failure 时，前端可显示 Local Network 权限修复指引。
 
 ## 5. 依赖关系
 - 内部依赖: `./settingsStore` (useSettingsStore)

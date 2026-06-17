@@ -4,18 +4,25 @@ import { Add, ChatbubbleEllipses, EllipsisVertical } from '@vicons/ionicons5'
 import { useChatStore } from '@/stores/chatStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiFeedback } from '@/composables/useUiFeedback'
 import { toggleWindowZoom } from '@/composables/useNativeWindow'
+import { shouldShowMacOSLocalNetworkHint } from '@/utils/sshErrorHints'
+import MacLocalNetworkFixCard from '@/components/settings/MacLocalNetworkFixCard.vue'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 const connectionStore = useConnectionStore()
 const sessionStore = useSessionStore()
+const settingsStore = useSettingsStore()
 const feedback = useUiFeedback()
 const props = defineProps<{ compact?: boolean }>()
 const newChatDisabled = computed(() => sessionStore.isBusy)
+const showMacLocalNetworkFix = computed(() =>
+  shouldShowMacOSLocalNetworkHint(connectionStore.error, settingsStore.settings.ssh.host)
+)
 
 // Renaming state
 const renamingId = ref<string | null>(null)
@@ -280,6 +287,11 @@ function handleTitlebarDoubleClick() {
       <!-- Error -->
       <div v-if="connectionStore.error" class="conn-error">
         <span class="error-text">{{ connectionStore.error }}</span>
+        <MacLocalNetworkFixCard
+          v-if="showMacLocalNetworkFix"
+          compact
+          :ssh="settingsStore.settings.ssh"
+        />
       </div>
 
       <!-- Connect / Disconnect -->

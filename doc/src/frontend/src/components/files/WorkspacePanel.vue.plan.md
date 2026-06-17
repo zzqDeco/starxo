@@ -22,6 +22,7 @@
   - 列表失败时显示错误空状态和重试按钮，不能静默伪装成空目录
 - 交互:
   - 顶部按钮：上传、下载、刷新、复制 workspace 路径、清理 tmp
+  - tmp 清理成功提示通过 `formatNamedMessage` 格式化 `count/size`，避免占位符直出。
   - 元信息栏以 inspector 密度展示 active sandbox、runtime、SSH host、workspace path；文件数量和大小仍由后端提供但不在窄右栏里抢占首屏视觉。
   - `WorktreeReviewPanel` 展示当前 session active worktree，并支持 review/merge/exit keep
   - 搜索过滤：按 `path/name` 匹配
@@ -51,6 +52,7 @@
   - `SplitHandle.vue`, `FileTransfer.vue`, `CodePreview.vue`, `SxEmptyState.vue`
   - `@/types/config` (`FileInfo`)
   - `@/composables/useWorkspaceBridge`
+  - `@/utils/i18nFormat`
 - 外部依赖:
   - `vue`, `naive-ui`, `@vicons/ionicons5`, `vue-i18n`
   - Wails `FileService`

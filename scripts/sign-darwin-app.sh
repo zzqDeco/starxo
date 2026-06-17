@@ -26,6 +26,16 @@ if [[ "${actual_bundle_id}" != "${BUNDLE_ID}" ]]; then
   echo "error: expected bundle id ${BUNDLE_ID}, got ${actual_bundle_id}" >&2
   exit 1
 fi
+local_network_usage="$(/usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "${INFO_PLIST}" 2>/dev/null || true)"
+if [[ -z "${local_network_usage}" ]]; then
+  echo "error: NSLocalNetworkUsageDescription must be present and non-empty" >&2
+  exit 1
+fi
+allows_local_networking="$(/usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" "${INFO_PLIST}" 2>/dev/null || true)"
+if [[ "${allows_local_networking}" != "true" ]]; then
+  echo "error: NSAppTransportSecurity.NSAllowsLocalNetworking must be true" >&2
+  exit 1
+fi
 
 codesign --force --deep --sign "${IDENTITY}" "${APP_PATH}"
 codesign --verify --deep --strict "${APP_PATH}"

@@ -25,13 +25,14 @@
   - `copyAll()` 将全文写入剪贴板
 - 文案:
   - 全部走 i18n（`codePreview.*`）
-  - 行数标签对 `{count}` 做防御性替换，避免 i18n 插值异常时把占位符直出到 UI。
+  - 行数标签通过 `formatNamedMessage` 做防御性替换，避免 i18n 插值异常时把占位符直出到 UI。
 
 ## 5. 依赖关系
 - 外部依赖:
   - `vue`
   - `naive-ui`
   - `@/composables/highlight`
+  - `@/utils/i18nFormat`
   - `highlight.js/lib/core`
   - `@vicons/ionicons5`
   - `vue-i18n`

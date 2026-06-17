@@ -1580,6 +1580,36 @@ export namespace service {
 		}
 	}
 
+	export class MacLocalNetworkCheckResult {
+	    platform: string;
+	    host: string;
+	    port: number;
+	    isMac: boolean;
+	    isLocalNetworkHost: boolean;
+	    appDialOK: boolean;
+	    appDialError?: string;
+	    likelyPermissionIssue: boolean;
+	    summary: string;
+	    fixSteps: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new MacLocalNetworkCheckResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.isMac = source["isMac"];
+	        this.isLocalNetworkHost = source["isLocalNetworkHost"];
+	        this.appDialOK = source["appDialOK"];
+	        this.appDialError = source["appDialError"];
+	        this.likelyPermissionIssue = source["likelyPermissionIssue"];
+	        this.summary = source["summary"];
+	        this.fixSteps = source["fixSteps"];
+	    }
+	}
 	export class PlatformUIInfo {
 	    platform: string;
 	    goos: string;
@@ -1987,7 +2017,6 @@ export namespace service {
 	}
 
 }
-
 export namespace tools {
 
 	export class RuntimeTaskOutput {

@@ -16,4 +16,5 @@
 - 新增 `message.agent.*` 文案，用于 assistant timeline 中的 agent 名称，避免中文 UI 暴露内部英文变量名。
 - macOS native 设计语言调整后，核心入口文案收敛为更短、更自然的产品语言，例如“新建”“准备开始”“执行命令”“浏览文件”，减少工作台里暴露实现名或变量式描述。
 - Figma v0.5 对齐后，`chat.agentRunning`、`chat.taskProgress`、`chat.statusRunning`、`chat.statusReady` 服务 composer 上方 inline task status；`chat.modePlanHint` 避免继续表达“主 agent / subagent”旧范式。
+- `settings.ssh.localNetwork.*` 用于 macOS Local Network 权限诊断卡片，文案必须保持手动修复语义，不能暗示应用会自动修改系统隐私设置或能通过 `tccutil` 重置 Local Network 状态。
 - `containers.unavailable` 用于旧 Docker 记录。

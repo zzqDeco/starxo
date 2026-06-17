@@ -378,6 +378,17 @@ export default {
       testConnection: '测试连接',
       connected: '已连接！',
       failed: '失败',
+      localNetwork: {
+        title: 'macOS 本地网络权限可能阻止了 SSH',
+        body: '如果终端可以连接这个局域网主机，但 Starxo app 报 no route to host，通常是 macOS Local Network 权限或旧 bundle 身份缓存导致。',
+        stepSettings: '打开系统设置 > 隐私与安全性 > 本地网络。',
+        stepEnable: '允许 Starxo 访问本地网络。',
+        stepRestart: '完全退出并重新打开 Starxo 后再重试连接。',
+        stepRetest: '如果开发测试状态仍然卡住，请使用新的 macOS 用户账户或 VM 快照重新测试。',
+        diagnose: '重新检测',
+        appDialOK: 'Starxo app 已可访问该 SSH 主机。',
+        likelySummary: 'Starxo app 进程无法访问该局域网主机，请检查本地网络权限。',
+      },
     },
     sandbox: {
       tab: '沙箱',

@@ -16,4 +16,5 @@
 - 新增 `message.agent.*` labels，用于 assistant timeline 中的 agent 名称，避免 UI 暴露内部变量式名称。
 - macOS native design pass tightened high-traffic copy to shorter product language such as “New”, “Ready when you are”, “Run commands”, and “Browse files”, reducing implementation-like labels in the workbench.
 - Figma v0.5 alignment adds `chat.agentRunning`, `chat.taskProgress`, `chat.statusRunning`, and `chat.statusReady` for the inline task status above the composer; `chat.modePlanHint` no longer describes the old main-agent/subagent split.
+- `settings.ssh.localNetwork.*` supports the macOS Local Network diagnostics card; copy must stay manual and must not imply Starxo can auto-change system privacy settings or reset Local Network state through `tccutil`.
 - `containers.unavailable` 用于旧 Docker 记录。

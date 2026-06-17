@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useUiFeedback } from '@/composables/useUiFeedback'
+import { formatNamedMessage } from '@/utils/i18nFormat'
 import { GetRuntimeLSPStatus } from '../../../wailsjs/go/service/ChatService'
 
 const { t } = useI18n()
@@ -140,7 +141,7 @@ function serverStateLabel(alive?: boolean) {
           <span class="mono">{{ server.language }}</span>
           <span :class="['status-badge', server.alive ? 'active' : 'danger']">{{ serverStateLabel(server.alive) }}</span>
           <span>{{ server.workspace }}</span>
-          <span>{{ t('settings.lsp.requestCount', { count: server.requestCount || 0 }) }}</span>
+          <span>{{ formatNamedMessage(t, 'settings.lsp.requestCount', { count: server.requestCount || 0 }) }}</span>
         </div>
       </div>
     </section>

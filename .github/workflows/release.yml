@@ -169,6 +169,16 @@ jobs:
                 echo "::error::macOS bundle id must be com.starxo.app, got ${bundle_id}"
                 exit 1
               fi
+              local_network_usage="$(/usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" build/bin/starxo.app/Contents/Info.plist 2>/dev/null || true)"
+              if [[ -z "${local_network_usage}" ]]; then
+                echo "::error::macOS app must declare NSLocalNetworkUsageDescription"
+                exit 1
+              fi
+              allows_local_networking="$(/usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" build/bin/starxo.app/Contents/Info.plist 2>/dev/null || true)"
+              if [[ "${allows_local_networking}" != "true" ]]; then
+                echo "::error::macOS app must set NSAppTransportSecurity.NSAllowsLocalNetworking=true"
+                exit 1
+              fi
               codesign --verify --deep --strict build/bin/starxo.app
               signing_details="$(codesign -dv build/bin/starxo.app 2>&1)"
               echo "${signing_details}"

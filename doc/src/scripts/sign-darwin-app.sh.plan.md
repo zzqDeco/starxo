@@ -7,6 +7,7 @@
 ## 核心职责
 - 对 `build/bin/starxo.app` 执行 ad-hoc 或指定 identity 的 codesign。
 - 校验 bundle identifier 必须为 `com.starxo.app`。
+- 校验渲染后的 `Info.plist` 必须声明 `NSLocalNetworkUsageDescription`，并设置 `NSAppTransportSecurity.NSAllowsLocalNetworking=true`。
 - 校验签名绑定 `Info.plist` 并 seal resources，避免发布无稳定 macOS bundle identity 的包。
 
 ## 维护要点

@@ -378,6 +378,17 @@ export default {
       testConnection: 'Test Connection',
       connected: 'Connected!',
       failed: 'Failed',
+      localNetwork: {
+        title: 'macOS Local Network may be blocking SSH',
+        body: 'If Terminal can connect to this LAN host but the Starxo app reports no route to host, macOS Local Network permission or an old bundle identity cache is usually involved.',
+        stepSettings: 'Open System Settings > Privacy & Security > Local Network.',
+        stepEnable: 'Allow Starxo to access the local network.',
+        stepRestart: 'Fully quit and reopen Starxo, then retry the connection.',
+        stepRetest: 'If a development test state remains stuck, retest from a new macOS user account or a VM snapshot.',
+        diagnose: 'Check again',
+        appDialOK: 'The Starxo app can reach this SSH host.',
+        likelySummary: 'The Starxo app process cannot reach this LAN host. Check Local Network permission.',
+      },
     },
     sandbox: {
       tab: 'Sandbox',

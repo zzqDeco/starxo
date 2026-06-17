@@ -1,18 +1,15 @@
 import type { SSHConfig } from '@/types/config'
 
-const MAC_LOCAL_NETWORK_HINT =
-  'macOS may be blocking Local Network access for Starxo. Open System Settings > Privacy & Security > Local Network, enable Starxo, then quit and reopen the app before retrying.'
-
 export function formatSSHError(error: unknown, ssh?: Partial<SSHConfig>): string {
   const message = errorMessage(error)
   if (!shouldShowMacOSLocalNetworkHint(message, ssh?.host)) {
     return message
   }
-  return `${message}\n\n${MAC_LOCAL_NETWORK_HINT}`
+  return message
 }
 
 export function shouldShowMacOSLocalNetworkHint(message: string, host?: string): boolean {
-  return isMacPlatform() && isNoRouteToHost(message) && isLocalNetworkHost(host)
+  return isMacPlatform() && isPermissionLikeLocalNetworkError(message) && isLocalNetworkHost(host)
 }
 
 export function errorMessage(error: unknown): string {
@@ -32,8 +29,11 @@ function isMacPlatform(): boolean {
   return platform.includes('mac') || userAgent.includes('mac os x')
 }
 
-function isNoRouteToHost(message: string): boolean {
-  return /\bno route to host\b/i.test(message)
+function isPermissionLikeLocalNetworkError(message: string): boolean {
+  return /\bno route to host\b/i.test(message) ||
+    /\bnetwork is unreachable\b/i.test(message) ||
+    /\boperation not permitted\b/i.test(message) ||
+    /\bpermission denied\b/i.test(message)
 }
 
 function isLocalNetworkHost(host?: string): boolean {
